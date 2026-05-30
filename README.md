@@ -1,8 +1,8 @@
-# yohaku-mind
+# liubai-mind
 
 *An AI agent built on restraint.*
 
-**余白 (yohaku)** — the active blank space; the margin that does the work. **mind** — a thinking partner, not a task executor.
+**留白 (liúbái)** — "leave white": the deliberate act of leaving space blank so it does the work (Chinese ink-painting tradition, Taoist roots; origin of Japanese *yohaku*/*ma*). **mind** — a thinking partner, not a task executor.
 
 Steer agents with deterministic guardrails and dense, minimal communication — so a cheap model behaves well, and a strong one isn't drowned in noise. Domain-general: code, writing, research.
 
