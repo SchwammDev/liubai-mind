@@ -32,6 +32,8 @@ Real question = **ratio and placement** of the two, and whether it should **shif
 
 Named obstacles the design must assume (Kesseler): context-rot, excess-verbosity, selective-hearing, compliance-bias (agrees but misaligned), negative-bleedthrough, non-determinism, degrades-under-complexity. Density + slim + small-steps are answers to these, not aesthetics.
 
+**The agent is not an ally of these principles.** Models are trained to be helpful = additive: more context, fuller prose, completeness. The bloat reflex always runs; its cost is just usually invisible. Same reflex that caught nWave's authors, and that re-padded principle #3 mid-edit. Implication: don't trust the agent's intent to be terse — **gate density deterministically.** This is itself an argument for the whole approach.
+
 ## Verified anti-example — nWave
 
 nWave (`nwave.ai`): spec-driven multi-agent methodology inside Claude Code — 22 agents, 7 waves, 11 quality gates, runtime TDD enforcement. Built by SWEs whose ceremony instincts are sound. Tried it firsthand.
