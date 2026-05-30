@@ -56,6 +56,16 @@ Config: `~/.openharness/settings.json` (or `OPENHARNESS_CONFIG_DIR`, or per-proj
 
 Risks remaining: young + fast-moving (0.1.4→0.1.9 within days), longevity unproven, no control of direction. But the core bet is validated.
 
+## Who's behind it (2026-05-30)
+
+**Data Intelligence Lab@HKU** (org `HKUDS`), led by **Chao Huang**, Assistant Professor, University of Hong Kong. Research: LLMs, agents, graph learning, RAG.
+
+- Chao Huang: "World's Top 2% Scientists", multiple Most-Influential-Paper rankings (WWW/SIGIR/KDD/CIKM). Real reputation, not anon.
+- Lab track record: **LightRAG** (36k★, EMNLP'25), **RAG-Anything** (21k★), **AI-Researcher** (5k★, NeurIPS'25). Ships widely-used OSS, not fly-by-night.
+- OpenHarness: MIT, created 2026-04-01, **49 contributors, 2.2k forks, 13k★**, active (pushed 2026-05-27). Real community traction already.
+
+Read: **academic lab, strong OSS track record, named accountable PI.** Trust↑ on provenance. Caveat — academic labs optimize for papers/stars/demos, not long-term product maintenance. Flagship (LightRAG) is sustained; whether OpenHarness gets that or becomes an abandoned demo is the open bet. MIT = forkable if abandoned. Tagline self-describes "80% of agent functionality in 3% of the code" — aligns with our slim thesis (verify, don't trust).
+
 Discounted marketing: "beats Claude Code / 100% Harness-Bench".
 
 ## Links
