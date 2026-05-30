@@ -52,6 +52,20 @@ Ran it. Results:
 - **Local weak model works end-to-end.** Ollama `llama3.2:3b` via `provider add` (openai api-format, `localhost:11434/v1`) → `oh -p` → clean output. The cheap-model case is real.
 - **Code quality good** where it counts: `hooks/loader.py` (60 lines), `config/paths.py` clean/typed/single-responsibility. Contradicts the README vibe.
 
+## Is it slop? — measured (cloned repo, 2026-05-30)
+
+Suspicion raised by group's star-farming culture (see provenance). Checked craftsmanship directly instead of trusting:
+
+- **Package code (215 files, 41.5k LOC):** 80% of defs type-hinted (1268/1575), **0 bare excepts**, 7 TODO/FIXME total, 152/215 files <150 LOC. Surface craftsmanship = real, not slop.
+- **Test suite (full git clone):** ~119 test files under `tests/test_*/` (one dir per subsystem), 1054 test functions, ~2877 asserts (static count). Real structure mirroring src, not stubs.
+- **Actually ran (verified):** `tests/test_hooks` → **11 passed**. Core dirs `test_hooks test_skills test_plugins test_permissions test_config test_tools` → **266 passed, 2 failed**; both failures environmental (test expects `python` on PATH, we have `python3`; one timing-flaky agent test), not defects.
+
+**Conclusion:** competently engineered, real test discipline. NOT slop. Surface metrics can't catch *logic* slop (wrong abstractions, subtle bugs) — but the evidence strongly favors real craft.
+
+**The real problem is NOT quality — it's two things:**
+1. **Not slim.** 41.5k LOC = full Claude-Code reimplementation. Bloat (cli 2464, autopilot 2239, feishu/swarm/channels) is in layers you don't use, but it's there.
+2. **Trust/longevity.** Group (HKUDS/Chao Huang) clearly star-farms & overhypes: paper repos sit at <1k★ while "product" repos cluster at 13-36k★; courts the OpenClaw hype ecosystem (375k★, Peter Steinberger's — NOT theirs; ClawTeam IS theirs, "Roadmap" only). Good engineers who also hype-farm — both true. Risk = abandonment when they chase the next shiny thing, not correctness.
+
 Config: `~/.openharness/settings.json` (or `OPENHARNESS_CONFIG_DIR`, or per-project `<cwd>/.openharness/`). Hooks shape: `{"hooks":{"pre_tool_use":[{"type":"command","command":...,"matcher":...,"block_on_failure":true}]}}`.
 
 Risks remaining: young + fast-moving (0.1.4→0.1.9 within days), longevity unproven, no control of direction. But the core bet is validated.
