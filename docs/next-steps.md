@@ -8,13 +8,21 @@ Plan: **try A first for a real feel, then scope B, then decide.**
 
 ## Step 1 — Try `oh` with ported hooks (get informed feel)
 
-1. Port existing Claude hooks → `~/.openharness/settings.json` (`{type: command, command, matcher, block_on_failure}`). Called scripts port verbatim; only wiring rewritten.
+1. ✅ **Done (2026-05-31).** All 4 Claude hooks ported, wired in `~/.openharness/settings.json` under `pre_tool_use`, parse + register verified. Three plan assumptions proved false against v0.1.9 source — see **Porting findings** below.
 2. Copy one Claude skill → OpenHarness skill dir, confirm `oh --dry-run` loads it (anthropic-skills compat claimed, unverified).
 3. Drive real coding task on a cheap model. Judge: does the nudging *feel* right? Noise level? Friction?
 4. **First fresh hook: filler-phrase blocklist on agent output.** Reject "This reflects…", "It's worth noting…", "In essence…", "Overall,"… Trivial, deterministic, no length-Goodhart, kills ~80% of visible bloat. Cheapest high-value experiment.
 5. **Experiment — native-concept priming.** Hypothesis: phrasing density/restraint guidance with 留白 (Hanzi) in the *injected* context (system prompt / skills / hook messages) steers Chinese-trained open models (Qwen/DeepSeek/GLM) better than English/romaji — they have denser priors for it. Caveat: these models are bilingual + English-RLHF'd, effect may dilute. Test: same hook, English vs 留白 phrasing, cheap Chinese model, compare output density. NOTE: the *project name* itself does NOT steer (not in context) — only injected prompt text does.
 
 This gives a concrete baseline to judge B against — don't decide blind.
+
+## `oh` command hooks (v0.1.9 source)
+
+- Block-or-silent: runtime reads exit code only. No allow+advise channel. → all 4 ported as **hard blocks**; the 3 nudges had nowhere else to go. Leash-vs-rails ratio now a live experiment.
+- Payload via env var, not stdin. Config home-only, no per-project.
+- Block message must say *rejected, not applied, re-issue* or the model thrashes.
+
+Adapters: `.openharness/hooks/*_block.py`, reusing `.claude/hooks/` detection.
 
 ## Density gating — what's possible (design note)
 
