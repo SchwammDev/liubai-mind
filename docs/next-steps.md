@@ -56,6 +56,7 @@ Can a hook enforce density on agent output? Partially — and the gap IS the res
 - **Not catchable mechanically:** dense-but-long vs sparse-but-short. Density ≠ length. Line-counting rewards terse-but-useless.
 - **Goodhart trap:** metric = lines/filler → agent games it (drops banned phrases, keeps bloat reworded). Ties to principle #7.
 - **Inferential layer** (OpenHarness `prompt`/`agent` hook) could catch semantic bloat in principle — BUT (a) on oh it never sees model output (no event carries assistant text — see **Hook event model**), and (b) it's an LLM with the *same additive bias*: judge shares defendant's flaw. So on A it's doubly dead; on B it's buildable but suspect.
+- **Deterministic gate = the one worth building.** No bias, trustworthy. LLM judge = research, not product (blindspot: same-family judge shares the worker's pro-verbosity bias → waves through smooth bloat, catches only clumsy filler). Both still need B/oh-patch to hook prose.
 
 → Real question = mix of dumb-deterministic + biased-inferential that lands dense without gaming. Measure it (= vision's two-loop open question). Note: any prose-density gate at all presupposes B (or an oh patch), since A can't hook output.
 
