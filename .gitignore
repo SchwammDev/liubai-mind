@@ -2,3 +2,4 @@ playground/
 __pycache__/
 scratch-oh/
 .openharness/
+.claude/skills/
