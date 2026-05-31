@@ -28,7 +28,7 @@ Adapters: `.openharness/hooks/*_block.py`, reusing `.claude/hooks/` detection.
 ## Feel-test results (2026-05-31, Qwen via oh)
 
 - **Clean recovery, no thrash.** Blocked edits get fixed and re-issued in sequence; the *rejected/re-issue* wording holds on a weak model. OpenCode thrash did not reproduce.
-- **Rail → human escalation (ex2).** Hitting the comment gate, Qwen asked the user rather than gaming the rail — steering routed a judgment call to the human, exactly the vision's intent (rails serve goals).
+- **Rail → human escalation (ex2, n=1).** Once, hitting the comment gate, Qwen asked the user rather than gaming the rail — would match the vision's intent (rails serve goals) if it holds. Single observation, not reproduced; could be non-determinism. Needs repeats before it counts.
 - **Long-test gate + skill worked** (ex4) — behavioral naming + helper extraction held.
 - **`no_comments` fires often.** Single dispatch hook (all checks → one combined block) may cut round-trips, since oh surfaces only the first block reason (N violations = N cycles). Defer until tested on a real project, not toy exercises.
 - **Bash-evasion hole.** Gates see only `write_file`/`edit_file`; a `bash` heredoc write bypasses all four. Open.
