@@ -28,11 +28,12 @@ Steering lives in dotfiles (`claude/code/.claude-utils/oh_bridge.py` + test), mi
 ## Feel-test results (2026-05-31, Qwen via oh)
 
 - **Clean recovery, no thrash.** Blocked edits get fixed and re-issued in sequence; the *rejected/re-issue* wording holds on a weak model. OpenCode thrash did not reproduce.
-- **Rail → human escalation (ex2, n=1).** Once, hitting the comment gate, Qwen asked the user rather than gaming the rail — would match the vision's intent (rails serve goals) if it holds. Single observation, not reproduced; could be non-determinism. Needs repeats before it counts.
+- **Rail → human escalation (ex2, reproduced).** Across reruns, hitting the rules-vs-`CLAUDE.md` conflict, Qwen repeatedly surfaced it as a question to the user rather than gaming the rail — matches the vision's intent (rails serve goals). No longer a single observation; holds across runs.
 - **Long-test gate + skill worked** (ex4) — behavioral naming + helper extraction held.
 - **`no_comments` fires often → solved by the bridge.** oh surfaces only the first block reason (N violations = N cycles), so the bridge aggregates all checks into one combined block — one re-issue regardless of violation count.
+- **Comment-vs-docstring confusion (Qwen).** Block says "Comments"; model reasons docstrings are exempt, strips only `#` lines, keeps the docstring, re-submits, gets re-blocked — one wasted cycle. The hook *does* catch docstrings; the message wording is the gap. (Wording fix pending policy call — see below.)
 - **Bash-evasion hole.** Gates see only `write_file`/`edit_file`; a `bash` heredoc write bypasses all four. Open.
-- **oh flickers in tmux** at history-bottom. Cosmetic, but a daily-use-friction data point for the A-vs-B decision (oh UI maturity).
+- **oh UX rough** — A-adoption friction, not correctness: flickers in tmux at history-bottom; interrupt unreliable (must spam `esc` before a stop registers); denying a tool call doesn't prompt "what should the agent do instead" the way Claude Code does, so the steer is lost. Daily-use-friction data points for A-vs-B (oh UI maturity).
 
 ## Density gating — what's possible (design note)
 
