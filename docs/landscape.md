@@ -30,8 +30,8 @@ Core fact: rich gating hooks are rare. That feature defines the search. Most too
 - `command` (shell) = deterministic
 - `prompt`/`agent` (LLM check, cheap/deep) = inferential
 - `http` (POST payload)
-- `matcher` (glob on tool_name), `priority`, hot-reload. Events = full Claude-Code parity (pre/post-tool, prompt-submit, stop, compact, session).
-- Limit: allow/block only, **no input rewrite** (same as Claude Code).
+- `matcher` (glob on tool_name — not regex), hot-reload. Events = full Claude-Code parity (pre/post-tool, prompt-submit, stop, compact, session).
+- Command hooks: payload via env var `OPENHARNESS_HOOK_PAYLOAD` (not stdin). **Block-or-silent** — runtime reads exit code only; no `additionalContext`/advise channel, successful stdout is discarded. Block = exit non-zero + `block_on_failure`.
 - → vision's deterministic-first/inferential-second = native hook taxonomy. Pluggable posture (#5) = `hot_reload`.
 
 **Model-agnostic — yes.** Ollama/DeepSeek/Groq/OpenRouter/Kimi/GLM + any OpenAI/Anthropic-compatible endpoint, per-profile keys. Cheap/local solved.
@@ -66,7 +66,7 @@ Suspicion raised by group's star-farming culture (see provenance). Checked craft
 1. **Not slim.** 41.5k LOC = full Claude-Code reimplementation. Bloat (cli 2464, autopilot 2239, feishu/swarm/channels) is in layers you don't use, but it's there.
 2. **Trust/longevity.** Group (HKUDS/Chao Huang) clearly star-farms & overhypes: paper repos sit at <1k★ while "product" repos cluster at 13-36k★; courts the OpenClaw hype ecosystem (375k★, Peter Steinberger's — NOT theirs; ClawTeam IS theirs, "Roadmap" only). Good engineers who also hype-farm — both true. Risk = abandonment when they chase the next shiny thing, not correctness.
 
-Config: `~/.openharness/settings.json` (or `OPENHARNESS_CONFIG_DIR`, or per-project `<cwd>/.openharness/`). Hooks shape: `{"hooks":{"pre_tool_use":[{"type":"command","command":...,"matcher":...,"block_on_failure":true}]}}`.
+Config: `~/.openharness/settings.json` or `OPENHARNESS_CONFIG_DIR` only — **no per-project `<cwd>/.openharness/`** (v0.1.9, verified). Hooks shape: `{"hooks":{"pre_tool_use":[{"type":"command","command":...,"block_on_failure":true}]}}`.
 
 Risks remaining: young + fast-moving (0.1.4→0.1.9 within days), longevity unproven, no control of direction. But the core bet is validated.
 
