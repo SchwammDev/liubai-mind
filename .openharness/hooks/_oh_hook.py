@@ -11,11 +11,32 @@ if str(_CLAUDE_HOOKS) not in sys.path:
     sys.path.insert(0, str(_CLAUDE_HOOKS))
 
 
+def _normalize(raw: dict) -> dict:
+    tool = raw.get("tool_name", "")
+    inp = raw.get("tool_input", {}) or {}
+    if tool == "write_file":
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": inp.get("path", ""), "content": inp.get("content", "")},
+        }
+    if tool == "edit_file":
+        return {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": inp.get("path", ""),
+                "old_string": inp.get("old_str", ""),
+                "new_string": inp.get("new_str", ""),
+            },
+        }
+    return raw
+
+
 def payload() -> dict:
     try:
-        return json.loads(os.environ.get("OPENHARNESS_HOOK_PAYLOAD", ""))
+        raw = json.loads(os.environ.get("OPENHARNESS_HOOK_PAYLOAD", ""))
     except json.JSONDecodeError:
         return {}
+    return _normalize(raw)
 
 
 def block(body: str) -> int:
