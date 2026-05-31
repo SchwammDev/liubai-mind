@@ -21,16 +21,16 @@ This gives a concrete baseline to judge B against — don't decide blind.
 - Block-or-silent: runtime reads exit code only. No allow+advise channel. → all 4 ported as **hard blocks**; the 3 nudges had nowhere else to go. Leash-vs-rails ratio now a live experiment.
 - Payload via env var, not stdin. Config home-only, no per-project.
 - Block message must say *rejected, not applied, re-issue* or the model thrashes.
-- oh tool names/fields differ from Claude (`write_file`/`edit_file`, `path`/`old_str`/`new_str`) — shim translates to Claude shape. Missing this = silent no-op on every edit.
+- oh tool names/fields differ from Claude (`write_file`/`edit_file`, `path`/`old_str`/`new_str`) — bridge translates to Claude shape. Missing this = silent no-op on every edit.
 
-Adapters: `.openharness/hooks/*_block.py`, reusing `.claude/hooks/` detection.
+Steering lives in dotfiles (`claude/code/.claude-utils/oh_bridge.py` + test), mirroring the opencode bridge: one script imports the shared `hooks/` detection core, translates oh's env payload, dispatches all checks, and **aggregates into one combined block** (one re-issue, not N). Wired globally via `~/.openharness/settings.json` → `python3 $HOME/.../oh_bridge.py` (`$HOME` shell-expands, portable).
 
 ## Feel-test results (2026-05-31, Qwen via oh)
 
 - **Clean recovery, no thrash.** Blocked edits get fixed and re-issued in sequence; the *rejected/re-issue* wording holds on a weak model. OpenCode thrash did not reproduce.
 - **Rail → human escalation (ex2, n=1).** Once, hitting the comment gate, Qwen asked the user rather than gaming the rail — would match the vision's intent (rails serve goals) if it holds. Single observation, not reproduced; could be non-determinism. Needs repeats before it counts.
 - **Long-test gate + skill worked** (ex4) — behavioral naming + helper extraction held.
-- **`no_comments` fires often.** Single dispatch hook (all checks → one combined block) may cut round-trips, since oh surfaces only the first block reason (N violations = N cycles). Defer until tested on a real project, not toy exercises.
+- **`no_comments` fires often → solved by the bridge.** oh surfaces only the first block reason (N violations = N cycles), so the bridge aggregates all checks into one combined block — one re-issue regardless of violation count.
 - **Bash-evasion hole.** Gates see only `write_file`/`edit_file`; a `bash` heredoc write bypasses all four. Open.
 - **oh flickers in tmux** at history-bottom. Cosmetic, but a daily-use-friction data point for the A-vs-B decision (oh UI maturity).
 
