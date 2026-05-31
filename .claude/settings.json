@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/no_added_comments.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/long_test_nudge.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/cyclomatic_complexity_nudge.py"
+          },
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/type_annotation_nudge.py"
+          }
+        ]
+      }
+    ]
+  }
+}
