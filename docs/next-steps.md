@@ -9,7 +9,7 @@ Plan: **try A first for a real feel, then scope B, then decide.**
 ## Step 1 — Try `oh` with ported hooks (get informed feel)
 
 1. ✅ **Done (2026-05-31).** All 4 Claude hooks ported, wired in `~/.openharness/settings.json` under `pre_tool_use`, parse + register verified. Three plan assumptions proved false against v0.1.9 source — see **Porting findings** below.
-2. Copy one Claude skill → OpenHarness skill dir, confirm `oh --dry-run` loads it (anthropic-skills compat claimed, unverified).
+2. ✅ **Done (2026-05-31).** `python-acceptance-tests` symlinked into `~/.openharness/skills/`, registers cleanly — anthropic-skills compat confirmed. Same `SKILL.md` + frontmatter format, no conversion.
 3. Drive real coding task on a cheap model. Judge: does the nudging *feel* right? Noise level? Friction?
 4. **First fresh hook: filler-phrase blocklist on agent output.** Reject "This reflects…", "It's worth noting…", "In essence…", "Overall,"… Trivial, deterministic, no length-Goodhart, kills ~80% of visible bloat. Cheapest high-value experiment.
 5. **Experiment — native-concept priming.** Hypothesis: phrasing density/restraint guidance with 留白 (Hanzi) in the *injected* context (system prompt / skills / hook messages) steers Chinese-trained open models (Qwen/DeepSeek/GLM) better than English/romaji — they have denser priors for it. Caveat: these models are bilingual + English-RLHF'd, effect may dilute. Test: same hook, English vs 留白 phrasing, cheap Chinese model, compare output density. NOTE: the *project name* itself does NOT steer (not in context) — only injected prompt text does.
