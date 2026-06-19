@@ -1,18 +1,14 @@
 #!/bin/bash
-# Transparent wrapper around `uv run pytest`. Forwards all args verbatim.
-# Prints "✅ All tests passed!" on success, full pytest output on failure.
-# Prefer over raw `uv run pytest` for local runs.
+# Runs the TypeScript pi-extension tests on the bundled node (system node is too old
+# for type stripping). Override the interpreter with LIUBAI_NODE. Forwards args verbatim;
+# defaults to the rails bridge test.
+set -euo pipefail
 
-output=$(uv run pytest "$@" 2>&1)
-exit_code=$?
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+NODE="${LIUBAI_NODE:-$(ls "$ROOT"/playground/node-*/bin/node 2>/dev/null | head -1)}"
+[ -x "$NODE" ] || NODE=node
 
-if [ $exit_code -eq 0 ]; then
-    coverage=$(echo "$output" | grep -E '^TOTAL' | awk '{print $NF}')
-    if [ -n "$coverage" ]; then
-        echo "✅ All tests passed! (coverage: $coverage)"
-    else
-        echo "✅ All tests passed!"
-    fi
-else
-    echo "$output"
-fi
+args=("$@")
+[ ${#args[@]} -eq 0 ] && args=("$ROOT/.pi/extensions/rails/bridge.test.ts")
+
+exec "$NODE" --test --experimental-strip-types "${args[@]}"

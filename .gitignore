@@ -1,4 +1,5 @@
 playground/
+node_modules/
 __pycache__/
 scratch-oh/
 .openharness/

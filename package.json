@@ -1,0 +1,8 @@
+{
+  "name": "liubai-mind",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.79.8"
+  }
+}
