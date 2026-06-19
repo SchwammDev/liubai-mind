@@ -124,7 +124,7 @@ def collect_added_comments(payload: dict) -> tuple[str, list[tuple[int, str]]]:
 
 
 def format_message(path: str, items: list[tuple[int, str]]) -> str:
-    out = [f"Blocked: new Python comments detected in {path}:"]
+    out = [f"Blocked: new Python comments/docstrings detected in {path}:"]
     for line_no, line in items:
         snippet = line.strip()
         if len(snippet) > 100:
@@ -132,8 +132,13 @@ def format_message(path: str, items: list[tuple[int, str]]) -> str:
         out.append(f"  L{line_no}: {snippet}")
     out.append("")
     out.append(
-        "Comments are noise — write expressive code. "
+        "Comments and docstrings are both noise here — write expressive code. "
+        "Remove docstrings too, not just '#' lines. "
         "If you truly think a WHY-comment is justified, propose it to the user before writing it."
+    )
+    out.append(
+        "Tooling directives are allowed and not blocked: '# ty: ignore[...]', "
+        "'# type: ignore', '# noqa', '# pragma:', '# pyright:'."
     )
     return "\n".join(out)
 

@@ -71,3 +71,16 @@ def test_plain_prose_comment_is_blocked():
 
 def test_directive_word_inside_prose_is_blocked():
     assert_not_allowed("# remember to add a noqa here later")
+
+
+def test_block_message_names_docstrings_so_agents_dont_keep_them() -> None:
+    message = hook.format_message("src/x.py", [(2, '    """move it"""')])
+
+    assert "docstring" in message.lower()
+
+
+def test_block_message_points_to_allowed_tooling_directives() -> None:
+    message = hook.format_message("src/x.py", [(2, "# explain")])
+
+    assert "ty:" in message
+    assert "allowed" in message.lower()
