@@ -83,3 +83,21 @@ test("an edit that triggers no rail leaves the result untouched", async () => {
   assert.equal(outcome.blocked, false);
   assert.equal(outcome.text, TOOL_RESULT);
 });
+
+async function withRailsDisabled<T>(action: () => Promise<T>): Promise<T> {
+  process.env.LIUBAI_RAILS_OFF = "1";
+  try {
+    return await action();
+  } finally {
+    delete process.env.LIUBAI_RAILS_OFF;
+  }
+}
+
+test("LIUBAI_RAILS_OFF lets a would-be-blocked edit through untouched", async () => {
+  const outcome = await withRailsDisabled(() =>
+    applyEdit("disabled", MODULE_FILE, "x = 1", "x = 1  # noise"),
+  );
+
+  assert.equal(outcome.blocked, false);
+  assert.equal(outcome.text, TOOL_RESULT);
+});

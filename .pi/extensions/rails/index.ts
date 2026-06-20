@@ -47,10 +47,15 @@ function runRail(name: string, payload: ClaudePayload): { block: string } | { nu
   }
 }
 
+// Rails steer by default; setting LIUBAI_RAILS_OFF yields the un-steered
+// baseline without swapping engines, keeping the comparison a clean toggle.
+const railsDisabled = (): boolean => Boolean(process.env.LIUBAI_RAILS_OFF);
+
 export function register(pi: ExtensionAPI): void {
   const pendingNudges = new Map<string, string[]>();
 
   pi.on("tool_call", (event: any) => {
+    if (railsDisabled()) return undefined;
     const payload = claudePayload(event.toolName, event.input);
     if (!payload) return undefined;
 
