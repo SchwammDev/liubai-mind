@@ -8,8 +8,21 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 PI_BIN="$REPO/node_modules/.bin/pi"
+PI_PKG="@earendil-works/pi-coding-agent"
 
 command -v mise >/dev/null 2>&1 || { echo "liubai: mise not found — run $REPO/setup.sh" >&2; exit 1; }
+
+# `liubai update [version]` bumps the pinned engine and reinstalls. This is the
+# only safe update for a pinned+vendored engine: it rewrites the exact pin in
+# package.json and package-lock.json (both tracked), so the change lands in git.
+# Pi's own `pi update` would reinstall in place and silently drift off the pin.
+if [ "${1:-}" = "update" ]; then
+  target="${2:-latest}"
+  mise exec -- npm install --prefix "$REPO" --save-exact "$PI_PKG@$target"
+  echo "liubai: engine updated. Review and commit package.json + package-lock.json."
+  exit 0
+fi
+
 [ -x "$PI_BIN" ] || { echo "liubai: engine not installed — run $REPO/setup.sh" >&2; exit 1; }
 
 exec mise exec -- "$PI_BIN" \
