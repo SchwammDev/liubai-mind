@@ -37,6 +37,14 @@ async function applyEdit(
   oldText: string,
   newText: string,
 ): Promise<EditOutcome> {
+  return applyEditCall(callId, path, { path, edits: [{ oldText, newText }] });
+}
+
+async function applyEditCall(
+  callId: string,
+  path: string,
+  input: Record<string, unknown>,
+): Promise<EditOutcome> {
   const { pi, handlers } = fakePi();
   register(pi);
 
@@ -44,7 +52,7 @@ async function applyEdit(
     type: "tool_call",
     toolCallId: callId,
     toolName: "edit",
-    input: { path, oldText, newText },
+    input,
   };
   const callResult = await handlers.get("tool_call")?.(callEvent);
   if (callResult?.block) return { blocked: true, reason: callResult.reason, text: "" };
@@ -64,6 +72,17 @@ async function applyEdit(
 
 test("a newly introduced comment is rejected before the edit runs", async () => {
   const outcome = await applyEdit("comment", MODULE_FILE, "x = 1", "x = 1  # noise");
+
+  assert.equal(outcome.blocked, true);
+  assert.match(outcome.reason ?? "", /no_added_comments/);
+});
+
+test("a comment added through the legacy flat edit shape is still rejected", async () => {
+  const outcome = await applyEditCall("legacy", MODULE_FILE, {
+    path: MODULE_FILE,
+    oldText: "x = 1",
+    newText: "x = 1  # noise",
+  });
 
   assert.equal(outcome.blocked, true);
   assert.match(outcome.reason ?? "", /no_added_comments/);

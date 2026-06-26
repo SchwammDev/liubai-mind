@@ -14,8 +14,16 @@ const RAILS = [
   "type_annotation_nudge.py",
 ] as const;
 
-type ClaudePayload = { tool_name: "Edit" | "Write"; tool_input: Record<string, unknown> };
+type ClaudePayload = { tool_name: "Edit" | "Write" | "MultiEdit"; tool_input: Record<string, unknown> };
 type TextPart = { type: "text"; text: string };
+
+// pi's `edit` tool carries an `edits[]` array; older builds emitted a single
+// flat oldText/newText. Both map onto the hooks' MultiEdit payload.
+function editList(input: any): Array<{ oldText: string; newText: string }> {
+  return Array.isArray(input.edits)
+    ? input.edits
+    : [{ oldText: input.oldText, newText: input.newText }];
+}
 
 function claudePayload(toolName: string, input: any): ClaudePayload | null {
   if (toolName === "write") {
@@ -23,8 +31,11 @@ function claudePayload(toolName: string, input: any): ClaudePayload | null {
   }
   if (toolName === "edit") {
     return {
-      tool_name: "Edit",
-      tool_input: { file_path: input.path, old_string: input.oldText, new_string: input.newText },
+      tool_name: "MultiEdit",
+      tool_input: {
+        file_path: input.path,
+        edits: editList(input).map((e) => ({ old_string: e.oldText, new_string: e.newText })),
+      },
     };
   }
   return null;
