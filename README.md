@@ -8,6 +8,10 @@ Steer agents with deterministic guardrails and dense, minimal communication — 
 
 See [`docs/vision.md`](docs/vision.md) for principles, [`docs/landscape.md`](docs/landscape.md) for the tool survey, [`docs/next-steps.md`](docs/next-steps.md) for the build plan.
 
+## Model
+
+Not pinned. Pick in-session (`Ctrl+P`) or via `pi config`. Choice persists to `~/.pi/agent/settings.json` — local, not version-controlled. Catalog of available models lives in `~/.pi/agent/models.json` (stowed from dotfiles).
+
 ## License
 
 Copyright 2026 Bernhard Raml. Licensed under [Apache 2.0](LICENSE).
