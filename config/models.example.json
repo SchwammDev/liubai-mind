@@ -1,0 +1,21 @@
+{
+  "providers": {
+    "your-provider": {
+      "name": "Your provider",
+      "baseUrl": "https://your-openai-compatible-endpoint/v1",
+      "apiKey": "$YOUR_API_KEY_ENV_VAR",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "model-id",
+          "name": "Model display name",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 262144,
+          "maxTokens": 32768
+        }
+      ]
+    }
+  }
+}

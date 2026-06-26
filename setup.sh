@@ -4,8 +4,10 @@
 #   1. mise + node@22   (user-local, no sudo; system node is too old for pi)
 #   2. pinned pi engine (npm install honours the exact pin in package.json)
 #   3. global steering  (rails extension loads in every repo you open)
-#   4. model config     (aqueduct provider, api key read from $TU_WIEN_API_KEY)
-#   5. PATH command     (`liubai` available everywhere)
+#   4. PATH command     (`liubai` available everywhere)
+#
+# Model config (~/.pi/agent/models.json) is owned by the dotfiles repo and
+# linked by its stow install — not created here.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,9 +29,6 @@ step "pinned pi engine"
 step "global steering rails"
 mkdir -p "$AGENT_DIR/extensions"
 ln -sfn "$REPO/.pi/extensions/rails" "$AGENT_DIR/extensions/rails"
-
-step "model config"
-ln -sfn "$REPO/config/models.json" "$AGENT_DIR/models.json"
 
 step "global memory"
 ln -sfn "$HOME/.claude/CLAUDE.md" "$AGENT_DIR/CLAUDE.md"
