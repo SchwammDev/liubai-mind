@@ -31,6 +31,9 @@ ln -sfn "$REPO/.pi/extensions/rails" "$AGENT_DIR/extensions/rails"
 step "model config"
 ln -sfn "$REPO/config/models.json" "$AGENT_DIR/models.json"
 
+step "global memory"
+ln -sfn "$HOME/.claude/CLAUDE.md" "$AGENT_DIR/CLAUDE.md"
+
 step "liubai command"
 mkdir -p "$LOCAL_BIN"
 ln -sfn "$REPO/bin/liubai" "$LOCAL_BIN/liubai"
