@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Daily driver: the pinned pi engine + aqueduct model + steering rails, runnable
-# from any working directory. Rails load globally (see setup.sh); the model and
-# provider come from this repo's config. Run `setup.sh` once before first use.
+# Daily driver: the pinned pi engine + steering rails, runnable from any working
+# directory. Rails load globally (see setup.sh); the provider and model come from
+# pi's own settings.json (~/.pi/agent/). Run `setup.sh` once before first use.
 #
 # Steering is on by default. For the un-steered baseline: LIUBAI_RAILS_OFF=1 liubai ...
 set -euo pipefail
@@ -25,7 +25,4 @@ fi
 
 [ -x "$PI_BIN" ] || { echo "liubai: engine not installed — run $REPO/setup.sh" >&2; exit 1; }
 
-exec mise exec -- "$PI_BIN" \
-  --provider aqueduct \
-  --model aqueduct/qwen-3.5-397b \
-  "$@"
+exec mise exec -- "$PI_BIN" "$@"
