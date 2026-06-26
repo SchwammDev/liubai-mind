@@ -103,6 +103,25 @@ test("an edit that triggers no rail leaves the result untouched", async () => {
   assert.equal(outcome.text, TOOL_RESULT);
 });
 
+function finalizeAssistant(text: string) {
+  const { pi, handlers } = fakePi();
+  register(pi);
+  const event = { type: "message_end", message: { role: "assistant", content: [{ type: "text", text }] } };
+  return handlers.get("message_end")?.(event);
+}
+
+test("filler is stripped from a finalized assistant message", () => {
+  const out = finalizeAssistant("Certainly. The rails fire on edit.");
+
+  assert.equal(out.message.content[0].text, "The rails fire on edit.");
+});
+
+test("LIUBAI_RAILS_OFF leaves a finalized assistant message untouched", async () => {
+  const out = await withRailsDisabled(() => finalizeAssistant("Certainly. The rails fire on edit."));
+
+  assert.equal(out, undefined);
+});
+
 async function withRailsDisabled<T>(action: () => Promise<T>): Promise<T> {
   process.env.LIUBAI_RAILS_OFF = "1";
   try {

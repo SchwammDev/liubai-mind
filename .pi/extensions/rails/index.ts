@@ -3,6 +3,8 @@ import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { cleanProse } from "./prose-gate.ts";
+
 const HOOK_DIR =
   process.env.LIUBAI_RAILS_HOOK_DIR ??
   join(homedir(), "code/dotfiles/claude/code/.claude-utils/hooks");
@@ -89,6 +91,12 @@ export function register(pi: ExtensionAPI): void {
 
     const advisory: TextPart = { type: "text", text: "\n\n" + nudges.join("\n\n") };
     return { content: [...event.content, advisory] };
+  });
+
+  pi.on("message_end", (event: any) => {
+    if (railsDisabled()) return undefined;
+    if (event.message.role !== "assistant") return undefined;
+    return { message: cleanProse(event.message) };
   });
 }
 
