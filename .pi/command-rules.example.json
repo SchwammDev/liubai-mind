@@ -1,5 +1,5 @@
 {
-  "deny": ["\\brm\\s+-rf\\s+/", "\\|\\s*sh\\b"],
-  "ask": ["\\bgit\\s+commit\\b", "\\bgit\\s+push\\b"],
-  "allow": ["\\bgit\\s+push\\s+--dry-run\\b"]
+  "deny": ["\\bgit\\s+push\\b", "\\|\\s*sh\\b"],
+  "ask": ["\\bgit\\s+commit\\b"],
+  "allow": []
 }
