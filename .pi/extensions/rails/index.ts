@@ -1,9 +1,17 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { classify, mergeRules, type CommandRules } from "./command-gate.ts";
 import { cleanProse } from "./prose-gate.ts";
+
+// Command-gate rules merge a personal global file under a project-local one;
+// either may be absent (no gating). LIUBAI_RAILS_RULES overrides the project path.
+const GLOBAL_RULES = join(homedir(), ".pi/agent/command-rules.json");
+const PROJECT_RULES =
+  process.env.LIUBAI_RAILS_RULES ?? join(import.meta.dirname, "../../command-rules.json");
 
 const HOOK_DIR =
   process.env.LIUBAI_RAILS_HOOK_DIR ??
@@ -64,11 +72,46 @@ function runRail(name: string, payload: ClaudePayload): { block: string } | { nu
 // baseline without swapping engines, keeping the comparison a clean toggle.
 const railsDisabled = (): boolean => Boolean(process.env.LIUBAI_RAILS_OFF);
 
+// A missing or malformed file yields no rules, so the gate stays open rather
+// than bricking the agent on a typo.
+function loadRules(path: string): Partial<CommandRules> {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+// `ask` needs an interactive prompt; with no UI (headless `-p`/rpc) it blocks,
+// so an unattended run can't slip a gated command through unconfirmed.
+async function gateCommand(
+  command: string,
+  rules: CommandRules,
+  ctx: any,
+): Promise<{ block: true; reason: string } | undefined> {
+  const decision = classify(command, rules);
+  if (decision === "deny") return { block: true, reason: `[command-gate] denied: ${command}` };
+  if (decision === "ask") {
+    if (!ctx.hasUI) {
+      return { block: true, reason: `[command-gate] '${command}' needs confirmation; no UI available` };
+    }
+    const allowed = await ctx.ui.confirm("Run command?", command);
+    if (!allowed) return { block: true, reason: `[command-gate] declined: ${command}` };
+  }
+  return undefined;
+}
+
 export function register(pi: ExtensionAPI): void {
   const pendingNudges = new Map<string, string[]>();
+  const rules = mergeRules(loadRules(GLOBAL_RULES), loadRules(PROJECT_RULES));
 
-  pi.on("tool_call", (event: any) => {
+  pi.on("tool_call", async (event: any, ctx: any) => {
     if (railsDisabled()) return undefined;
+
+    if (event.toolName === "bash") {
+      return gateCommand(event.input?.command ?? "", rules, ctx);
+    }
+
     const payload = claudePayload(event.toolName, event.input);
     if (!payload) return undefined;
 
