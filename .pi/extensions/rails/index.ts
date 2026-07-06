@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { classify, mergeRules, type CommandRules } from "./command-gate.ts";
 import { cleanProse } from "./prose-gate.ts";
+import { injectWebSearch } from "./web-search.ts";
 
 // Command-gate rules merge a personal global file under a project-local one;
 // either may be absent (no gating). LIUBAI_RAILS_RULES overrides the project path.
@@ -135,6 +136,12 @@ export function register(pi: ExtensionAPI): void {
     const advisory: TextPart = { type: "text", text: "\n\n" + nudges.join("\n\n") };
     return { content: [...event.content, advisory] };
   });
+
+  // Capability, not steering: stays on under LIUBAI_RAILS_OFF so baseline
+  // comparisons vary only the steering, never what the agent can reach.
+  pi.on("before_provider_request", (event: any, ctx: any) =>
+    injectWebSearch(event.payload, ctx.model),
+  );
 
   pi.on("message_end", (event: any) => {
     if (railsDisabled()) return undefined;
