@@ -16,6 +16,10 @@ Not pinned. Pick in-session (`Ctrl+P`) or via `pi config`. Choice persists to `~
 
 Gate bash commands by rule, not code. `.pi/command-rules.json` (project) merges over `~/.pi/agent/command-rules.json` (global); project wins per list. Three regex lists — `deny`, `ask`, `allow` — matched against the command string. Precedence `deny > allow > ask`; unmatched runs. `ask` prompts for confirmation (blocks in headless `-p`). Missing file → no gating. Copy [`.pi/command-rules.example.json`](.pi/command-rules.example.json) to start.
 
+## Web search
+
+On the TU Wien aqueduct provider, every request carries a server-side `web_search` tool — the gateway's OpenAI Responses API executes the search itself, so no client tool-calling is involved and weak-model tool fragility doesn't apply. Requires `api: "openai-responses"` on the provider in `~/.pi/agent/models.json`. Scoped to aqueduct; on paid providers the same tool type would incur cost. Stays active under `LIUBAI_RAILS_OFF`: capability, not steering.
+
 ## License
 
 Copyright 2026 Bernhard Raml. Licensed under [Apache 2.0](LICENSE).
