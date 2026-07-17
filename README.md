@@ -16,10 +16,6 @@ Not pinned. Pick in-session (`Ctrl+P`) or via `pi config`. Choice persists to `~
 
 `mise exec -- npm install @earendil-works/pi-coding-agent@<version> --save-exact`
 
-## Upgrade
-
-`mise exec -- npm install @earendil-works/pi-coding-agent@<version> --save-exact`
-
 ## Command gating
 
 Gate bash commands by rule, not code. `.pi/command-rules.json` (project) merges over `~/.pi/agent/command-rules.json` (global); project wins per list. Three regex lists — `deny`, `ask`, `allow` — matched against the command string. Precedence `deny > allow > ask`; unmatched runs. `ask` prompts for confirmation (blocks in headless `-p`). Missing file → no gating. Copy [`.pi/command-rules.example.json`](.pi/command-rules.example.json) to start.
