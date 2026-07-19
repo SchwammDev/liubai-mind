@@ -195,7 +195,9 @@ async function runChild(
   try {
     const t = await session.sendPrompt(`Task: ${task}`);
     result.exitCode = t.exitCode;
+    result.settled = t.settled;
     if (t.aborted) throw new Error("Spawned child was aborted");
+    if (!t.settled) result.errorMessage ??= `child exited (code ${t.exitCode}) before completing its turn`;
 
     if (!isFailedResult(result)) {
       await gateChildReport(result, session, onUpdate);

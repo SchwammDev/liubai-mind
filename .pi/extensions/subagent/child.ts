@@ -42,6 +42,7 @@ export interface SingleResult {
   stopReason?: string;
   errorMessage?: string;
   finalReport?: string;
+  settled?: boolean;
 }
 
 export const COMPLEXITY_LEVELS = ["trivial", "easy", "medium", "hard"] as const;
@@ -244,7 +245,12 @@ export function getFinalOutput(messages: Message[]): string {
 }
 
 export function isFailedResult(result: SingleResult): boolean {
-  return result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
+  return (
+    result.exitCode !== 0 ||
+    result.settled === false ||
+    result.stopReason === "error" ||
+    result.stopReason === "aborted"
+  );
 }
 
 export function getResultOutput(result: SingleResult): string {
