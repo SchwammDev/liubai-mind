@@ -57,11 +57,6 @@ export function processRpcLine(line: string, acc: Accumulator, bridge: AskBridge
     return { settled: false };
   }
 
-  if (event.type === "tool_result_end" && event.message) {
-    acc.messages.push(event.message as Message);
-    return { settled: false };
-  }
-
   if (event.type === "extension_ui_request") {
     bridge.handle(event).catch(() => {});
     return { settled: false };
