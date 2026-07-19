@@ -40,13 +40,20 @@ class FakeForwarder implements UiForwarder {
   notifyCalls: Array<{ message: string; type: unknown }> = [];
   confirmResult = true;
   confirmShouldThrow = false;
+  confirmPending = false;
   selectResult: string | undefined = "chosen";
   inputResult: string | undefined = "typed";
   editorResult: string | undefined = "edited";
 
   confirm(title: string, message: string, opts?: any) {
     this.confirmCalls.push({ title, message, opts });
-    return this.confirmShouldThrow ? Promise.reject(new Error("nope")) : Promise.resolve(this.confirmResult);
+    if (this.confirmShouldThrow) return Promise.reject(new Error("nope"));
+    if (this.confirmPending) {
+      return new Promise<boolean>((resolve) => {
+        opts?.signal?.addEventListener("abort", () => resolve(false), { once: true });
+      });
+    }
+    return Promise.resolve(this.confirmResult);
   }
   select(title: string, options: string[], opts?: any) {
     this.selectCalls.push({ title, options, opts });
@@ -323,4 +330,97 @@ test("a confirm request mid-turn reaches the forwarder and writes the response b
 
   t.emitLine(JSON.stringify({ type: "agent_settled" }));
   await p;
+});
+
+test("a pending parent confirm is dismissed when the child dies mid-ask", async () => {
+  const t = new FakeTransport();
+  const f = new FakeForwarder();
+  f.confirmPending = true;
+  const session = new ChildSession(t, f, makeAcc());
+
+  const p = session.sendPrompt("task");
+  t.emitLine(
+    JSON.stringify({ type: "extension_ui_request", id: "q1", method: "confirm", title: "ok?", message: "proceed?" }),
+  );
+  await flush();
+
+  assert.equal(f.confirmCalls.length, 1);
+
+  const confirmPromise = f.confirmCalls[0].opts?.signal ? new Promise<void>((resolve) => {
+    f.confirmCalls[0].opts.signal.addEventListener("abort", () => resolve(), { once: true });
+  }) : Promise.resolve();
+
+  t.emitClose(9);
+  await confirmPromise;
+  await flush();
+
+  const result = await p;
+  assert.deepEqual(result, { settled: false, exitCode: 9, aborted: false });
+});
+
+test("a pending parent confirm is dismissed on parent abort", async () => {
+  const t = new FakeTransport();
+  const f = new FakeForwarder();
+  f.confirmPending = true;
+  const toolController = new AbortController();
+  const session = new ChildSession(t, f, makeAcc(), undefined, toolController.signal);
+
+  const p = session.sendPrompt("task");
+  t.emitLine(
+    JSON.stringify({ type: "extension_ui_request", id: "q1", method: "confirm", title: "ok?", message: "proceed?" }),
+  );
+  await flush();
+
+  assert.equal(f.confirmCalls.length, 1);
+
+  const confirmPromise = f.confirmCalls[0].opts?.signal ? new Promise<void>((resolve) => {
+    f.confirmCalls[0].opts.signal.addEventListener("abort", () => {
+      setImmediate(() => resolve());
+    });
+  }) : Promise.resolve();
+
+  toolController.abort();
+  t.emitClose(1);
+  await confirmPromise;
+  await flush();
+
+  const result = await p;
+  assert.deepEqual(result, { settled: false, exitCode: 1, aborted: true });
+});
+
+test("parallel children resolve asks independently by id with no cross-talk", async () => {
+  const t1 = new FakeTransport();
+  const f1 = new FakeForwarder();
+  const session1 = new ChildSession(t1, f1, makeAcc());
+
+  const t2 = new FakeTransport();
+  const f2 = new FakeForwarder();
+  const session2 = new ChildSession(t2, f2, makeAcc());
+
+  const p1 = session1.sendPrompt("task1");
+  const p2 = session2.sendPrompt("task2");
+
+  f1.confirmResult = true;
+  f2.confirmResult = false;
+
+  t1.emitLine(
+    JSON.stringify({ type: "extension_ui_request", id: "a1", method: "confirm", title: "t1", message: "m1" }),
+  );
+  t2.emitLine(
+    JSON.stringify({ type: "extension_ui_request", id: "a2", method: "confirm", title: "t2", message: "m2" }),
+  );
+  await flush();
+
+  await flush();
+
+  const responses1 = t1.writtenJson().filter((o) => o.type === "extension_ui_response");
+  const responses2 = t2.writtenJson().filter((o) => o.type === "extension_ui_response");
+
+  assert.deepEqual(responses1, [{ type: "extension_ui_response", id: "a1", confirmed: true }]);
+  assert.deepEqual(responses2, [{ type: "extension_ui_response", id: "a2", confirmed: false }]);
+
+  t1.emitLine(JSON.stringify({ type: "agent_settled" }));
+  t2.emitLine(JSON.stringify({ type: "agent_settled" }));
+  await p1;
+  await p2;
 });
