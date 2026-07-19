@@ -30,6 +30,7 @@ step "pinned pi engine"
 step "global steering rails"
 mkdir -p "$AGENT_DIR/extensions"
 ln -sfn "$REPO/.pi/extensions/rails" "$AGENT_DIR/extensions/rails"
+ln -sfn "$REPO/.pi/extensions/subagent" "$AGENT_DIR/extensions/subagent"
 
 step "liubai command"
 mkdir -p "$LOCAL_BIN"

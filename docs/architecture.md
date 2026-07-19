@@ -37,6 +37,12 @@ The bridge in `index.ts` (`claudePayload`, `runRail`) maps pi's tool names onto 
 
 `command-gate.ts` — regex rules from two files: global `~/.pi/agent/command-rules.json` and project `.pi/command-rules.json` (override `LIUBAI_RAILS_RULES`). Project lists replace global per-list; an explicit empty list is a definition. Precedence `deny > allow > ask`; unmatched runs. `ask` blocks in headless mode (no UI to confirm). See `.pi/command-rules.example.json`.
 
+## Spawn extension
+
+`.pi/extensions/subagent/` — a generic `spawn` tool, loaded globally by `setup.sh` into `~/.pi/agent/extensions/subagent`. It spawns a child `pi --mode json -p --no-session` per task with an isolated context window; the child's final report lands in the parent. Two modes: single (`task`) and parallel (`tasks` array, capped at 8, concurrency 4). The `task` string carries everything — no role roster, no per-spawn system prompt. Children inherit the rails through the same global extensions dir.
+
+Kept separate from rails because their lifecycles are opposite: rails inherit *into* children, whereas spawn must self-disable past a depth cap (a later issue) so a child cannot recurse without bound.
+
 ## Extending
 
 Add a content rail: drop a `hooks/foo.py` following the block/nudge exit-code contract, add a test `hooks/test_foo.py`, append its name to `RAILS` in `index.ts`. No other wiring.
