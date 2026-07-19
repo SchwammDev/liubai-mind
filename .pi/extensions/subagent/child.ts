@@ -7,6 +7,20 @@ export const MAX_PARALLEL_TASKS = 8;
 export const MAX_CONCURRENCY = 4;
 export const COLLAPSED_ITEM_COUNT = 10;
 export const PER_TASK_OUTPUT_CAP = 50 * 1024;
+export const MAX_DEPTH = 1;
+
+export function currentDepth(): number {
+  const parsed = Number(process.env.LIUBAI_SPAWN_DEPTH);
+  return Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
+}
+
+export function childDepthOf(parentDepth: number): number {
+  return parentDepth + 1;
+}
+
+export function canSpawn(depth: number): boolean {
+  return depth < MAX_DEPTH;
+}
 
 export interface UsageStats {
   input: number;
