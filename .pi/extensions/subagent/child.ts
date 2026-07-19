@@ -41,7 +41,6 @@ export interface SingleResult {
   model?: string;
   stopReason?: string;
   errorMessage?: string;
-  sessionId?: string;
   finalReport?: string;
 }
 
