@@ -253,11 +253,16 @@ export function isFailedResult(result: SingleResult): boolean {
   );
 }
 
+// Failure output skips the compress bounce (no live child to ask), so the cap
+// is enforced by hard truncation — a crashing child's stderr flood must not
+// land uncapped in the parent's context.
 export function getResultOutput(result: SingleResult): string {
-  if (isFailedResult(result)) {
-    return result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)";
+  if (!isFailedResult(result)) {
+    return getFinalOutput(result.messages) || "(no output)";
   }
-  return getFinalOutput(result.messages) || "(no output)";
+  const raw = result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)";
+  const { report, omitted } = hardTruncateReport(raw);
+  return omitted > 0 ? `${report}\n\n${truncationNotice(omitted)}` : report;
 }
 
 export type ReportAssessment =
