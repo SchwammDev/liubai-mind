@@ -5,3 +5,4 @@ scratch-oh/
 .openharness/
 .claude/skills/
 config/models.json
+.coverage

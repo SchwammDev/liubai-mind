@@ -14,9 +14,7 @@ const GLOBAL_RULES = join(homedir(), ".pi/agent/command-rules.json");
 const PROJECT_RULES =
   process.env.LIUBAI_RAILS_RULES ?? join(import.meta.dirname, "../../command-rules.json");
 
-const HOOK_DIR =
-  process.env.LIUBAI_RAILS_HOOK_DIR ??
-  join(homedir(), "code/dotfiles/claude/code/.claude-utils/hooks");
+const HOOK_DIR = join(import.meta.dirname, "hooks");
 
 const RAILS = [
   "no_added_comments.py",
