@@ -1,8 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 import {
   selectMode,
+  loadComplexityMap,
   aggregateUsage,
   getFinalOutput,
   getResultOutput,
@@ -29,20 +33,25 @@ const childResult = (overrides: Partial<SingleResult>): SingleResult => ({
   ...overrides,
 });
 
-test("a lone task selects single mode", () => {
-  const selection = selectMode({ task: "summarize the changelog" });
+test("a lone task with a complexity selects single mode", () => {
+  const selection = selectMode({ task: "summarize the changelog", complexity: "easy" });
 
   assert.deepEqual(selection, { kind: "single" });
 });
 
-test("a tasks array selects parallel mode", () => {
-  const selection = selectMode({ tasks: [{ task: "lint" }, { task: "typecheck" }] });
+test("a tasks array with complexities selects parallel mode", () => {
+  const selection = selectMode({
+    tasks: [
+      { task: "lint", complexity: "trivial" },
+      { task: "typecheck", complexity: "medium" },
+    ],
+  });
 
   assert.deepEqual(selection, { kind: "parallel" });
 });
 
 test("providing both task and tasks is rejected as ambiguous", () => {
-  const selection = selectMode({ task: "one", tasks: [{ task: "two" }] });
+  const selection = selectMode({ task: "one", complexity: "easy", tasks: [{ task: "two", complexity: "easy" }] });
 
   assert.equal(selection.kind, "error");
 });
@@ -54,11 +63,94 @@ test("providing neither task nor tasks is rejected", () => {
 });
 
 test("more parallel tasks than the cap are rejected", () => {
-  const tooMany = Array.from({ length: MAX_PARALLEL_TASKS + 1 }, (_, i) => ({ task: `task ${i}` }));
+  const tooMany = Array.from({ length: MAX_PARALLEL_TASKS + 1 }, (_, i) => ({
+    task: `task ${i}`,
+    complexity: "easy",
+  }));
 
   const selection = selectMode({ tasks: tooMany });
 
   assert.equal(selection.kind, "error");
+});
+
+test("a single task without a complexity is rejected", () => {
+  const selection = selectMode({ task: "summarize the changelog" });
+
+  assert.equal(selection.kind, "error");
+});
+
+test("an unknown complexity value is rejected", () => {
+  const selection = selectMode({ task: "summarize the changelog", complexity: "impossible" });
+
+  assert.equal(selection.kind, "error");
+});
+
+test("a parallel task item without a complexity is rejected", () => {
+  const selection = selectMode({ tasks: [{ task: "lint", complexity: "easy" }, { task: "typecheck" }] });
+
+  assert.equal(selection.kind, "error");
+});
+
+const complexityConfigFile = (contents: string): string => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "complexity-"));
+  const file = path.join(dir, "complexity.json");
+  fs.writeFileSync(file, contents);
+  return file;
+};
+
+const FULL_TIER_MAP = { trivial: "t-model", easy: "e-model", medium: "m-model", hard: "h-model" };
+
+test("a valid config maps every complexity tier to its model id", () => {
+  const file = complexityConfigFile(JSON.stringify(FULL_TIER_MAP));
+
+  const map = loadComplexityMap(file);
+
+  assert.deepEqual(map, FULL_TIER_MAP);
+});
+
+test("a missing config file errors naming the path and the example file", () => {
+  const missing = path.join(os.tmpdir(), "does-not-exist", "complexity.json");
+
+  assert.throws(() => loadComplexityMap(missing), (e: Error) => {
+    assert.match(e.message, new RegExp(missing.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(e.message, /complexity\.example\.json/);
+    return true;
+  });
+});
+
+test("malformed JSON in the config errors naming the path", () => {
+  const file = complexityConfigFile("{ not json");
+
+  assert.throws(() => loadComplexityMap(file), (e: Error) => {
+    assert.match(e.message, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(e.message, /complexity\.example\.json/);
+    return true;
+  });
+});
+
+test("a config missing a tier is rejected", () => {
+  const { hard, ...incomplete } = FULL_TIER_MAP;
+  const file = complexityConfigFile(JSON.stringify(incomplete));
+
+  assert.throws(() => loadComplexityMap(file), /hard/);
+});
+
+test("a config with an unknown extra key is rejected", () => {
+  const file = complexityConfigFile(JSON.stringify({ ...FULL_TIER_MAP, extreme: "x-model" }));
+
+  assert.throws(() => loadComplexityMap(file), /extreme/);
+});
+
+test("an empty model id is rejected", () => {
+  const file = complexityConfigFile(JSON.stringify({ ...FULL_TIER_MAP, easy: "" }));
+
+  assert.throws(() => loadComplexityMap(file), /easy/);
+});
+
+test("a non-string model id is rejected", () => {
+  const file = complexityConfigFile(JSON.stringify({ ...FULL_TIER_MAP, medium: 42 }));
+
+  assert.throws(() => loadComplexityMap(file), /medium/);
 });
 
 test("a report under the cap is accepted", () => {

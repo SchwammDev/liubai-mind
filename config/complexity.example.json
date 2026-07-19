@@ -1,0 +1,6 @@
+{
+  "trivial": "small-model-id",
+  "easy": "mid-model-id",
+  "medium": "reasoning-model-id",
+  "hard": "flagship-model-id"
+}

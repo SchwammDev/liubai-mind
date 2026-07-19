@@ -45,9 +45,64 @@ export interface SingleResult {
   finalReport?: string;
 }
 
+export const COMPLEXITY_LEVELS = ["trivial", "easy", "medium", "hard"] as const;
+export type Complexity = (typeof COMPLEXITY_LEVELS)[number];
+
+function isComplexity(value: unknown): value is Complexity {
+  return COMPLEXITY_LEVELS.includes(value as Complexity);
+}
+
+const COMPLEXITY_EXAMPLE = "config/complexity.example.json";
+
+export function defaultComplexityConfigPath(): string {
+  return path.join(os.homedir(), ".pi", "agent", "complexity.json");
+}
+
+export type ComplexityMap = Record<Complexity, string>;
+
+export function loadComplexityMap(configPath: string = defaultComplexityConfigPath()): ComplexityMap {
+  const remedy = `Copy ${COMPLEXITY_EXAMPLE} from the repo to ${configPath} and fill in real model ids.`;
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, "utf8");
+  } catch {
+    throw new Error(`Complexity config not found at ${configPath}. ${remedy}`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`Complexity config at ${configPath} is not valid JSON. ${remedy}`);
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Complexity config at ${configPath} must be a flat object. ${remedy}`);
+  }
+
+  const entries = parsed as Record<string, unknown>;
+  for (const key of Object.keys(entries)) {
+    if (!isComplexity(key)) {
+      throw new Error(`Complexity config at ${configPath} has unknown key "${key}". Allowed keys: ${COMPLEXITY_LEVELS.join(", ")}. ${remedy}`);
+    }
+  }
+  for (const level of COMPLEXITY_LEVELS) {
+    const value = entries[level];
+    if (typeof value !== "string" || value.trim() === "") {
+      throw new Error(`Complexity config at ${configPath} needs a non-empty model id string for "${level}". ${remedy}`);
+    }
+  }
+  return entries as ComplexityMap;
+}
+
 export type ModeSelection = { kind: "single" } | { kind: "parallel" } | { kind: "error"; message: string };
 
-export function selectMode(params: { task?: string; tasks?: { task: string; model?: string }[] }): ModeSelection {
+export function selectMode(params: {
+  task?: string;
+  complexity?: string;
+  tasks?: { task: string; complexity?: string }[];
+}): ModeSelection {
   const hasSingle = Boolean(params.task && params.task.trim());
   const hasParallel = (params.tasks?.length ?? 0) > 0;
 
@@ -59,6 +114,19 @@ export function selectMode(params: { task?: string; tasks?: { task: string; mode
   }
   if (hasParallel && params.tasks!.length > MAX_PARALLEL_TASKS) {
     return { kind: "error", message: `Too many parallel tasks (${params.tasks!.length}). Max is ${MAX_PARALLEL_TASKS}.` };
+  }
+
+  const complexityError = (value: unknown) =>
+    ({
+      kind: "error",
+      message: `complexity is required and must be one of ${COMPLEXITY_LEVELS.join(" | ")} (got ${JSON.stringify(value)}).`,
+    }) as const;
+
+  if (hasSingle && !isComplexity(params.complexity)) return complexityError(params.complexity);
+  if (hasParallel) {
+    for (const t of params.tasks!) {
+      if (!isComplexity(t.complexity)) return complexityError(t.complexity);
+    }
   }
   return hasParallel ? { kind: "parallel" } : { kind: "single" };
 }
