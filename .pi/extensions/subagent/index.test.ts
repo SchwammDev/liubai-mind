@@ -19,6 +19,7 @@ import {
   canSpawn,
   childDepthOf,
   currentDepth,
+  isFailedResult,
   type SingleResult,
 } from "./child.ts";
 
@@ -264,6 +265,18 @@ test("a failed child surfaces its error message over its partial output", () => 
   });
 
   assert.equal(getResultOutput(failed), "provider timed out");
+});
+
+test("a child that exits cleanly without settling is a failed result", () => {
+  const unsettled = childResult({ exitCode: 0, settled: false });
+
+  assert.equal(isFailedResult(unsettled), true);
+});
+
+test("a settled clean exit stays a successful result", () => {
+  const settled = childResult({ exitCode: 0, settled: true });
+
+  assert.equal(isFailedResult(settled), false);
 });
 
 test("only the top depth may spawn", () => {
