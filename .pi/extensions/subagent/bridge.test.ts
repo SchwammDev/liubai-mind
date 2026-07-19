@@ -127,8 +127,18 @@ test("AskBridge forwards a confirm request and writes {id, confirmed}", async ()
 
   await bridge.handle({ type: "extension_ui_request", id: "c1", method: "confirm", title: "T", message: "M" });
 
-  assert.deepEqual(f.confirmCalls, [{ title: "T", message: "M", opts: { signal: undefined } }]);
+  assert.deepEqual(f.confirmCalls, [{ title: "T", message: "M", opts: { signal: undefined, timeout: undefined } }]);
   assert.deepEqual(w.json(0), { type: "extension_ui_response", id: "c1", confirmed: true });
+});
+
+test("a child ask's timeout is forwarded to the parent dialog", async () => {
+  const f = new FakeForwarder();
+  const w = new FakeWriter();
+  const bridge = new AskBridge(f, (l) => w.write(l));
+
+  await bridge.handle({ type: "extension_ui_request", id: "c1", method: "confirm", title: "T", message: "M", timeout: 5000 });
+
+  assert.equal(f.confirmCalls[0].opts.timeout, 5000);
 });
 
 test("AskBridge select writes {id, value} for a string and {id, cancelled} for undefined", async () => {

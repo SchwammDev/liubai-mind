@@ -116,7 +116,7 @@ export class AskBridge {
       return;
     }
 
-    const opts = { signal: this.signal };
+    const opts = { signal: this.signal, timeout: req.timeout };
 
     try {
       if (req.method === "confirm") {
