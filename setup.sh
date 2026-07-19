@@ -7,7 +7,8 @@
 #   4. PATH command     (`liubai` available everywhere)
 #
 # Model config (~/.pi/agent/models.json) is owned by the dotfiles repo and
-# linked by its stow install — not created here.
+# linked by its stow install — not created here. The agent memory file
+# (~/.pi/agent/CLAUDE.md) is owned by the user and not touched here.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,9 +30,6 @@ step "pinned pi engine"
 step "global steering rails"
 mkdir -p "$AGENT_DIR/extensions"
 ln -sfn "$REPO/.pi/extensions/rails" "$AGENT_DIR/extensions/rails"
-
-step "global memory"
-ln -sfn "$HOME/.claude/CLAUDE.md" "$AGENT_DIR/CLAUDE.md"
 
 step "liubai command"
 mkdir -p "$LOCAL_BIN"
