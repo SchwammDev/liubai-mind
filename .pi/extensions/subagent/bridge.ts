@@ -63,7 +63,7 @@ export function processRpcLine(line: string, acc: Accumulator, bridge: AskBridge
   }
 
   if (event.type === "extension_ui_request") {
-    bridge.handle(event);
+    bridge.handle(event).catch(() => {});
     return { settled: false };
   }
 

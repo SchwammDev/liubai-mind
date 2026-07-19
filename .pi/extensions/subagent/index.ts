@@ -65,8 +65,17 @@ function spawnRpcTransport(
   });
 
   let stdoutBuffer = "";
+  let closed = false;
   const lineCbs: ((line: string) => void)[] = [];
   const closeCbs: ((code: number | null) => void)[] = [];
+
+  const fireClose = (code: number | null) => {
+    if (closed) return;
+    closed = true;
+    if (stdoutBuffer.trim()) for (const cb of lineCbs) cb(stdoutBuffer);
+    stdoutBuffer = "";
+    for (const cb of closeCbs) cb(code);
+  };
 
   proc.stdout.on("data", (data: Buffer) => {
     stdoutBuffer += data.toString();
@@ -79,11 +88,14 @@ function spawnRpcTransport(
     onStderr(data.toString());
   });
 
-  proc.on("close", (code) => {
-    if (stdoutBuffer.trim()) for (const cb of lineCbs) cb(stdoutBuffer);
-    stdoutBuffer = "";
-    for (const cb of closeCbs) cb(code);
-  });
+  // A dead child's stdin rejects writes with EPIPE (a late extension_ui_response
+  // after the child exited); swallow it so the parent doesn't crash. proc 'error'
+  // covers spawn failure (binary not found) — the old json driver resolved 1.
+  proc.stdin.on("error", () => {});
+  proc.stdout.on("error", () => {});
+  proc.stderr.on("error", () => {});
+  proc.on("error", () => fireClose(1));
+  proc.on("close", (code) => fireClose(code ?? 1));
 
   return {
     write: (line: string) => proc.stdin.write(line + "\n"),
@@ -92,7 +104,7 @@ function spawnRpcTransport(
     kill: () => {
       proc.kill("SIGTERM");
       setTimeout(() => {
-        if (!proc.killed) proc.kill("SIGKILL");
+        if (!closed) proc.kill("SIGKILL");
       }, 5000);
     },
   };
