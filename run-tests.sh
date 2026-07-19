@@ -14,7 +14,7 @@ PY_DIR="$ROOT/.pi/extensions/rails/hooks"
 args=("$@")
 ts_args=("${args[@]}")
 py_args=("${args[@]}")
-[ ${#args[@]} -eq 0 ] && ts_args=("$TS_DIR"/*.test.ts)
+[ ${#args[@]} -eq 0 ] && ts_args=("$TS_DIR"/*.test.ts "$ROOT/.pi/extensions/subagent"/*.test.ts)
 [ ${#args[@]} -eq 0 ] && py_args=("$PY_DIR")
 
 status=0
