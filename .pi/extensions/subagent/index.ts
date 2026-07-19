@@ -113,7 +113,6 @@ function spawnRpcTransport(
 async function gateChildReport(
   result: SingleResult,
   session: ChildSession,
-  signal: AbortSignal | undefined,
   onUpdate: ChildUpdate | undefined,
 ): Promise<void> {
   const emitUpdate = () => onUpdate?.(result);
@@ -197,7 +196,7 @@ async function runChild(
     if (t.aborted) throw new Error("Spawned child was aborted");
 
     if (!isFailedResult(result)) {
-      await gateChildReport(result, session, signal, onUpdate);
+      await gateChildReport(result, session, onUpdate);
     }
   } finally {
     session.close();
