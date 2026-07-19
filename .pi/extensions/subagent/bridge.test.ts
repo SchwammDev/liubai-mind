@@ -238,15 +238,16 @@ test("processRpcLine pushes a message_end assistant message, sums usage, and sta
   assert.equal(acc.stopReason, "end");
 });
 
-test("processRpcLine pushes a tool_result_end message and stays unsettled", () => {
+test("processRpcLine accumulates a toolResult message arriving via message_end", () => {
   const acc = makeAcc();
   const bridge = new AskBridge(new FakeForwarder(), () => {});
-  const msg = { role: "tool", content: [{ type: "toolResult", toolCallId: "t1", content: "ok" }] };
+  const msg = { role: "toolResult", content: [{ type: "toolResult", toolCallId: "t1", content: "ok" }] };
 
-  const outcome = processRpcLine(JSON.stringify({ type: "tool_result_end", message: msg }), acc, bridge);
+  const outcome = processRpcLine(JSON.stringify({ type: "message_end", message: msg }), acc, bridge);
 
   assert.equal(outcome.settled, false);
   assert.equal(acc.messages.length, 1);
+  assert.equal(acc.usage.turns, 0);
 });
 
 test("processRpcLine does not resolve on agent_end with willRetry false", () => {
