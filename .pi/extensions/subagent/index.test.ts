@@ -256,6 +256,14 @@ test("the last assistant text is returned as the final output", () => {
   assert.equal(getFinalOutput(messages as any), "final answer");
 });
 
+test("a failed child's output is capped at the report limit with a truncation notice", () => {
+  const failed = childResult({ exitCode: 1, stderr: "x".repeat(3 * REPORT_CAP) });
+
+  const output = getResultOutput(failed);
+
+  assert.equal(output, `${"x".repeat(REPORT_CAP)}\n\n${truncationNotice(2 * REPORT_CAP)}`);
+});
+
 test("a failed child surfaces its error message over its partial output", () => {
   const failed = childResult({
     exitCode: 1,
