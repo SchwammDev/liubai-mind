@@ -18,9 +18,11 @@ import {
   getPiInvocation,
   getResultOutput,
   isFailedResult,
+  loadComplexityMap,
   MAX_CONCURRENCY,
   mapWithConcurrencyLimit,
   selectMode,
+  type ComplexityMap,
   type SingleResult,
   taskPreview,
   compressPrompt,
@@ -145,17 +147,14 @@ async function runPiTurn(
   return { exitCode, aborted: wasAborted };
 }
 
-function bounceArgs(sessionId: string, model: string | undefined, prompt: string): string[] {
-  const args: string[] = ["--mode", "json", "-p", "--session", sessionId];
-  if (model) args.push("--model", model);
-  args.push(prompt);
-  return args;
+function bounceArgs(sessionId: string, model: string, prompt: string): string[] {
+  return ["--mode", "json", "-p", "--session", sessionId, "--model", model, prompt];
 }
 
 async function gateChildReport(
   cwd: string,
   result: SingleResult,
-  model: string | undefined,
+  model: string,
   depthEnv: string,
   signal: AbortSignal | undefined,
   onUpdate: ChildUpdate | undefined,
@@ -199,7 +198,7 @@ async function gateChildReport(
 async function runChild(
   cwd: string,
   task: string,
-  model: string | undefined,
+  model: string,
   signal: AbortSignal | undefined,
   onUpdate: ChildUpdate | undefined,
 ): Promise<SingleResult> {
@@ -213,9 +212,7 @@ async function runChild(
     model,
   };
 
-  const args: string[] = ["--mode", "json", "-p"];
-  if (model) args.push("--model", model);
-  args.push(`Task: ${task}`);
+  const args: string[] = ["--mode", "json", "-p", "--model", model, `Task: ${task}`];
 
   const { exitCode, aborted } = await runPiTurn(cwd, args, result, depthEnv, signal, onUpdate);
   result.exitCode = exitCode;
@@ -227,15 +224,30 @@ async function runChild(
   return result;
 }
 
+const COMPLEXITY_DESCRIPTION = [
+  "Task difficulty; the extension resolves the child model from it.",
+  "Required — in single mode alongside task, and on every item in tasks.",
+  "trivial — mechanical, zero judgment: rename, typo, apply stated pattern verbatim.",
+  "easy — one obvious change, approach clear before starting, single file/function.",
+  "medium — several steps, minor exploration needed, approach settles after a quick look.",
+  "hard — design judgment, multi-step debugging, or synthesis across components.",
+].join(" ");
+
+const complexityParam = () =>
+  Type.Union(
+    [Type.Literal("trivial"), Type.Literal("easy"), Type.Literal("medium"), Type.Literal("hard")],
+    { description: COMPLEXITY_DESCRIPTION },
+  );
+
 const TaskItem = Type.Object({
   task: Type.String({ description: "Task to delegate to the child" }),
-  model: Type.Optional(Type.String({ description: "Model for the child process" })),
+  complexity: complexityParam(),
 });
 
 const SpawnParams = Type.Object({
   task: Type.Optional(Type.String({ description: "Task to delegate (single mode)" })),
-  model: Type.Optional(Type.String({ description: "Model for the child process (single mode)" })),
-  tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {task, model?} for parallel execution" })),
+  complexity: Type.Optional(complexityParam()),
+  tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {task, complexity} for parallel execution" })),
 });
 
 export function register(pi: ExtensionAPI): void {
@@ -259,6 +271,17 @@ export function register(pi: ExtensionAPI): void {
         };
       }
 
+      let complexityMap: ComplexityMap;
+      try {
+        complexityMap = loadComplexityMap();
+      } catch (e) {
+        return {
+          content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
+          details: makeDetails(selection.kind)([]),
+          isError: true,
+        };
+      }
+
       if (selection.kind === "parallel") {
         const tasks = params.tasks!;
         const allResults: SingleResult[] = tasks.map((t) => ({
@@ -267,7 +290,7 @@ export function register(pi: ExtensionAPI): void {
           messages: [],
           stderr: "",
           usage: emptyUsage(),
-          model: t.model,
+          model: complexityMap[t.complexity],
         }));
 
         const emitParallelUpdate = () => {
@@ -281,7 +304,7 @@ export function register(pi: ExtensionAPI): void {
         };
 
         const results = await mapWithConcurrencyLimit(tasks, MAX_CONCURRENCY, async (t, index) => {
-          const result = await runChild(ctx.cwd, t.task, t.model, signal, (r) => {
+          const result = await runChild(ctx.cwd, t.task, complexityMap[t.complexity], signal, (r) => {
             allResults[index] = r;
             emitParallelUpdate();
           });
@@ -317,7 +340,7 @@ export function register(pi: ExtensionAPI): void {
             })
         : undefined;
 
-      const result = await runChild(ctx.cwd, params.task!, params.model, signal, childUpdate);
+      const result = await runChild(ctx.cwd, params.task!, complexityMap[params.complexity!], signal, childUpdate);
       if (isFailedResult(result)) {
         return {
           content: [{ type: "text", text: `Child ${result.stopReason || "failed"}: ${getResultOutput(result)}` }],
