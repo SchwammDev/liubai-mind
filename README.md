@@ -6,23 +6,33 @@
 
 Steer agents with deterministic guardrails and dense, minimal communication — so a cheap model behaves well, and a strong one isn't drowned in noise. Domain-general: code, writing, research.
 
-See [`docs/vision.md`](docs/vision.md) for principles, [`docs/landscape.md`](docs/landscape.md) for the tool survey, [`docs/next-steps.md`](docs/next-steps.md) for the build plan.
+Principles in [`docs/vision.md`](docs/vision.md); how the steering is built in [`docs/architecture.md`](docs/architecture.md); why this engine in [`docs/landscape.md`](docs/landscape.md).
 
-## Model
+## Install
 
-Not pinned. Pick in-session (`Ctrl+P`) or via `pi config`. Choice persists to `~/.pi/agent/settings.json` — local, not version-controlled. Catalog of available models lives in `~/.pi/agent/models.json` (stowed from dotfiles).
+```
+./setup.sh
+```
 
-## Upgrade
+mise + node@22, the pinned pi engine, the global steering rails, and a `liubai` command on PATH. Idempotent — re-run is safe.
 
-`mise exec -- npm install @earendil-works/pi-coding-agent@<version> --save-exact`
+## Run
 
-## Command gating
+```
+liubai            # steering on (default)
+LIUBAI_RAILS_OFF=1 liubai ...   # un-steered baseline, same engine
+liubai update [version]         # bump the pinned engine (review + commit the lockfile)
+```
 
-Gate bash commands by rule, not code. `.pi/command-rules.json` (project) merges over `~/.pi/agent/command-rules.json` (global); project wins per list. Three regex lists — `deny`, `ask`, `allow` — matched against the command string. Precedence `deny > allow > ask`; unmatched runs. `ask` prompts for confirmation (blocks in headless `-p`). Missing file → no gating. Copy [`.pi/command-rules.example.json`](.pi/command-rules.example.json) to start.
+## Configure
 
-## Web search
+**Model** — not pinned. Pick in-session (`Ctrl+P`) or via `pi config`; persists to `~/.pi/agent/settings.json` (local, not version-controlled). Catalog in `~/.pi/agent/models.json`.
 
-On the TU Wien aqueduct provider, every request carries a server-side `web_search` tool — the gateway's OpenAI Responses API executes the search itself, so no client tool-calling is involved and weak-model tool fragility doesn't apply. Requires `api: "openai-responses"` on the provider in `~/.pi/agent/models.json`. Scoped to aqueduct; on paid providers the same tool type would incur cost. Stays active under `LIUBAI_RAILS_OFF`: capability, not steering.
+**Memory** — `~/.pi/agent/CLAUDE.md`, owned by you. Edit it directly to steer every session; setup neither creates nor links it.
+
+**Command gating** — `.pi/command-rules.json` (project) merges over `~/.pi/agent/command-rules.json` (global); project wins per list. Three regex lists — `deny`, `ask`, `allow` — matched against the command string. Precedence `deny > allow > ask`; unmatched runs. `ask` prompts (blocks headless). Copy [`.pi/command-rules.example.json`](.pi/command-rules.example.json) to start.
+
+**Web search** — on the TU Wien aqueduct provider the gateway runs `web_search` server-side, so it works even on models with unreliable tool-calling. Scoped to aqueduct; on paid providers the same tool type would incur cost. Stays on under `LIUBAI_RAILS_OFF` (capability, not steering).
 
 ## License
 
