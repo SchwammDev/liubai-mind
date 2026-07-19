@@ -6,7 +6,10 @@ import { Type } from "typebox";
 
 import {
   aggregateUsage,
+  canSpawn,
+  childDepthOf,
   COLLAPSED_ITEM_COUNT,
+  currentDepth,
   type DisplayItem,
   formatToolCall,
   formatUsageStats,
@@ -66,6 +69,7 @@ async function runChild(
       cwd,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, LIUBAI_SPAWN_DEPTH: String(childDepthOf(currentDepth())) },
     });
     let buffer = "";
 
@@ -156,6 +160,8 @@ const SpawnParams = Type.Object({
 });
 
 export function register(pi: ExtensionAPI): void {
+  if (!canSpawn(currentDepth())) return;
+
   pi.registerTool({
     name: "spawn",
     label: "Spawn",

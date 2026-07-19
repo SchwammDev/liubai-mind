@@ -41,7 +41,7 @@ The bridge in `index.ts` (`claudePayload`, `runRail`) maps pi's tool names onto 
 
 `.pi/extensions/subagent/` — a generic `spawn` tool, loaded globally by `setup.sh` into `~/.pi/agent/extensions/subagent`. It spawns a child `pi --mode json -p --no-session` per task with an isolated context window; the child's final report lands in the parent. Two modes: single (`task`) and parallel (`tasks` array, capped at 8, concurrency 4). The `task` string carries everything — no role roster, no per-spawn system prompt. Children inherit the rails through the same global extensions dir.
 
-Kept separate from rails because their lifecycles are opposite: rails inherit *into* children, whereas spawn must self-disable past a depth cap (a later issue) so a child cannot recurse without bound.
+Kept separate from rails because their lifecycles are opposite: rails inherit *into* children, whereas spawn self-disables past a depth cap so a child cannot recurse without bound. The cap rides `LIUBAI_SPAWN_DEPTH` (default 0); `register` skips the tool entirely at depth ≥ `MAX_DEPTH` (1), so spawn is absent — not merely blocked — in children. `runChild` sets the child's depth one above the parent's.
 
 ## Extending
 

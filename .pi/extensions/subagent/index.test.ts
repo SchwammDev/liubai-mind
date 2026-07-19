@@ -9,6 +9,9 @@ import {
   getResultOutput,
   MAX_PARALLEL_TASKS,
   PER_TASK_OUTPUT_CAP,
+  canSpawn,
+  childDepthOf,
+  currentDepth,
   type SingleResult,
 } from "./child.ts";
 
@@ -99,4 +102,49 @@ test("a failed child surfaces its error message over its partial output", () => 
   });
 
   assert.equal(getResultOutput(failed), "provider timed out");
+});
+
+test("only the top depth may spawn", () => {
+  assert.equal(canSpawn(0), true);
+  assert.equal(canSpawn(1), false);
+  assert.equal(canSpawn(2), false);
+});
+
+test("a child sits one level below its parent", () => {
+  assert.equal(childDepthOf(0), 1);
+  assert.equal(childDepthOf(1), 2);
+});
+
+test("a missing or malformed depth falls back to the top", () => {
+  const saved = process.env.LIUBAI_SPAWN_DEPTH;
+  try {
+    delete process.env.LIUBAI_SPAWN_DEPTH;
+    assert.equal(currentDepth(), 0);
+
+    process.env.LIUBAI_SPAWN_DEPTH = "abc";
+    assert.equal(currentDepth(), 0);
+
+    process.env.LIUBAI_SPAWN_DEPTH = "2";
+    assert.equal(currentDepth(), 2);
+
+    process.env.LIUBAI_SPAWN_DEPTH = "-1";
+    assert.equal(currentDepth(), 0);
+  } finally {
+    if (saved === undefined) delete process.env.LIUBAI_SPAWN_DEPTH;
+    else process.env.LIUBAI_SPAWN_DEPTH = saved;
+  }
+});
+
+test("at the capped depth a child may not spawn, but the top may", () => {
+  const saved = process.env.LIUBAI_SPAWN_DEPTH;
+  try {
+    process.env.LIUBAI_SPAWN_DEPTH = "1";
+    assert.equal(canSpawn(currentDepth()), false);
+
+    delete process.env.LIUBAI_SPAWN_DEPTH;
+    assert.equal(canSpawn(currentDepth()), true);
+  } finally {
+    if (saved === undefined) delete process.env.LIUBAI_SPAWN_DEPTH;
+    else process.env.LIUBAI_SPAWN_DEPTH = saved;
+  }
 });
