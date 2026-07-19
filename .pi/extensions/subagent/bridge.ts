@@ -72,15 +72,33 @@ export function processRpcLine(line: string, acc: Accumulator, bridge: AskBridge
   return { settled: false };
 }
 
+// The parent TUI shows one extension dialog at a time; a second concurrent
+// dialog silently replaces the first and its promise never resolves. Chaining
+// every dialog through a shared gate keeps parallel children's asks queued.
+export class DialogGate {
+  private chain: Promise<unknown> = Promise.resolve();
+
+  enqueue<T>(skipValue: T, signal: AbortSignal | undefined, show: () => Promise<T>): Promise<T> {
+    const turn = this.chain.then(() => (signal?.aborted ? skipValue : show()));
+    this.chain = turn.then(
+      () => undefined,
+      () => undefined,
+    );
+    return turn;
+  }
+}
+
 export class AskBridge {
   private readonly signal?: AbortSignal;
   private readonly forwarder: UiForwarder;
   private readonly writer: (line: string) => void;
+  private readonly gate: DialogGate;
 
-  constructor(forwarder: UiForwarder, writer: (line: string) => void, signal?: AbortSignal) {
+  constructor(forwarder: UiForwarder, writer: (line: string) => void, signal?: AbortSignal, gate?: DialogGate) {
     this.forwarder = forwarder;
     this.writer = writer;
     this.signal = signal;
+    this.gate = gate ?? new DialogGate();
   }
 
   async handle(req: any): Promise<void> {
@@ -102,12 +120,16 @@ export class AskBridge {
 
     try {
       if (req.method === "confirm") {
-        const confirmed = await this.forwarder.confirm(req.title, req.message, opts);
+        const confirmed = await this.gate.enqueue(false, this.signal, () =>
+          this.forwarder.confirm(req.title, req.message, opts),
+        );
         this.writeResponse({ type: "extension_ui_response", id: req.id, confirmed });
         return;
       }
       if (req.method === "select") {
-        const value = await this.forwarder.select(req.title, req.options, opts);
+        const value = await this.gate.enqueue<string | undefined>(undefined, this.signal, () =>
+          this.forwarder.select(req.title, req.options, opts),
+        );
         this.writeResponse(
           value === undefined
             ? { type: "extension_ui_response", id: req.id, cancelled: true }
@@ -116,7 +138,9 @@ export class AskBridge {
         return;
       }
       if (req.method === "input") {
-        const value = await this.forwarder.input(req.title, req.placeholder, opts);
+        const value = await this.gate.enqueue<string | undefined>(undefined, this.signal, () =>
+          this.forwarder.input(req.title, req.placeholder, opts),
+        );
         this.writeResponse(
           value === undefined
             ? { type: "extension_ui_response", id: req.id, cancelled: true }
@@ -125,7 +149,9 @@ export class AskBridge {
         return;
       }
       if (req.method === "editor") {
-        const value = await this.forwarder.editor(req.title, req.prefill);
+        const value = await this.gate.enqueue<string | undefined>(undefined, this.signal, () =>
+          this.forwarder.editor(req.title, req.prefill),
+        );
         this.writeResponse(
           value === undefined
             ? { type: "extension_ui_response", id: req.id, cancelled: true }
@@ -160,12 +186,13 @@ export class ChildSession {
     acc: Accumulator,
     onUpdate?: () => void,
     signal?: AbortSignal,
+    gate?: DialogGate,
   ) {
     this.transport = transport;
     this.acc = acc;
     this.onUpdate = onUpdate;
     this.signal = signal;
-    this.bridge = new AskBridge(forwarder, (line) => transport.write(line), this.dialogController.signal);
+    this.bridge = new AskBridge(forwarder, (line) => transport.write(line), this.dialogController.signal, gate);
 
     transport.onLine((line) => {
       const out = processRpcLine(line, this.acc, this.bridge);

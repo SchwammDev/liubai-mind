@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   AskBridge,
   ChildSession,
+  DialogGate,
   processRpcLine,
   type ChildTransport,
   type UiForwarder,
@@ -41,6 +42,8 @@ class FakeForwarder implements UiForwarder {
   confirmResult = true;
   confirmShouldThrow = false;
   confirmPending = false;
+  confirmManual = false;
+  pendingConfirms: Array<(confirmed: boolean) => void> = [];
   selectResult: string | undefined = "chosen";
   inputResult: string | undefined = "typed";
   editorResult: string | undefined = "edited";
@@ -48,6 +51,12 @@ class FakeForwarder implements UiForwarder {
   confirm(title: string, message: string, opts?: any) {
     this.confirmCalls.push({ title, message, opts });
     if (this.confirmShouldThrow) return Promise.reject(new Error("nope"));
+    if (this.confirmManual) {
+      return new Promise<boolean>((resolve) => {
+        this.pendingConfirms.push(resolve);
+        opts?.signal?.addEventListener("abort", () => resolve(false), { once: true });
+      });
+    }
     if (this.confirmPending) {
       return new Promise<boolean>((resolve) => {
         opts?.signal?.addEventListener("abort", () => resolve(false), { once: true });
@@ -386,6 +395,70 @@ test("a pending parent confirm is dismissed on parent abort", async () => {
 
   const result = await p;
   assert.deepEqual(result, { settled: false, exitCode: 1, aborted: true });
+});
+
+test("concurrent asks from two children show one parent dialog at a time", async () => {
+  const gate = new DialogGate();
+  const f = new FakeForwarder();
+  f.confirmManual = true;
+  const t1 = new FakeTransport();
+  const t2 = new FakeTransport();
+  const s1 = new ChildSession(t1, f, makeAcc(), undefined, undefined, gate);
+  const s2 = new ChildSession(t2, f, makeAcc(), undefined, undefined, gate);
+
+  const p1 = s1.sendPrompt("task1");
+  const p2 = s2.sendPrompt("task2");
+  t1.emitLine(JSON.stringify({ type: "extension_ui_request", id: "a1", method: "confirm", title: "t1", message: "m1" }));
+  t2.emitLine(JSON.stringify({ type: "extension_ui_request", id: "a2", method: "confirm", title: "t2", message: "m2" }));
+  await flush();
+
+  assert.equal(f.confirmCalls.length, 1);
+
+  f.pendingConfirms.shift()!(true);
+  await flush();
+
+  assert.equal(f.confirmCalls.length, 2);
+
+  f.pendingConfirms.shift()!(false);
+  await flush();
+
+  const responses1 = t1.writtenJson().filter((o) => o.type === "extension_ui_response");
+  const responses2 = t2.writtenJson().filter((o) => o.type === "extension_ui_response");
+  assert.deepEqual(responses1, [{ type: "extension_ui_response", id: "a1", confirmed: true }]);
+  assert.deepEqual(responses2, [{ type: "extension_ui_response", id: "a2", confirmed: false }]);
+
+  t1.emitLine(JSON.stringify({ type: "agent_settled" }));
+  t2.emitLine(JSON.stringify({ type: "agent_settled" }));
+  await p1;
+  await p2;
+});
+
+test("an ask queued behind another dialog is skipped when its child dies while waiting", async () => {
+  const gate = new DialogGate();
+  const f = new FakeForwarder();
+  f.confirmManual = true;
+  const t1 = new FakeTransport();
+  const t2 = new FakeTransport();
+  const s1 = new ChildSession(t1, f, makeAcc(), undefined, undefined, gate);
+  const s2 = new ChildSession(t2, f, makeAcc(), undefined, undefined, gate);
+
+  const p1 = s1.sendPrompt("task1");
+  const p2 = s2.sendPrompt("task2");
+  t1.emitLine(JSON.stringify({ type: "extension_ui_request", id: "a1", method: "confirm", title: "t1", message: "m1" }));
+  t2.emitLine(JSON.stringify({ type: "extension_ui_request", id: "a2", method: "confirm", title: "t2", message: "m2" }));
+  await flush();
+
+  assert.equal(f.confirmCalls.length, 1);
+
+  t2.emitClose(3);
+  f.pendingConfirms.shift()!(true);
+  await flush();
+
+  assert.equal(f.confirmCalls.length, 1);
+  assert.deepEqual(await p2, { settled: false, exitCode: 3, aborted: false });
+
+  t1.emitLine(JSON.stringify({ type: "agent_settled" }));
+  await p1;
 });
 
 test("parallel children resolve asks independently by id with no cross-talk", async () => {

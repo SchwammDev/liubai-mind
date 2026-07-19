@@ -34,6 +34,7 @@ import {
   type ChildTransport,
   type UiForwarder,
   ChildSession,
+  DialogGate,
 } from "./bridge.ts";
 
 interface SubagentDetails {
@@ -163,6 +164,7 @@ async function runChild(
   model: string,
   signal: AbortSignal | undefined,
   onUpdate: ChildUpdate | undefined,
+  gate: DialogGate,
 ): Promise<SingleResult> {
   const depthEnv = String(childDepthOf(currentDepth()));
   const result: SingleResult = {
@@ -188,7 +190,7 @@ async function runChild(
   const transport = spawnRpcTransport(ctx.cwd, model, depthEnv, (s) => {
     result.stderr += s;
   });
-  const session = new ChildSession(transport, forwarder, result, emitUpdate, signal);
+  const session = new ChildSession(transport, forwarder, result, emitUpdate, signal, gate);
 
   try {
     const t = await session.sendPrompt(`Task: ${task}`);
@@ -232,6 +234,8 @@ const SpawnParams = Type.Object({
 
 export function register(pi: ExtensionAPI): void {
   if (!canSpawn(currentDepth())) return;
+
+  const dialogGate = new DialogGate();
 
   pi.registerTool({
     name: "spawn",
@@ -284,10 +288,17 @@ export function register(pi: ExtensionAPI): void {
         };
 
         const results = await mapWithConcurrencyLimit(tasks, MAX_CONCURRENCY, async (t, index) => {
-          const result = await runChild(ctx, t.task, complexityMap[t.complexity], signal, (r) => {
-            allResults[index] = r;
-            emitParallelUpdate();
-          });
+          const result = await runChild(
+            ctx,
+            t.task,
+            complexityMap[t.complexity],
+            signal,
+            (r) => {
+              allResults[index] = r;
+              emitParallelUpdate();
+            },
+            dialogGate,
+          );
           allResults[index] = result;
           emitParallelUpdate();
           return result;
@@ -320,7 +331,7 @@ export function register(pi: ExtensionAPI): void {
             })
         : undefined;
 
-      const result = await runChild(ctx, params.task!, complexityMap[params.complexity!], signal, childUpdate);
+      const result = await runChild(ctx, params.task!, complexityMap[params.complexity!], signal, childUpdate, dialogGate);
       if (isFailedResult(result)) {
         return {
           content: [{ type: "text", text: `Child ${result.stopReason || "failed"}: ${getResultOutput(result)}` }],
