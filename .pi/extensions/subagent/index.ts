@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import type { Message } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -31,6 +30,11 @@ import {
   truncationNotice,
   type ReportAssessment,
 } from "./child.ts";
+import {
+  type ChildTransport,
+  type UiForwarder,
+  ChildSession,
+} from "./bridge.ts";
 
 interface SubagentDetails {
   mode: "single" | "parallel";
@@ -45,120 +49,63 @@ const emptyUsage = () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, co
 
 type ChildUpdate = (result: SingleResult) => void;
 
-type Accumulator = Pick<SingleResult, "messages" | "usage" | "stderr" | "model" | "stopReason" | "errorMessage" | "sessionId">;
-
-function processJsonLine(line: string, acc: Accumulator, onUpdate: (() => void) | undefined): void {
-  if (!line.trim()) return;
-  let event: any;
-  try {
-    event = JSON.parse(line);
-  } catch {
-    return;
-  }
-
-  if (event.type === "session" && event.id) {
-    acc.sessionId = event.id;
-    onUpdate?.();
-    return;
-  }
-
-  if (event.type === "message_end" && event.message) {
-    const msg = event.message as Message;
-    acc.messages.push(msg);
-    if (msg.role === "assistant") {
-      acc.usage.turns++;
-      const usage = msg.usage;
-      if (usage) {
-        acc.usage.input += usage.input || 0;
-        acc.usage.output += usage.output || 0;
-        acc.usage.cacheRead += usage.cacheRead || 0;
-        acc.usage.cacheWrite += usage.cacheWrite || 0;
-        acc.usage.cost += usage.cost?.total || 0;
-        acc.usage.contextTokens = usage.totalTokens || 0;
-      }
-      if (!acc.model && msg.model) acc.model = msg.model;
-      if (msg.stopReason) acc.stopReason = msg.stopReason;
-      if (msg.errorMessage) acc.errorMessage = msg.errorMessage;
-    }
-    onUpdate?.();
-    return;
-  }
-
-  if (event.type === "tool_result_end" && event.message) {
-    acc.messages.push(event.message as Message);
-    onUpdate?.();
-  }
-}
-
-async function runPiTurn(
+function spawnRpcTransport(
   cwd: string,
-  args: string[],
-  result: SingleResult,
+  model: string,
   depthEnv: string,
-  signal: AbortSignal | undefined,
-  onUpdate: ChildUpdate | undefined,
-): Promise<{ exitCode: number; aborted: boolean }> {
-  const emitUpdate = () => onUpdate?.(result);
-  let buffer = "";
-  let wasAborted = false;
-
-  const exitCode = await new Promise<number>((resolve) => {
-    const invocation = getPiInvocation(args);
-    const proc = spawn(invocation.command, invocation.args, {
-      cwd,
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, LIUBAI_SPAWN_DEPTH: depthEnv },
-    });
-
-    proc.stdout.on("data", (data) => {
-      buffer += data.toString();
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      for (const line of lines) processJsonLine(line, result, emitUpdate);
-    });
-
-    proc.stderr.on("data", (data) => {
-      result.stderr += data.toString();
-    });
-
-    proc.on("close", (code) => {
-      if (buffer.trim()) processJsonLine(buffer, result, emitUpdate);
-      resolve(code ?? 0);
-    });
-
-    proc.on("error", () => {
-      resolve(1);
-    });
-
-    if (signal) {
-      const killProc = () => {
-        wasAborted = true;
-        proc.kill("SIGTERM");
-        setTimeout(() => {
-          if (!proc.killed) proc.kill("SIGKILL");
-        }, 5000);
-      };
-      if (signal.aborted) killProc();
-      else signal.addEventListener("abort", killProc, { once: true });
-    }
+  onStderr: (data: string) => void,
+): ChildTransport {
+  const args = ["--mode", "rpc", "--model", model];
+  const invocation = getPiInvocation(args);
+  const proc = spawn(invocation.command, invocation.args, {
+    cwd,
+    shell: false,
+    stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env, LIUBAI_SPAWN_DEPTH: depthEnv },
   });
 
-  return { exitCode, aborted: wasAborted };
-}
+  let stdoutBuffer = "";
+  const lineCbs: ((line: string) => void)[] = [];
+  const closeCbs: ((code: number | null) => void)[] = [];
 
-function bounceArgs(sessionId: string, model: string, prompt: string): string[] {
-  return ["--mode", "json", "-p", "--session", sessionId, "--model", model, prompt];
+  proc.stdout.on("data", (data: Buffer) => {
+    stdoutBuffer += data.toString();
+    const lines = stdoutBuffer.split("\n");
+    stdoutBuffer = lines.pop() || "";
+    for (const line of lines) for (const cb of lineCbs) cb(line);
+  });
+
+  proc.stderr.on("data", (data: Buffer) => {
+    onStderr(data.toString());
+  });
+
+  proc.on("close", (code) => {
+    if (stdoutBuffer.trim()) for (const cb of lineCbs) cb(stdoutBuffer);
+    stdoutBuffer = "";
+    for (const cb of closeCbs) cb(code);
+  });
+
+  return {
+    write: (line: string) => proc.stdin.write(line + "\n"),
+    onLine: (cb) => lineCbs.push(cb),
+    onClose: (cb) => closeCbs.push(cb),
+    kill: () => {
+      proc.kill("SIGTERM");
+      setTimeout(() => {
+        if (!proc.killed) proc.kill("SIGKILL");
+      }, 5000);
+    },
+  };
 }
 
 async function gateChildReport(
-  cwd: string,
   result: SingleResult,
-  model: string,
-  depthEnv: string,
+  session: ChildSession,
   signal: AbortSignal | undefined,
   onUpdate: ChildUpdate | undefined,
 ): Promise<void> {
+  const emitUpdate = () => onUpdate?.(result);
+
   const rawReport = getFinalOutput(result.messages);
   if (rawReport === "") {
     result.finalReport = "";
@@ -166,17 +113,9 @@ async function gateChildReport(
   }
 
   const compress = async (report: string): Promise<string> => {
-    if (!result.sessionId) throw new Error("no session id to resume for compress bounce");
-    const { exitCode, aborted } = await runPiTurn(
-      cwd,
-      bounceArgs(result.sessionId, model, compressPrompt(report)),
-      result,
-      depthEnv,
-      signal,
-      onUpdate,
-    );
-    if (aborted) throw new Error("compress bounce was aborted");
-    if (exitCode !== 0) throw new Error(`compress bounce exited ${exitCode}`);
+    const r = await session.sendPrompt(compressPrompt(report));
+    emitUpdate();
+    if (!r.settled) throw new Error("compress turn did not settle");
     return getFinalOutput(result.messages);
   };
 
@@ -195,8 +134,20 @@ async function gateChildReport(
       : gated.report;
 }
 
+interface SpawnContext {
+  cwd: string;
+  hasUI: boolean;
+  ui: {
+    confirm: (title: string, message: string, opts?: { signal?: AbortSignal; timeout?: number }) => Promise<boolean>;
+    select: (title: string, options: string[], opts?: { signal?: AbortSignal; timeout?: number }) => Promise<string | undefined>;
+    input: (title: string, placeholder?: string, opts?: { signal?: AbortSignal; timeout?: number }) => Promise<string | undefined>;
+    editor: (title: string, prefill?: string) => Promise<string | undefined>;
+    notify: (message: string, type?: "info" | "warning" | "error") => void;
+  };
+}
+
 async function runChild(
-  cwd: string,
+  ctx: SpawnContext,
   task: string,
   model: string,
   signal: AbortSignal | undefined,
@@ -212,14 +163,32 @@ async function runChild(
     model,
   };
 
-  const args: string[] = ["--mode", "json", "-p", "--model", model, `Task: ${task}`];
+  const emitUpdate = () => onUpdate?.(result);
 
-  const { exitCode, aborted } = await runPiTurn(cwd, args, result, depthEnv, signal, onUpdate);
-  result.exitCode = exitCode;
-  if (aborted) throw new Error("Spawned child was aborted");
+  const forwarder: UiForwarder = {
+    hasUI: ctx.hasUI,
+    confirm: (t, m, o) => ctx.ui.confirm(t, m, o),
+    select: (t, o, s) => ctx.ui.select(t, o, s),
+    input: (t, p, o) => ctx.ui.input(t, p, o),
+    editor: (t, p) => ctx.ui.editor(t, p),
+    notify: (m, ty) => ctx.ui.notify(m, ty),
+  };
 
-  if (!isFailedResult(result)) {
-    await gateChildReport(cwd, result, model, depthEnv, signal, onUpdate);
+  const transport = spawnRpcTransport(ctx.cwd, model, depthEnv, (s) => {
+    result.stderr += s;
+  });
+  const session = new ChildSession(transport, forwarder, result, emitUpdate, signal);
+
+  try {
+    const t = await session.sendPrompt(`Task: ${task}`);
+    result.exitCode = t.exitCode;
+    if (t.aborted) throw new Error("Spawned child was aborted");
+
+    if (!isFailedResult(result)) {
+      await gateChildReport(result, session, signal, onUpdate);
+    }
+  } finally {
+    session.close();
   }
   return result;
 }
@@ -304,7 +273,7 @@ export function register(pi: ExtensionAPI): void {
         };
 
         const results = await mapWithConcurrencyLimit(tasks, MAX_CONCURRENCY, async (t, index) => {
-          const result = await runChild(ctx.cwd, t.task, complexityMap[t.complexity], signal, (r) => {
+          const result = await runChild(ctx, t.task, complexityMap[t.complexity], signal, (r) => {
             allResults[index] = r;
             emitParallelUpdate();
           });
@@ -340,7 +309,7 @@ export function register(pi: ExtensionAPI): void {
             })
         : undefined;
 
-      const result = await runChild(ctx.cwd, params.task!, complexityMap[params.complexity!], signal, childUpdate);
+      const result = await runChild(ctx, params.task!, complexityMap[params.complexity!], signal, childUpdate);
       if (isFailedResult(result)) {
         return {
           content: [{ type: "text", text: `Child ${result.stopReason || "failed"}: ${getResultOutput(result)}` }],
