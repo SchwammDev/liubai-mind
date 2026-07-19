@@ -149,6 +149,7 @@ export class ChildSession {
   private readonly onUpdate?: () => void;
   private readonly signal?: AbortSignal;
   private readonly acc: Accumulator;
+  private readonly dialogController = new AbortController();
   private resolver: ((result: TurnResult) => void) | null = null;
   private abortedFlag = false;
   private abortHandler: (() => void) | null = null;
@@ -164,7 +165,7 @@ export class ChildSession {
     this.acc = acc;
     this.onUpdate = onUpdate;
     this.signal = signal;
-    this.bridge = new AskBridge(forwarder, (line) => transport.write(line), signal);
+    this.bridge = new AskBridge(forwarder, (line) => transport.write(line), this.dialogController.signal);
 
     transport.onLine((line) => {
       const out = processRpcLine(line, this.acc, this.bridge);
@@ -177,6 +178,7 @@ export class ChildSession {
     });
 
     transport.onClose((code) => {
+      this.dialogController.abort();
       if (this.resolver) {
         const resolve = this.resolver;
         this.resolver = null;
@@ -187,6 +189,7 @@ export class ChildSession {
     if (signal) {
       this.abortHandler = () => {
         this.abortedFlag = true;
+        this.dialogController.abort();
         this.transport.kill();
       };
       signal.addEventListener("abort", this.abortHandler, { once: true });
@@ -211,6 +214,7 @@ export class ChildSession {
     if (this.abortHandler && this.signal) {
       this.signal.removeEventListener("abort", this.abortHandler);
     }
+    this.dialogController.abort();
     this.transport.kill();
   }
 }
