@@ -23,7 +23,11 @@ import {
   selectMode,
   type SingleResult,
   taskPreview,
-  truncateChildOutput,
+  compressPrompt,
+  gateReport,
+  hardTruncateReport,
+  truncationNotice,
+  type ReportAssessment,
 } from "./child.ts";
 
 interface SubagentDetails {
@@ -39,28 +43,61 @@ const emptyUsage = () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, co
 
 type ChildUpdate = (result: SingleResult) => void;
 
-async function runChild(
+type Accumulator = Pick<SingleResult, "messages" | "usage" | "stderr" | "model" | "stopReason" | "errorMessage" | "sessionId">;
+
+function processJsonLine(line: string, acc: Accumulator, onUpdate: (() => void) | undefined): void {
+  if (!line.trim()) return;
+  let event: any;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return;
+  }
+
+  if (event.type === "session" && event.id) {
+    acc.sessionId = event.id;
+    onUpdate?.();
+    return;
+  }
+
+  if (event.type === "message_end" && event.message) {
+    const msg = event.message as Message;
+    acc.messages.push(msg);
+    if (msg.role === "assistant") {
+      acc.usage.turns++;
+      const usage = msg.usage;
+      if (usage) {
+        acc.usage.input += usage.input || 0;
+        acc.usage.output += usage.output || 0;
+        acc.usage.cacheRead += usage.cacheRead || 0;
+        acc.usage.cacheWrite += usage.cacheWrite || 0;
+        acc.usage.cost += usage.cost?.total || 0;
+        acc.usage.contextTokens = usage.totalTokens || 0;
+      }
+      if (!acc.model && msg.model) acc.model = msg.model;
+      if (msg.stopReason) acc.stopReason = msg.stopReason;
+      if (msg.errorMessage) acc.errorMessage = msg.errorMessage;
+    }
+    onUpdate?.();
+    return;
+  }
+
+  if (event.type === "tool_result_end" && event.message) {
+    acc.messages.push(event.message as Message);
+    onUpdate?.();
+  }
+}
+
+async function runPiTurn(
   cwd: string,
-  task: string,
-  model: string | undefined,
+  args: string[],
+  result: SingleResult,
+  depthEnv: string,
   signal: AbortSignal | undefined,
   onUpdate: ChildUpdate | undefined,
-): Promise<SingleResult> {
-  const args: string[] = ["--mode", "json", "-p", "--no-session"];
-  if (model) args.push("--model", model);
-
-  const currentResult: SingleResult = {
-    task,
-    exitCode: 0,
-    messages: [],
-    stderr: "",
-    usage: emptyUsage(),
-    model,
-  };
-
-  const emitUpdate = () => onUpdate?.(currentResult);
-
-  args.push(`Task: ${task}`);
+): Promise<{ exitCode: number; aborted: boolean }> {
+  const emitUpdate = () => onUpdate?.(result);
+  let buffer = "";
   let wasAborted = false;
 
   const exitCode = await new Promise<number>((resolve) => {
@@ -69,60 +106,22 @@ async function runChild(
       cwd,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, LIUBAI_SPAWN_DEPTH: String(childDepthOf(currentDepth())) },
+      env: { ...process.env, LIUBAI_SPAWN_DEPTH: depthEnv },
     });
-    let buffer = "";
-
-    const processLine = (line: string) => {
-      if (!line.trim()) return;
-      let event: any;
-      try {
-        event = JSON.parse(line);
-      } catch {
-        return;
-      }
-
-      if (event.type === "message_end" && event.message) {
-        const msg = event.message as Message;
-        currentResult.messages.push(msg);
-
-        if (msg.role === "assistant") {
-          currentResult.usage.turns++;
-          const usage = msg.usage;
-          if (usage) {
-            currentResult.usage.input += usage.input || 0;
-            currentResult.usage.output += usage.output || 0;
-            currentResult.usage.cacheRead += usage.cacheRead || 0;
-            currentResult.usage.cacheWrite += usage.cacheWrite || 0;
-            currentResult.usage.cost += usage.cost?.total || 0;
-            currentResult.usage.contextTokens = usage.totalTokens || 0;
-          }
-          if (!currentResult.model && msg.model) currentResult.model = msg.model;
-          if (msg.stopReason) currentResult.stopReason = msg.stopReason;
-          if (msg.errorMessage) currentResult.errorMessage = msg.errorMessage;
-        }
-        emitUpdate();
-      }
-
-      if (event.type === "tool_result_end" && event.message) {
-        currentResult.messages.push(event.message as Message);
-        emitUpdate();
-      }
-    };
 
     proc.stdout.on("data", (data) => {
       buffer += data.toString();
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
-      for (const line of lines) processLine(line);
+      for (const line of lines) processJsonLine(line, result, emitUpdate);
     });
 
     proc.stderr.on("data", (data) => {
-      currentResult.stderr += data.toString();
+      result.stderr += data.toString();
     });
 
     proc.on("close", (code) => {
-      if (buffer.trim()) processLine(buffer);
+      if (buffer.trim()) processJsonLine(buffer, result, emitUpdate);
       resolve(code ?? 0);
     });
 
@@ -143,9 +142,89 @@ async function runChild(
     }
   });
 
-  currentResult.exitCode = exitCode;
-  if (wasAborted) throw new Error("Spawned child was aborted");
-  return currentResult;
+  return { exitCode, aborted: wasAborted };
+}
+
+function bounceArgs(sessionId: string, model: string | undefined, prompt: string): string[] {
+  const args: string[] = ["--mode", "json", "-p", "--session", sessionId];
+  if (model) args.push("--model", model);
+  args.push(prompt);
+  return args;
+}
+
+async function gateChildReport(
+  cwd: string,
+  result: SingleResult,
+  model: string | undefined,
+  depthEnv: string,
+  signal: AbortSignal | undefined,
+  onUpdate: ChildUpdate | undefined,
+): Promise<void> {
+  const rawReport = getFinalOutput(result.messages);
+  if (rawReport === "") {
+    result.finalReport = "";
+    return;
+  }
+
+  const compress = async (report: string): Promise<string> => {
+    if (!result.sessionId) throw new Error("no session id to resume for compress bounce");
+    const { exitCode, aborted } = await runPiTurn(
+      cwd,
+      bounceArgs(result.sessionId, model, compressPrompt(report)),
+      result,
+      depthEnv,
+      signal,
+      onUpdate,
+    );
+    if (aborted) throw new Error("compress bounce was aborted");
+    if (exitCode !== 0) throw new Error(`compress bounce exited ${exitCode}`);
+    return getFinalOutput(result.messages);
+  };
+
+  let gated: { report: string; verdict: ReportAssessment };
+  try {
+    gated = await gateReport(rawReport, undefined, compress);
+  } catch (e) {
+    const { report: body, omitted } = hardTruncateReport(rawReport);
+    gated = { report: body, verdict: { kind: "truncated", bytes: omitted } };
+    result.stderr += `\n[compress bounce failed: ${e instanceof Error ? e.message : String(e)}; fell back to hard-truncate]`;
+  }
+
+  result.finalReport =
+    gated.verdict.kind === "truncated"
+      ? `${gated.report}\n\n${truncationNotice(gated.verdict.bytes)}`
+      : gated.report;
+}
+
+async function runChild(
+  cwd: string,
+  task: string,
+  model: string | undefined,
+  signal: AbortSignal | undefined,
+  onUpdate: ChildUpdate | undefined,
+): Promise<SingleResult> {
+  const depthEnv = String(childDepthOf(currentDepth()));
+  const result: SingleResult = {
+    task,
+    exitCode: 0,
+    messages: [],
+    stderr: "",
+    usage: emptyUsage(),
+    model,
+  };
+
+  const args: string[] = ["--mode", "json", "-p"];
+  if (model) args.push("--model", model);
+  args.push(`Task: ${task}`);
+
+  const { exitCode, aborted } = await runPiTurn(cwd, args, result, depthEnv, signal, onUpdate);
+  result.exitCode = exitCode;
+  if (aborted) throw new Error("Spawned child was aborted");
+
+  if (!isFailedResult(result)) {
+    await gateChildReport(cwd, result, model, depthEnv, signal, onUpdate);
+  }
+  return result;
 }
 
 const TaskItem = Type.Object({
@@ -213,7 +292,7 @@ export function register(pi: ExtensionAPI): void {
 
         const successCount = results.filter((r) => !isFailedResult(r)).length;
         const summaries = results.map((r) => {
-          const output = truncateChildOutput(getResultOutput(r));
+          const output = r.finalReport ?? getResultOutput(r);
           const status = isFailedResult(r)
             ? `failed${r.stopReason && r.stopReason !== "end" ? ` (${r.stopReason})` : ""}`
             : "completed";
@@ -247,7 +326,7 @@ export function register(pi: ExtensionAPI): void {
         };
       }
       return {
-        content: [{ type: "text", text: getFinalOutput(result.messages) || "(no output)" }],
+        content: [{ type: "text", text: result.finalReport || getFinalOutput(result.messages) || "(no output)" }],
         details: makeDetails("single")([result]),
       };
     },
@@ -297,7 +376,7 @@ export function register(pi: ExtensionAPI): void {
         const isError = isFailedResult(r);
         const icon = isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
         const displayItems = getDisplayItems(r.messages);
-        const finalOutput = getFinalOutput(r.messages);
+        const finalOutput = r.finalReport ?? getFinalOutput(r.messages);
 
         if (expanded) {
           const container = new Container();
@@ -368,7 +447,7 @@ export function register(pi: ExtensionAPI): void {
         for (const r of details.results) {
           const rIcon = isFailedResult(r) ? theme.fg("error", "✗") : theme.fg("success", "✓");
           const displayItems = getDisplayItems(r.messages);
-          const finalOutput = getFinalOutput(r.messages);
+          const finalOutput = r.finalReport ?? getFinalOutput(r.messages);
 
           container.addChild(new Spacer(1));
           container.addChild(new Text(`${theme.fg("muted", "─── ") + theme.fg("accent", taskPreview(r.task))} ${rIcon}`, 0, 0));

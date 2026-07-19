@@ -3,12 +3,15 @@ import assert from "node:assert/strict";
 
 import {
   selectMode,
-  truncateChildOutput,
   aggregateUsage,
   getFinalOutput,
   getResultOutput,
   MAX_PARALLEL_TASKS,
-  PER_TASK_OUTPUT_CAP,
+  REPORT_CAP,
+  assessReport,
+  gateReport,
+  compressPrompt,
+  truncationNotice,
   canSpawn,
   childDepthOf,
   currentDepth,
@@ -58,19 +61,86 @@ test("more parallel tasks than the cap are rejected", () => {
   assert.equal(selection.kind, "error");
 });
 
-test("output within the cap passes through untouched", () => {
-  const output = "the child finished cleanly";
-
-  assert.equal(truncateChildOutput(output), output);
+test("a report under the cap is accepted", () => {
+  assert.deepEqual(assessReport("short report"), { kind: "accepted" });
 });
 
-test("output over the cap is truncated with a byte-count notice", () => {
-  const oversized = "x".repeat(PER_TASK_OUTPUT_CAP + 512);
+test("a report exactly at the cap is accepted", () => {
+  const at = "x".repeat(REPORT_CAP);
 
-  const truncated = truncateChildOutput(oversized);
+  assert.deepEqual(assessReport(at), { kind: "accepted" });
+});
 
-  assert.ok(Buffer.byteLength(truncated, "utf8") < oversized.length);
-  assert.match(truncated, /512 bytes omitted/);
+test("a report over the cap needs compress with its byte count", () => {
+  const over = "x".repeat(REPORT_CAP + 100);
+
+  assert.deepEqual(assessReport(over), { kind: "needs_compress", bytes: REPORT_CAP + 100 });
+});
+
+test("an accepted report passes through the gate without compressing", async () => {
+  let calls = 0;
+  const compress = async () => {
+    calls++;
+    return "should not be used";
+  };
+
+  const { report, verdict } = await gateReport("fine as is", undefined, compress);
+
+  assert.equal(report, "fine as is");
+  assert.deepEqual(verdict, { kind: "accepted" });
+  assert.equal(calls, 0);
+});
+
+test("an oversized report whose compress lands under cap is returned accepted", async () => {
+  let calls = 0;
+  const original = "x".repeat(REPORT_CAP + 1);
+  const compressed = "fits now";
+  const compress = async (report: string) => {
+    calls++;
+    assert.equal(report, original);
+    return compressed;
+  };
+
+  const { report, verdict } = await gateReport(original, undefined, compress);
+
+  assert.equal(report, compressed);
+  assert.deepEqual(verdict, { kind: "accepted" });
+  assert.equal(calls, 1);
+});
+
+test("a report still over cap after compress is hard-truncated and flagged", async () => {
+  let calls = 0;
+  const original = "x".repeat(REPORT_CAP + 1);
+  const stillOver = "y".repeat(REPORT_CAP + 50);
+  const compress = async (report: string) => {
+    calls++;
+    assert.equal(report, original);
+    return stillOver;
+  };
+
+  const { report, verdict } = await gateReport(original, undefined, compress);
+
+  assert.ok(Buffer.byteLength(report, "utf8") <= REPORT_CAP);
+  assert.equal(verdict.kind, "truncated");
+  if (verdict.kind === "truncated") {
+    assert.equal(verdict.bytes, Buffer.byteLength(stillOver, "utf8") - Buffer.byteLength(report, "utf8"));
+  }
+  assert.equal(calls, 1);
+});
+
+test("the truncation notice names the omitted byte count and the cap", () => {
+  const notice = truncationNotice(50);
+
+  assert.match(notice, /50 bytes/);
+  assert.match(notice, /4 KB/);
+});
+
+test("the compress prompt states the 4 KB limit and output-only instruction", () => {
+  const prompt = compressPrompt("x".repeat(REPORT_CAP + 1));
+
+  assert.match(prompt, /4 ?KB/);
+  assert.match(prompt, /4096/);
+  assert.match(prompt, /only/i);
 });
 
 test("usage is summed across every child", () => {

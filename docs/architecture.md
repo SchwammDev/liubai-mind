@@ -39,9 +39,13 @@ The bridge in `index.ts` (`claudePayload`, `runRail`) maps pi's tool names onto 
 
 ## Spawn extension
 
-`.pi/extensions/subagent/` — a generic `spawn` tool, loaded globally by `setup.sh` into `~/.pi/agent/extensions/subagent`. It spawns a child `pi --mode json -p --no-session` per task with an isolated context window; the child's final report lands in the parent. Two modes: single (`task`) and parallel (`tasks` array, capped at 8, concurrency 4). The `task` string carries everything — no role roster, no per-spawn system prompt. Children inherit the rails through the same global extensions dir.
+`.pi/extensions/subagent/` — a generic `spawn` tool, loaded globally by `setup.sh` into `~/.pi/agent/extensions/subagent`. It spawns a child `pi --mode json -p` per task with an isolated context window; the child's final report lands in the parent. Two modes: single (`task`) and parallel (`tasks` array, capped at 8, concurrency 4). The `task` string carries everything — no role roster, no per-spawn system prompt. Children inherit the rails through the same global extensions dir.
 
 Kept separate from rails because their lifecycles are opposite: rails inherit *into* children, whereas spawn self-disables past a depth cap so a child cannot recurse without bound. The cap rides `LIUBAI_SPAWN_DEPTH` (default 0); `register` skips the tool entirely at depth ≥ `MAX_DEPTH` (1), so spawn is absent — not merely blocked — in children. `runChild` sets the child's depth one above the parent's.
+
+### Report gate
+
+A child's final report is capped at 4 KB (4096 bytes, UTF-8) before it enters the parent context. `assessReport` sizes the report; `gateReport` orchestrates the outcome: a report under cap passes through untouched; a report over cap gets **one** compress-bounce — the *same* child session is resumed (`pi --mode json -p --session <id>` with a compress instruction) and asked to rewrite under 4 KB, so the parent never sees the bloated first version. If the compress still lands over cap (a second violation), the compressed result is hard-truncated at the byte boundary and flagged. If the bounce itself fails (non-zero exit, abort, no session id), the gate falls back to hard-truncating the *original* report rather than losing the work. Children now save their sessions (the old `--no-session` was dropped) so the bounce can resume them; the compress turn inherits the same rails and the same depth cap, so it cannot recurse further. Each parallel task's report is gated independently.
 
 ## Extending
 
