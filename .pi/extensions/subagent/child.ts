@@ -6,7 +6,7 @@ import * as path from "node:path";
 export const MAX_PARALLEL_TASKS = 8;
 export const MAX_CONCURRENCY = 4;
 export const COLLAPSED_ITEM_COUNT = 10;
-export const PER_TASK_OUTPUT_CAP = 50 * 1024;
+export const REPORT_CAP = 4096;
 export const MAX_DEPTH = 1;
 
 export function currentDepth(): number {
@@ -41,6 +41,8 @@ export interface SingleResult {
   model?: string;
   stopReason?: string;
   errorMessage?: string;
+  sessionId?: string;
+  finalReport?: string;
 }
 
 export type ModeSelection = { kind: "single" } | { kind: "parallel" } | { kind: "error"; message: string };
@@ -185,15 +187,59 @@ export function getResultOutput(result: SingleResult): string {
   return getFinalOutput(result.messages) || "(no output)";
 }
 
-export function truncateChildOutput(output: string): string {
-  const byteLength = Buffer.byteLength(output, "utf8");
-  if (byteLength <= PER_TASK_OUTPUT_CAP) return output;
+export type ReportAssessment =
+  | { kind: "accepted" }
+  | { kind: "needs_compress"; bytes: number }
+  | { kind: "truncated"; bytes: number };
 
-  let truncated = output.slice(0, PER_TASK_OUTPUT_CAP);
-  while (Buffer.byteLength(truncated, "utf8") > PER_TASK_OUTPUT_CAP) {
+export function assessReport(report: string): ReportAssessment {
+  const bytes = Buffer.byteLength(report, "utf8");
+  if (bytes <= REPORT_CAP) return { kind: "accepted" };
+  return { kind: "needs_compress", bytes };
+}
+
+export function truncationNotice(omitted: number): string {
+  return `[report truncated: ${omitted} bytes over ${REPORT_CAP / 1024} KB cap]`;
+}
+
+export function hardTruncateReport(report: string): { report: string; omitted: number } {
+  const byteLength = Buffer.byteLength(report, "utf8");
+  if (byteLength <= REPORT_CAP) return { report, omitted: 0 };
+
+  let truncated = report.slice(0, REPORT_CAP);
+  while (Buffer.byteLength(truncated, "utf8") > REPORT_CAP) {
     truncated = truncated.slice(0, -1);
   }
-  return `${truncated}\n\n[Output truncated: ${byteLength - Buffer.byteLength(truncated, "utf8")} bytes omitted. Full output preserved in tool details.]`;
+  return { report: truncated, omitted: byteLength - Buffer.byteLength(truncated, "utf8") };
+}
+
+export async function gateReport(
+  report: string,
+  compressed: string | undefined,
+  compress: (report: string) => Promise<string>,
+): Promise<{ report: string; verdict: ReportAssessment }> {
+  const initial = assessReport(report);
+  if (initial.kind === "accepted") return { report, verdict: initial };
+
+  if (compressed === undefined) {
+    const attempt = await compress(report);
+    const rechecked = assessReport(attempt);
+    if (rechecked.kind === "accepted") return { report: attempt, verdict: rechecked };
+    const { report: truncated, omitted } = hardTruncateReport(attempt);
+    return { report: truncated, verdict: { kind: "truncated", bytes: omitted } };
+  }
+
+  const { report: truncated, omitted } = hardTruncateReport(report);
+  return { report: truncated, verdict: { kind: "truncated", bytes: omitted } };
+}
+
+export function compressPrompt(report: string): string {
+  const bytes = Buffer.byteLength(report, "utf8");
+  return [
+    `Your previous report is ${bytes} bytes, which exceeds the ${REPORT_CAP}-byte (${REPORT_CAP / 1024} KB) cap.`,
+    "Rewrite it under 4096 bytes (UTF-8), preserving the essential findings, conclusions, and code references while dropping redundancy and detail that is not load-bearing.",
+    "Output ONLY the compressed report. No preamble, no commentary, no explanation of what you changed.",
+  ].join(" ");
 }
 
 export function taskPreview(task: string, max = 40): string {
