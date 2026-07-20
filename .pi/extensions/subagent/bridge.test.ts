@@ -9,7 +9,7 @@ import {
   type ChildTransport,
   type UiForwarder,
 } from "./bridge.ts";
-import type { SingleResult } from "./child.ts";
+import { CLARIFY_TAG, MAX_CLARIFY, type SingleResult } from "./child.ts";
 
 const makeAcc = (): Pick<
   SingleResult,
@@ -300,7 +300,7 @@ test("ChildSession.sendPrompt writes the prompt and resolves only on agent_settl
   assert.equal(resolved, false);
 
   t.emitLine(JSON.stringify({ type: "agent_settled" }));
-  assert.deepEqual(await p, { settled: true, exitCode: 0, aborted: false });
+  assert.deepEqual(await p, { settled: true, suspended: false, exitCode: 0, aborted: false });
 });
 
 test("ChildSession.sendPrompt reuses the same transport across turns", async () => {
@@ -329,7 +329,7 @@ test("ChildSession.sendPrompt resolves unsettled on premature close with the exi
   const p = session.sendPrompt("hello");
   t.emitClose(7);
 
-  assert.deepEqual(await p, { settled: false, exitCode: 7, aborted: false });
+  assert.deepEqual(await p, { settled: false, suspended: false, exitCode: 7, aborted: false });
 });
 
 test("a confirm request mid-turn reaches the forwarder and writes the response back to the transport", async () => {
@@ -375,7 +375,7 @@ test("a pending parent confirm is dismissed when the child dies mid-ask", async 
   await flush();
 
   const result = await p;
-  assert.deepEqual(result, { settled: false, exitCode: 9, aborted: false });
+  assert.deepEqual(result, { settled: false, suspended: false, exitCode: 9, aborted: false });
 });
 
 test("a pending parent confirm is dismissed on parent abort", async () => {
@@ -405,7 +405,7 @@ test("a pending parent confirm is dismissed on parent abort", async () => {
   await flush();
 
   const result = await p;
-  assert.deepEqual(result, { settled: false, exitCode: 1, aborted: true });
+  assert.deepEqual(result, { settled: false, suspended: false, exitCode: 1, aborted: true });
 });
 
 test("concurrent asks from two children show one parent dialog at a time", async () => {
@@ -466,7 +466,7 @@ test("an ask queued behind another dialog is skipped when its child dies while w
   await flush();
 
   assert.equal(f.confirmCalls.length, 1);
-  assert.deepEqual(await p2, { settled: false, exitCode: 3, aborted: false });
+  assert.deepEqual(await p2, { settled: false, suspended: false, exitCode: 3, aborted: false });
 
   t1.emitLine(JSON.stringify({ type: "agent_settled" }));
   await p1;
@@ -507,4 +507,123 @@ test("parallel children resolve asks independently by id with no cross-talk", as
   t2.emitLine(JSON.stringify({ type: "agent_settled" }));
   await p1;
   await p2;
+});
+
+test("interceptClarify returns the clarifyId and question for a tagged single-mode request under budget and writes no response", () => {
+  const w = new FakeWriter();
+  const bridge = new AskBridge(new FakeForwarder(), (l) => w.write(l), undefined, undefined, "single", { delivered: 0 });
+
+  const out = bridge.interceptClarify({ id: "q1", method: "input", title: CLARIFY_TAG + "which file?" });
+
+  assert.deepEqual(out, { kind: "suspend", clarifyId: "q1", question: "which file?" });
+  assert.equal(w.lines.length, 0);
+});
+
+test("interceptClarify auto-denies and returns denied in parallel mode", () => {
+  const w = new FakeWriter();
+  const bridge = new AskBridge(new FakeForwarder(), (l) => w.write(l), undefined, undefined, "parallel", { delivered: 0 });
+
+  const out = bridge.interceptClarify({ id: "q1", method: "input", title: CLARIFY_TAG + "which?" });
+
+  assert.deepEqual(out, { kind: "denied" });
+  assert.deepEqual(w.json(0), { type: "extension_ui_response", id: "q1", value: "proceed with best judgment" });
+});
+
+test("interceptClarify auto-denies and returns denied when the delivered budget is at the cap", () => {
+  const w = new FakeWriter();
+  const bridge = new AskBridge(new FakeForwarder(), (l) => w.write(l), undefined, undefined, "single", { delivered: MAX_CLARIFY });
+
+  const out = bridge.interceptClarify({ id: "q1", method: "input", title: CLARIFY_TAG + "which?" });
+
+  assert.deepEqual(out, { kind: "denied" });
+  assert.deepEqual(w.json(0), { type: "extension_ui_response", id: "q1", value: "proceed with best judgment" });
+});
+
+test("interceptClarify returns pass without writing for a non-input request", () => {
+  const w = new FakeWriter();
+  const bridge = new AskBridge(new FakeForwarder(), (l) => w.write(l), undefined, undefined, "single", { delivered: 0 });
+
+  const out = bridge.interceptClarify({ id: "q1", method: "confirm", title: CLARIFY_TAG + "which?" });
+
+  assert.deepEqual(out, { kind: "pass" });
+  assert.equal(w.lines.length, 0);
+});
+
+test("interceptClarify returns pass without writing for an untagged input request", () => {
+  const w = new FakeWriter();
+  const bridge = new AskBridge(new FakeForwarder(), (l) => w.write(l), undefined, undefined, "single", { delivered: 0 });
+
+  const out = bridge.interceptClarify({ id: "q1", method: "input", title: "just a question" });
+
+  assert.deepEqual(out, { kind: "pass" });
+  assert.equal(w.lines.length, 0);
+});
+
+test("processRpcLine returns a suspended outcome for a tagged input line and does not reach the forwarder", () => {
+  const f = new FakeForwarder();
+  const bridge = new AskBridge(f, () => {}, undefined, undefined, "single", { delivered: 0 });
+  const acc = makeAcc();
+
+  const out = processRpcLine(
+    JSON.stringify({ type: "extension_ui_request", id: "q1", method: "input", title: CLARIFY_TAG + "which file?" }),
+    acc,
+    bridge,
+  );
+
+  assert.deepEqual(out, { settled: false, suspended: { clarifyId: "q1", question: "which file?" } });
+  assert.equal(f.inputCalls.length, 0);
+});
+
+test("processRpcLine auto-denies a parallel-mode clarify without forwarding it to the parent UI", async () => {
+  const f = new FakeForwarder();
+  const w = new FakeWriter();
+  const bridge = new AskBridge(f, (l) => w.write(l), undefined, undefined, "parallel", { delivered: 0 });
+  const acc = makeAcc();
+
+  const out = processRpcLine(
+    JSON.stringify({ type: "extension_ui_request", id: "q1", method: "input", title: CLARIFY_TAG + "which?" }),
+    acc,
+    bridge,
+  );
+  await flush();
+
+  assert.deepEqual(out, { settled: false });
+  assert.equal(f.inputCalls.length, 0);
+  assert.equal(w.lines.length, 1);
+  assert.deepEqual(w.json(0), { type: "extension_ui_response", id: "q1", value: "proceed with best judgment" });
+});
+
+test("ChildSession.sendPrompt resolves suspended for a tagged input line in single mode", async () => {
+  const t = new FakeTransport();
+  const session = new ChildSession(t, new FakeForwarder(), makeAcc(), undefined, undefined, undefined, "single", { delivered: 0 });
+
+  const p = session.sendPrompt("task");
+  t.emitLine(JSON.stringify({ type: "extension_ui_request", id: "q1", method: "input", title: CLARIFY_TAG + "which file?" }));
+
+  assert.deepEqual(await p, { settled: false, suspended: true, exitCode: 0, aborted: false, clarify: { id: "q1", question: "which file?" } });
+});
+
+test("ChildSession.resume resolves settled after the suspended turn settles", async () => {
+  const t = new FakeTransport();
+  const session = new ChildSession(t, new FakeForwarder(), makeAcc(), undefined, undefined, undefined, "single", { delivered: 0 });
+
+  const p = session.sendPrompt("task");
+  t.emitLine(JSON.stringify({ type: "extension_ui_request", id: "q1", method: "input", title: CLARIFY_TAG + "which file?" }));
+  const suspended = await p;
+  assert.equal(suspended.suspended, true);
+
+  const resumeP = session.resume();
+  t.emitLine(JSON.stringify({ type: "agent_settled" }));
+
+  assert.deepEqual(await resumeP, { settled: true, suspended: false, exitCode: 0, aborted: false });
+});
+
+test("ChildSession defaults keep sendPrompt working without explicit mode and budget", async () => {
+  const t = new FakeTransport();
+  const session = new ChildSession(t, new FakeForwarder(), makeAcc());
+
+  const p = session.sendPrompt("task");
+  t.emitLine(JSON.stringify({ type: "agent_settled" }));
+
+  assert.deepEqual(await p, { settled: true, suspended: false, exitCode: 0, aborted: false });
 });
