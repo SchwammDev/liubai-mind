@@ -9,6 +9,11 @@ export const COLLAPSED_ITEM_COUNT = 10;
 export const REPORT_CAP = 4096;
 export const MAX_DEPTH = 1;
 
+export const CLARIFY_TAG = "\x00CLARIFY:";
+export const QUESTION_CAP = 4096;
+export const MAX_CLARIFY = 2;
+export const CLARIFY_TIMEOUT_MS = 15 * 60 * 1000;
+
 export function currentDepth(): number {
   const parsed = Number(process.env.LIUBAI_SPAWN_DEPTH);
   return Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
@@ -274,6 +279,18 @@ export function assessReport(report: string): ReportAssessment {
   const bytes = Buffer.byteLength(report, "utf8");
   if (bytes <= REPORT_CAP) return { kind: "accepted" };
   return { kind: "needs_compress", bytes };
+}
+
+export type QuestionAssessment = { kind: "accepted" } | { kind: "rejected"; bytes: number };
+
+export function assessQuestion(question: string): QuestionAssessment {
+  const bytes = Buffer.byteLength(question, "utf8");
+  if (bytes <= QUESTION_CAP) return { kind: "accepted" };
+  return { kind: "rejected", bytes };
+}
+
+export function buildClarifyTitle(question: string): string {
+  return CLARIFY_TAG + question;
 }
 
 export function truncationNotice(omitted: number): string {

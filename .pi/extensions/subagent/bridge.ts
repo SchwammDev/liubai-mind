@@ -1,6 +1,6 @@
 import type { Message } from "@earendil-works/pi-ai";
 
-import type { SingleResult } from "./child.ts";
+import { CLARIFY_TAG, MAX_CLARIFY, type SingleResult } from "./child.ts";
 
 export type Accumulator = Pick<SingleResult, "messages" | "usage" | "stderr" | "model" | "stopReason" | "errorMessage">;
 
@@ -20,9 +20,20 @@ export interface ChildTransport {
   kill(): void;
 }
 
-export type LineOutcome = { settled: boolean };
+export type ClarifyIntercept =
+  | { kind: "suspend"; clarifyId: string; question: string }
+  | { kind: "denied" }
+  | { kind: "pass" };
 
-export type TurnResult = { settled: boolean; exitCode: number; aborted: boolean };
+export type LineOutcome = { settled: boolean; suspended?: { clarifyId: string; question: string } };
+
+export type TurnResult = {
+  settled: boolean;
+  suspended: boolean;
+  exitCode: number;
+  aborted: boolean;
+  clarify?: { id: string; question: string };
+};
 
 const DIALOG_METHODS = new Set(["confirm", "select", "input", "editor"]);
 const FIRE_AND_FORGET_METHODS = new Set(["setStatus", "setWidget", "setTitle", "set_editor_text"]);
@@ -58,6 +69,9 @@ export function processRpcLine(line: string, acc: Accumulator, bridge: AskBridge
   }
 
   if (event.type === "extension_ui_request") {
+    const intercept = bridge.interceptClarify(event);
+    if (intercept.kind === "suspend") return { settled: false, suspended: { clarifyId: intercept.clarifyId, question: intercept.question } };
+    if (intercept.kind === "denied") return { settled: false };
     bridge.handle(event).catch(() => {});
     return { settled: false };
   }
@@ -89,11 +103,33 @@ export class AskBridge {
   private readonly writer: (line: string) => void;
   private readonly gate: DialogGate;
 
-  constructor(forwarder: UiForwarder, writer: (line: string) => void, signal?: AbortSignal, gate?: DialogGate) {
+  private readonly mode: "single" | "parallel";
+  private readonly budget: { delivered: number };
+
+  constructor(
+    forwarder: UiForwarder,
+    writer: (line: string) => void,
+    signal?: AbortSignal,
+    gate?: DialogGate,
+    mode: "single" | "parallel" = "single",
+    budget: { delivered: number } = { delivered: 0 },
+  ) {
     this.forwarder = forwarder;
     this.writer = writer;
     this.signal = signal;
     this.gate = gate ?? new DialogGate();
+    this.mode = mode;
+    this.budget = budget;
+  }
+
+  interceptClarify(req: any): ClarifyIntercept {
+    if (req.method !== "input" || typeof req.title !== "string" || !req.title.startsWith(CLARIFY_TAG)) return { kind: "pass" };
+    const question = req.title.slice(CLARIFY_TAG.length);
+    if (this.mode === "parallel" || this.budget.delivered >= MAX_CLARIFY) {
+      this.writeResponse({ type: "extension_ui_response", id: req.id, value: "proceed with best judgment" });
+      return { kind: "denied" };
+    }
+    return { kind: "suspend", clarifyId: req.id, question };
   }
 
   async handle(req: any): Promise<void> {
@@ -182,20 +218,41 @@ export class ChildSession {
     onUpdate?: () => void,
     signal?: AbortSignal,
     gate?: DialogGate,
+    mode: "single" | "parallel" = "single",
+    budget: { delivered: number } = { delivered: 0 },
   ) {
     this.transport = transport;
     this.acc = acc;
     this.onUpdate = onUpdate;
     this.signal = signal;
-    this.bridge = new AskBridge(forwarder, (line) => transport.write(line), this.dialogController.signal, gate);
+    this.bridge = new AskBridge(
+      forwarder,
+      (line) => transport.write(line),
+      this.dialogController.signal,
+      gate,
+      mode,
+      budget,
+    );
 
     transport.onLine((line) => {
       const out = processRpcLine(line, this.acc, this.bridge);
       this.onUpdate?.();
+      if (out.suspended && this.resolver) {
+        const resolve = this.resolver;
+        this.resolver = null;
+        resolve({
+          settled: false,
+          suspended: true,
+          exitCode: 0,
+          aborted: false,
+          clarify: { id: out.suspended.clarifyId, question: out.suspended.question },
+        });
+        return;
+      }
       if (out.settled && this.resolver) {
         const resolve = this.resolver;
         this.resolver = null;
-        resolve({ settled: true, exitCode: 0, aborted: false });
+        resolve({ settled: true, suspended: false, exitCode: 0, aborted: false });
       }
     });
 
@@ -204,7 +261,7 @@ export class ChildSession {
       if (this.resolver) {
         const resolve = this.resolver;
         this.resolver = null;
-        resolve({ settled: false, exitCode: code ?? 1, aborted: this.abortedFlag });
+        resolve({ settled: false, suspended: false, exitCode: code ?? 1, aborted: this.abortedFlag });
       }
     });
 
@@ -221,12 +278,20 @@ export class ChildSession {
   async sendPrompt(message: string): Promise<TurnResult> {
     if (this.signal?.aborted) {
       this.transport.kill();
-      return { settled: false, exitCode: 0, aborted: true };
+      return { settled: false, suspended: false, exitCode: 0, aborted: true };
     }
 
     this.abortedFlag = false;
     this.transport.write(JSON.stringify({ type: "prompt", message }));
 
+    return this.awaitSettlement();
+  }
+
+  async resume(): Promise<TurnResult> {
+    return this.awaitSettlement();
+  }
+
+  private async awaitSettlement(): Promise<TurnResult> {
     return new Promise<TurnResult>((resolve) => {
       this.resolver = resolve;
     });

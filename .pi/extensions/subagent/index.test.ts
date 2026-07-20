@@ -20,6 +20,12 @@ import {
   childDepthOf,
   currentDepth,
   isFailedResult,
+  assessQuestion,
+  buildClarifyTitle,
+  CLARIFY_TAG,
+  QUESTION_CAP,
+  MAX_CLARIFY,
+  CLARIFY_TIMEOUT_MS,
   type SingleResult,
 } from "./child.ts";
 
@@ -316,6 +322,40 @@ test("a missing or malformed depth falls back to the top", () => {
     if (saved === undefined) delete process.env.LIUBAI_SPAWN_DEPTH;
     else process.env.LIUBAI_SPAWN_DEPTH = saved;
   }
+});
+
+test("a question under the byte cap is accepted", () => {
+  assert.deepEqual(assessQuestion("short question"), { kind: "accepted" });
+});
+
+test("a question exactly at the byte cap is accepted", () => {
+  const at = "x".repeat(QUESTION_CAP);
+
+  assert.deepEqual(assessQuestion(at), { kind: "accepted" });
+});
+
+test("a question over the byte cap is rejected with its byte count", () => {
+  const over = "x".repeat(QUESTION_CAP + 1);
+
+  assert.deepEqual(assessQuestion(over), { kind: "rejected", bytes: QUESTION_CAP + 1 });
+});
+
+test("assessQuestion measures UTF-8 bytes, not code units", () => {
+  const question = "\u00e9".repeat(QUESTION_CAP);
+
+  assert.deepEqual(assessQuestion(question), {
+    kind: "rejected",
+    bytes: Buffer.byteLength(question, "utf8"),
+  });
+});
+
+test("buildClarifyTitle prefixes the question with the CLARIFY_TAG sentinel", () => {
+  assert.equal(buildClarifyTitle("what now?"), CLARIFY_TAG + "what now?");
+});
+
+test("the clarify budget caps at two questions with a fifteen-minute timeout", () => {
+  assert.equal(MAX_CLARIFY, 2);
+  assert.equal(CLARIFY_TIMEOUT_MS, 15 * 60 * 1000);
 });
 
 test("at the capped depth a child may not spawn, but the top may", () => {

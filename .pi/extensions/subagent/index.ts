@@ -24,11 +24,9 @@ import {
   type ComplexityMap,
   type SingleResult,
   taskPreview,
-  compressPrompt,
-  gateReport,
-  hardTruncateReport,
-  truncationNotice,
-  type ReportAssessment,
+  assessQuestion,
+  buildClarifyTitle,
+  QUESTION_CAP,
 } from "./child.ts";
 import {
   type ChildTransport,
@@ -36,6 +34,18 @@ import {
   ChildSession,
   DialogGate,
 } from "./bridge.ts";
+import {
+  type ChildUpdate,
+  type RunChildOutcome,
+  type SuspendedState,
+  answerClarify,
+  answerToolResult,
+  gateChildReport,
+  getSuspended,
+  initSuspend,
+  singleSpawnResult,
+  spawnBlockedResult,
+} from "./clarify.ts";
 
 interface SubagentDetails {
   mode: "single" | "parallel";
@@ -47,8 +57,6 @@ const makeDetails =
   (results: SingleResult[]): SubagentDetails => ({ mode, results });
 
 const emptyUsage = () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 });
-
-type ChildUpdate = (result: SingleResult) => void;
 
 function spawnRpcTransport(
   cwd: string,
@@ -111,41 +119,6 @@ function spawnRpcTransport(
   };
 }
 
-async function gateChildReport(
-  result: SingleResult,
-  session: ChildSession,
-  onUpdate: ChildUpdate | undefined,
-): Promise<void> {
-  const emitUpdate = () => onUpdate?.(result);
-
-  const rawReport = getFinalOutput(result.messages);
-  if (rawReport === "") {
-    result.finalReport = "";
-    return;
-  }
-
-  const compress = async (report: string): Promise<string> => {
-    const r = await session.sendPrompt(compressPrompt(report));
-    emitUpdate();
-    if (!r.settled) throw new Error("compress turn did not settle");
-    return getFinalOutput(result.messages);
-  };
-
-  let gated: { report: string; verdict: ReportAssessment };
-  try {
-    gated = await gateReport(rawReport, undefined, compress);
-  } catch (e) {
-    const { report: body, omitted } = hardTruncateReport(rawReport);
-    gated = { report: body, verdict: { kind: "truncated", bytes: omitted } };
-    result.stderr += `\n[compress bounce failed: ${e instanceof Error ? e.message : String(e)}; fell back to hard-truncate]`;
-  }
-
-  result.finalReport =
-    gated.verdict.kind === "truncated"
-      ? `${gated.report}\n\n${truncationNotice(gated.verdict.bytes)}`
-      : gated.report;
-}
-
 interface SpawnContext {
   cwd: string;
   hasUI: boolean;
@@ -165,7 +138,8 @@ async function runChild(
   signal: AbortSignal | undefined,
   onUpdate: ChildUpdate | undefined,
   gate: DialogGate,
-): Promise<SingleResult> {
+  mode: "single" | "parallel",
+): Promise<RunChildOutcome> {
   const depthEnv = String(childDepthOf(currentDepth()));
   const result: SingleResult = {
     task,
@@ -175,6 +149,7 @@ async function runChild(
     usage: emptyUsage(),
     model,
   };
+  const budget = { delivered: 0 };
 
   const emitUpdate = () => onUpdate?.(result);
 
@@ -190,22 +165,36 @@ async function runChild(
   const transport = spawnRpcTransport(ctx.cwd, model, depthEnv, (s) => {
     result.stderr += s;
   });
-  const session = new ChildSession(transport, forwarder, result, emitUpdate, signal, gate);
+  const session = new ChildSession(transport, forwarder, result, emitUpdate, signal, gate, mode, budget);
 
+  const t = await session.sendPrompt(`Task: ${task}`);
+  if (t.suspended && t.clarify) {
+    const state: SuspendedState = {
+      clarifyId: t.clarify.id,
+      question: t.clarify.question,
+      transport,
+      session,
+      result,
+      budget,
+      onUpdate,
+      mode,
+      timer: null,
+      finished: false,
+    };
+    initSuspend(state, signal);
+    return { kind: "suspended", clarify: t.clarify, result };
+  }
+
+  result.exitCode = t.exitCode;
+  result.settled = t.settled;
+  if (t.aborted) throw new Error("Spawned child was aborted");
+  if (!t.settled) result.errorMessage ??= `child exited (code ${t.exitCode}) before completing its turn`;
   try {
-    const t = await session.sendPrompt(`Task: ${task}`);
-    result.exitCode = t.exitCode;
-    result.settled = t.settled;
-    if (t.aborted) throw new Error("Spawned child was aborted");
-    if (!t.settled) result.errorMessage ??= `child exited (code ${t.exitCode}) before completing its turn`;
-
-    if (!isFailedResult(result)) {
-      await gateChildReport(result, session, onUpdate);
-    }
+    if (!isFailedResult(result)) await gateChildReport(result, session, onUpdate);
   } finally {
     session.close();
   }
-  return result;
+  return { kind: "done", result };
 }
 
 const COMPLEXITY_DESCRIPTION = [
@@ -234,8 +223,52 @@ const SpawnParams = Type.Object({
   tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {task, complexity} for parallel execution" })),
 });
 
+const ClarifyParams = Type.Object({
+  question: Type.String({ description: "The single clarifying question to ask the parent model." }),
+});
+
+const AnswerParams = Type.Object({
+  text: Type.String({ description: "The answer to the child's clarifying question." }),
+});
+
+const CLARIFY_DESCRIPTION = [
+  "Ask the parent model one clarifying question on genuine ambiguity.",
+  "Capped at 2 questions per child; a 3rd is auto-denied.",
+  "Use sparingly — needing clarification often signals the task was under-specified; proceed with best judgment when you can.",
+  "The question must be under 4096 bytes (UTF-8).",
+].join(" ");
+
+function registerClarifyTool(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: "clarify",
+    label: "Clarify",
+    description: CLARIFY_DESCRIPTION,
+    parameters: ClarifyParams,
+
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const verdict = assessQuestion(params.question);
+      if (verdict.kind === "rejected") {
+        return {
+          content: [{ type: "text", text: `Question is ${verdict.bytes} bytes; re-ask under ${QUESTION_CAP} bytes (UTF-8).` }],
+          details: undefined,
+          isError: true,
+        };
+      }
+
+      const answer = await ctx.ui.input(buildClarifyTitle(params.question));
+      return {
+        content: [{ type: "text", text: answer ?? "proceed with best judgment" }],
+        details: undefined,
+      };
+    },
+  });
+}
+
 export function register(pi: ExtensionAPI): void {
-  if (!canSpawn(currentDepth())) return;
+  if (!canSpawn(currentDepth())) {
+    registerClarifyTool(pi);
+    return;
+  }
 
   const dialogGate = new DialogGate();
 
@@ -290,7 +323,7 @@ export function register(pi: ExtensionAPI): void {
         };
 
         const results = await mapWithConcurrencyLimit(tasks, MAX_CONCURRENCY, async (t, index) => {
-          const result = await runChild(
+          const outcome = await runChild(
             ctx,
             t.task,
             complexityMap[t.complexity],
@@ -300,7 +333,9 @@ export function register(pi: ExtensionAPI): void {
               emitParallelUpdate();
             },
             dialogGate,
+            "parallel",
           );
+          const result = outcome.result;
           allResults[index] = result;
           emitParallelUpdate();
           return result;
@@ -333,18 +368,9 @@ export function register(pi: ExtensionAPI): void {
             })
         : undefined;
 
-      const result = await runChild(ctx, params.task!, complexityMap[params.complexity!], signal, childUpdate, dialogGate);
-      if (isFailedResult(result)) {
-        return {
-          content: [{ type: "text", text: `Child ${result.stopReason || "failed"}: ${getResultOutput(result)}` }],
-          details: makeDetails("single")([result]),
-          isError: true,
-        };
-      }
-      return {
-        content: [{ type: "text", text: result.finalReport || getFinalOutput(result.messages) || "(no output)" }],
-        details: makeDetails("single")([result]),
-      };
+      if (getSuspended()) return spawnBlockedResult();
+      const outcome = await runChild(ctx, params.task!, complexityMap[params.complexity!], signal, childUpdate, dialogGate, "single");
+      return singleSpawnResult(outcome);
     },
 
     renderCall(args, theme, _context) {
@@ -512,6 +538,22 @@ export function register(pi: ExtensionAPI): void {
       }
       text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
       return new Text(text, 0, 0);
+    },
+  });
+
+  pi.registerTool({
+    name: "answer",
+    label: "Answer",
+    description: [
+      "Reply to a spawned child's clarifying question.",
+      "Only meaningful after a spawn suspended with 'Child asks: …'.",
+      "Writes the answer to the child and resumes it.",
+    ].join(" "),
+    parameters: AnswerParams,
+
+    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+      const outcome = await answerClarify(params.text, signal);
+      return answerToolResult(outcome);
     },
   });
 }
