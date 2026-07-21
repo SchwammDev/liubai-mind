@@ -1,7 +1,7 @@
 // User-configurable gate over bash commands. Rules are regex strings matched
 // against the command line; see command-rules.example.json for the file format.
 
-export type CommandRules = { deny: string[]; ask: string[]; allow: string[] };
+export type CommandRules = { deny: string[]; ask: string[]; allow: string[]; dedup: string[] };
 export type Decision = "deny" | "ask" | "allow";
 
 // Project rules override global per-list: a list the project defines replaces
@@ -12,7 +12,7 @@ export function mergeRules(
   project: Partial<CommandRules>,
 ): CommandRules {
   const pick = (key: keyof CommandRules): string[] => project[key] ?? global[key] ?? [];
-  return { deny: pick("deny"), ask: pick("ask"), allow: pick("allow") };
+  return { deny: pick("deny"), ask: pick("ask"), allow: pick("allow"), dedup: pick("dedup") };
 }
 
 function matchesAny(command: string, patterns: string[]): boolean {

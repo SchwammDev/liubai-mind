@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { classify, mergeRules } from "./command-gate.ts";
 
-const rules = (over: any = {}) => ({ deny: [], ask: [], allow: [], ...over });
+const rules = (over: any = {}) => ({ deny: [], ask: [], allow: [], dedup: [], ...over });
 
 test("an unmatched command is allowed by default", () => {
   const decision = classify("ls -la", rules());
@@ -55,3 +55,29 @@ test("an explicit empty project list disables the inherited global rule", () => 
 
   assert.deepEqual(merged.ask, []);
 });
+
+test("a project-omitted dedup list falls back to the global rule", () => {
+  const merged = mergeRules(
+    { dedup: ["\\bnpm\\s+publish\\b"] },
+    { ask: ["\\bgit\\s+push\\b"] },
+  );
+
+  assert.deepEqual(merged.dedup, ["\\bnpm\\s+publish\\b"]);
+});
+
+test("a project-defined dedup list replaces the global one", () => {
+  const merged = mergeRules(
+    { dedup: ["\\bnpm\\s+publish\\b"] },
+    { dedup: ["\\bgh\\s+issue\\s+comment\\b"] },
+  );
+
+  assert.deepEqual(merged.dedup, ["\\bgh\\s+issue\\s+comment\\b"]);
+});
+
+test("an explicit empty project dedup list disables the inherited global rule", () => {
+  const merged = mergeRules({ dedup: ["\\bnpm\\s+publish\\b"] }, { dedup: [] });
+
+  assert.deepEqual(merged.dedup, []);
+});
+
+
