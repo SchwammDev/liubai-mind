@@ -217,6 +217,7 @@ export async function completeClarify(state: SuspendedState, value: string): Pro
 
   state.result.settled = t.settled;
   state.result.exitCode = t.exitCode;
+  if (!t.settled) state.result.errorMessage ??= `child exited (code ${t.exitCode}) before completing its turn`;
   if (t.settled && !isFailedResult(state.result)) {
     await gateChildReport(state.result, state.session, state.onUpdate);
   }
