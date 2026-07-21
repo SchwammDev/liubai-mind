@@ -603,6 +603,22 @@ test("ChildSession.sendPrompt resolves suspended for a tagged input line in sing
   assert.deepEqual(await p, { settled: false, suspended: true, exitCode: 0, aborted: false, clarify: { id: "q1", question: "which file?" } });
 });
 
+test("a second clarify while one is suspended is auto-denied so the duplicate tool call can't hang the turn", async () => {
+  const t = new FakeTransport();
+  const session = new ChildSession(t, new FakeForwarder(), makeAcc(), undefined, undefined, undefined, "single", { delivered: 0 });
+
+  const p = session.sendPrompt("task");
+  t.emitLine(JSON.stringify({ type: "extension_ui_request", id: "q1", method: "input", title: CLARIFY_TAG + "first?" }));
+  const suspended = await p;
+  assert.equal(suspended.suspended, true);
+
+  t.emitLine(JSON.stringify({ type: "extension_ui_request", id: "q2", method: "input", title: CLARIFY_TAG + "dup?" }));
+  await flush();
+
+  const responses = t.writtenJson().filter((o) => o.type === "extension_ui_response");
+  assert.deepEqual(responses, [{ type: "extension_ui_response", id: "q2", value: "proceed with best judgment" }]);
+});
+
 test("ChildSession.resume resolves settled after the suspended turn settles", async () => {
   const t = new FakeTransport();
   const session = new ChildSession(t, new FakeForwarder(), makeAcc(), undefined, undefined, undefined, "single", { delivered: 0 });
