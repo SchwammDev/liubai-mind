@@ -1,5 +1,12 @@
 {
   "deny": ["\\bgit\\s+push\\b", "\\|\\s*sh\\b"],
   "ask": ["\\bgit\\s+commit\\b"],
-  "allow": []
+  "allow": [],
+  "dedup": [
+    "\\bgh\\s+(issue|pr)\\s+comment\\b",
+    "\\bgit\\s+tag\\b",
+    "\\bnpm\\s+publish\\b",
+    "\\bgh\\s+(issue|pr)\\s+(close|reopen|edit|delete)\\b",
+    "\\bcurl\\s+[^|]*-X\\s*(POST|PUT|DELETE|PATCH)\\b"
+  ]
 }

@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { classify, mergeRules, type CommandRules } from "./command-gate.ts";
+import { bashKey, writeKey, editKey, blockReason, bashMatchesDedup } from "./dedup.ts";
 import { cleanProse } from "./prose-gate.ts";
 import { injectWebSearch } from "./web-search.ts";
 
@@ -102,13 +103,27 @@ async function gateCommand(
 
 export function register(pi: ExtensionAPI): void {
   const pendingNudges = new Map<string, string[]>();
+  const dedupSeen = new Set<string>();
   const rules = mergeRules(loadRules(GLOBAL_RULES), loadRules(PROJECT_RULES));
 
   pi.on("tool_call", async (event: any, ctx: any) => {
     if (railsDisabled()) return undefined;
 
     if (event.toolName === "bash") {
-      return gateCommand(event.input?.command ?? "", rules, ctx);
+      const command = event.input?.command ?? "";
+      const key = bashKey(command);
+      if (bashMatchesDedup(command, rules.dedup) && dedupSeen.has(key)) {
+        return { block: true, reason: blockReason("bash") };
+      }
+      return gateCommand(command, rules, ctx);
+    }
+
+    if (event.toolName === "write") {
+      const key = writeKey(event.input.path, event.input.content);
+      if (dedupSeen.has(key)) return { block: true, reason: blockReason("write") };
+    } else if (event.toolName === "edit") {
+      const key = editKey(event.input.path, editList(event.input));
+      if (dedupSeen.has(key)) return { block: true, reason: blockReason("edit") };
     }
 
     const payload = claudePayload(event.toolName, event.input);
@@ -127,6 +142,18 @@ export function register(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_result", (event: any) => {
+    if (railsDisabled()) return undefined;
+
+    if (!event.isError) {
+      if (event.toolName === "bash" && bashMatchesDedup(event.input?.command, rules.dedup)) {
+        dedupSeen.add(bashKey(event.input.command));
+      } else if (event.toolName === "write") {
+        dedupSeen.add(writeKey(event.input.path, event.input.content));
+      } else if (event.toolName === "edit") {
+        dedupSeen.add(editKey(event.input.path, editList(event.input)));
+      }
+    }
+
     const nudges = pendingNudges.get(event.toolCallId);
     if (!nudges) return undefined;
     pendingNudges.delete(event.toolCallId);
