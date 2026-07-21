@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { CLARIFY_TAG, type SingleResult } from "./child.ts";
+import { CLARIFY_TAG, getResultOutput, type SingleResult } from "./child.ts";
 import { ChildSession, type ChildTransport, type UiForwarder } from "./bridge.ts";
 import {
   completeClarify,
@@ -115,6 +115,25 @@ test("completeClarify returns suspended when the child asks again after the answ
   assert.equal(state.clarifyId, "q2");
   assert.equal(state.question, "second?");
   assert.equal(t.killed, false);
+});
+
+test("completeClarify flags a clean early exit on resume instead of surfacing the preamble as the report", async () => {
+  __resetClarifyState();
+  const t = new FakeTransport();
+  const preamble = [{ role: "assistant", content: [{ type: "text", text: "preamble before the clarify tool call" }] }] as any;
+  const result = makeResult({ messages: preamble });
+  const state = makeState({ transport: t, result });
+  __setSuspended(state);
+
+  const outcomeP = completeClarify(state, "use file A");
+  assert.deepEqual(t.lastWrite(), { type: "extension_ui_response", id: "q1", value: "use file A" });
+  t.emitClose(0);
+
+  const outcome = await outcomeP;
+  assert.equal(outcome.kind, "done");
+  assert.equal(state.result.settled, false);
+  assert.equal(state.result.errorMessage, "child exited (code 0) before completing its turn");
+  assert.notEqual(getResultOutput(state.result), "preamble before the clarify tool call");
 });
 
 test("onClarifyTimeout auto-denies, settles the child, stashes a late report, and clears the slot", async () => {
