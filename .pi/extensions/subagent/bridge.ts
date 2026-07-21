@@ -105,6 +105,7 @@ export class AskBridge {
 
   private readonly mode: "single" | "parallel";
   private readonly budget: { delivered: number };
+  private clarifyInFlight = false;
 
   constructor(
     forwarder: UiForwarder,
@@ -125,11 +126,20 @@ export class AskBridge {
   interceptClarify(req: any): ClarifyIntercept {
     if (req.method !== "input" || typeof req.title !== "string" || !req.title.startsWith(CLARIFY_TAG)) return { kind: "pass" };
     const question = req.title.slice(CLARIFY_TAG.length);
-    if (this.mode === "parallel" || this.budget.delivered >= MAX_CLARIFY) {
+    // A second clarify while one is already suspended is a duplicate tool call
+    // (reasoning models sometimes re-emit the call after a thinking block); the
+    // parent has a single suspend slot, so auto-deny instead of dropping it and
+    // hanging the child turn on a response nobody will give.
+    if (this.mode === "parallel" || this.budget.delivered >= MAX_CLARIFY || this.clarifyInFlight) {
       this.writeResponse({ type: "extension_ui_response", id: req.id, value: "proceed with best judgment" });
       return { kind: "denied" };
     }
+    this.clarifyInFlight = true;
     return { kind: "suspend", clarifyId: req.id, question };
+  }
+
+  clearClarifyInFlight(): void {
+    this.clarifyInFlight = false;
   }
 
   async handle(req: any): Promise<void> {
@@ -288,6 +298,7 @@ export class ChildSession {
   }
 
   async resume(): Promise<TurnResult> {
+    this.bridge.clearClarifyInFlight();
     return this.awaitSettlement();
   }
 
