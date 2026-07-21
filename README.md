@@ -34,6 +34,20 @@ liubai update [version]         # bump the pinned engine (review + commit the lo
 
 **Web search** — on the TU Wien aqueduct provider the gateway runs `web_search` server-side, so it works even on models with unreliable tool-calling. Scoped to aqueduct; on paid providers the same tool type would incur cost. Stays on under `LIUBAI_RAILS_OFF` (capability, not steering).
 
+**Sub-agents** — the `spawn` tool delegates a task to a child pi with an isolated context window; the child's report lands back in the session. One `complexity` tier per task (`trivial | easy | medium | hard`) resolves the child model from `~/.pi/agent/complexity.json` (copy [`config/complexity.example.json`](config/complexity.example.json), fill in model ids); the agent never names a model. Children inherit the rails and can't spawn further (depth-capped). The report is capped at 4 KB. On genuine ambiguity a child may ask one clarifying question (≤2/child): `spawn` suspends and returns `Child asks: <Q>.` — reply with `answer(text=…)` to resume it. Parallel tasks (`tasks` array, capped 8) can't ask.
+
+```
+# one child
+spawn task="migrate the config loader to pydantic v2, update tests" complexity="medium"
+
+# parallel — independent, self-contained tasks
+spawn tasks=[
+  { task: "rename Foo→Bar across src/", complexity: "trivial" },
+  { task: "add retry to the upload client", complexity: "easy" },
+  { task: "redesign the job-queue back-pressure", complexity: "hard" },
+]
+```
+
 ## License
 
 Copyright 2026 Bernhard Raml. Licensed under [Apache 2.0](LICENSE).
