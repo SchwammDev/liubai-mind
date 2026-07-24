@@ -27,7 +27,10 @@ type EditOutcome = { blocked: boolean; reason?: string; text: string };
 
 function fakePi() {
   const handlers = new Map<string, (event: any) => any>();
-  const pi = { on: (name: string, fn: (event: any) => any) => handlers.set(name, fn) };
+  const pi = {
+    on: (name: string, fn: (event: any) => any) => handlers.set(name, fn),
+    registerTool: () => {},
+  };
   return { pi: pi as any, handlers };
 }
 
