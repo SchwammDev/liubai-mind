@@ -1,6 +1,11 @@
 import {
   createBashToolDefinition,
   createEditToolDefinition,
+  createFindToolDefinition,
+  createGrepToolDefinition,
+  createLsToolDefinition,
+  createReadToolDefinition,
+  createWriteToolDefinition,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { spawnSync } from "node:child_process";
@@ -24,6 +29,7 @@ import {
   type Exec,
 } from "./dedup.ts";
 import { withBashDedup, withEditDedup, type ToolLike } from "./overrides.ts";
+import { withSingleFlight, type InFlightCalls } from "./singleflight.ts";
 import { cleanProse } from "./prose-gate.ts";
 import { injectWebSearch } from "./web-search.ts";
 
@@ -135,25 +141,64 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
   const logDedup = deps.logDedup ?? createFileLog();
   const cwd = process.cwd();
 
+  // Duplicate-id shield: pi can deliver the same tool call twice (see
+  // singleflight.ts). Correctness, not steering — stays on under
+  // LIUBAI_RAILS_OFF. Built-ins coalesce onto one execution; tools this
+  // extension cannot wrap (other extensions' tools, e.g. spawn) get the
+  // second delivery blocked by a hook registered before the main handler.
+  const inFlight: InFlightCalls = new Map();
+  const shield = (tool: ToolLike) => withSingleFlight(tool, inFlight, logDedup);
+
   pi.registerTool(
-    withBashDedup((deps.bashTool ?? createBashToolDefinition(cwd)) as ToolLike, {
-      patterns: rules.dedup,
-      session: dedup,
-      exec: deps.exec ?? createExec(cwd),
-      log: logDedup,
-      enforced: dedupEnforced,
-      disabled: railsDisabled,
-    }) as any,
+    shield(
+      withBashDedup((deps.bashTool ?? createBashToolDefinition(cwd)) as ToolLike, {
+        patterns: rules.dedup,
+        session: dedup,
+        exec: deps.exec ?? createExec(cwd),
+        log: logDedup,
+        enforced: dedupEnforced,
+        disabled: railsDisabled,
+      }),
+    ) as any,
   );
   pi.registerTool(
-    withEditDedup((deps.editTool ?? createEditToolDefinition(cwd)) as ToolLike, {
-      session: dedup,
-      readTargetFile: deps.readTargetFile ?? createTargetReader(cwd),
-      log: logDedup,
-      enforced: dedupEnforced,
-      disabled: railsDisabled,
-    }) as any,
+    shield(
+      withEditDedup((deps.editTool ?? createEditToolDefinition(cwd)) as ToolLike, {
+        session: dedup,
+        readTargetFile: deps.readTargetFile ?? createTargetReader(cwd),
+        log: logDedup,
+        enforced: dedupEnforced,
+        disabled: railsDisabled,
+      }),
+    ) as any,
   );
+  const WRAPPED_BUILTINS = new Set(["bash", "edit"]);
+  for (const create of [
+    createFindToolDefinition,
+    createGrepToolDefinition,
+    createLsToolDefinition,
+    createReadToolDefinition,
+    createWriteToolDefinition,
+  ]) {
+    const tool = shield(create(cwd) as ToolLike);
+    WRAPPED_BUILTINS.add(tool.name);
+    pi.registerTool(tool as any);
+  }
+
+  const seenCallIds = new Set<string>();
+  pi.on("tool_call", (event: any) => {
+    if (!event.toolCallId || WRAPPED_BUILTINS.has(event.toolName)) return undefined;
+    if (seenCallIds.has(event.toolCallId)) {
+      logDedup({ kind: "duplicate-id", tool: event.toolName, key: event.toolCallId, action: "blocked" });
+      return {
+        block: true,
+        reason:
+          "[dedup] duplicate delivery of an already-issued tool call id; the original result arrives separately — do not retry",
+      };
+    }
+    seenCallIds.add(event.toolCallId);
+    return undefined;
+  });
 
   // A key that already no-opped once is being re-issued despite the notice:
   // ask the user, since retry loops are exactly what the no-op should end.

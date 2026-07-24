@@ -23,10 +23,10 @@ process.env.LIUBAI_DEDUP_ENFORCE = "1";
 const { register } = await import("./index.ts");
 
 function fakePi() {
-  const handlers = new Map<string, (event: any, ctx?: any) => any>();
+  const handlers = new Map<string, Array<(event: any, ctx?: any) => any>>();
   const tools = new Map<string, any>();
   const pi = {
-    on: (name: string, fn: any) => handlers.set(name, fn),
+    on: (name: string, fn: any) => handlers.set(name, [...(handlers.get(name) ?? []), fn]),
     registerTool: (tool: any) => tools.set(tool.name, tool),
   };
   return { pi: pi as any, handlers, tools };
@@ -60,9 +60,18 @@ function harness() {
     ui: { confirm: async (_title: string, body: string) => (confirms.push(body), answer) },
   });
   const headlessCtx = { hasUI: false };
-  const hook = (command: string, ctx: any) => handlers.get("tool_call")!({ toolName: "bash", input: { command } }, ctx);
-  const run = (command: string) => tools.get("bash").execute("id", { command }, undefined, undefined, undefined);
-  return { hook, run, calls, confirms, logs, world, confirmingCtx, headlessCtx, bash: tools.get("bash") };
+  let callSeq = 0;
+  const fire = async (event: any, ctx: any) => {
+    for (const handler of handlers.get("tool_call") ?? []) {
+      const outcome = await handler(event, ctx);
+      if (outcome) return outcome;
+    }
+    return undefined;
+  };
+  const hook = (command: string, ctx: any) => fire({ toolName: "bash", input: { command } }, ctx);
+  const run = (command: string, id?: string) =>
+    tools.get("bash").execute(id ?? `call-${++callSeq}`, { command }, undefined, undefined, undefined);
+  return { fire, hook, run, calls, confirms, logs, world, confirmingCtx, headlessCtx, bash: tools.get("bash") };
 }
 
 async function runUntilFirstReplay(h: ReturnType<typeof harness>) {
@@ -128,6 +137,57 @@ test("an ask-gated command whose effect was undone externally is confirmed again
 
   assert.equal(h.confirms.length, 2);
   assert.equal(h.calls.length, 2);
+});
+
+test("a duplicated tool call id executes the command once and both copies see one result", async () => {
+  const h = harness();
+
+  const [first, second] = await Promise.all([
+    h.run("npm publish", "dup-id"),
+    h.run("npm publish", "dup-id"),
+  ]);
+
+  assert.equal(h.calls.length, 1);
+  assert.equal(first, second);
+  assert.ok(h.logs.some((entry) => entry.kind === "duplicate-id"));
+});
+
+test("the duplicate-id shield stays active under LIUBAI_RAILS_OFF", async () => {
+  process.env.LIUBAI_RAILS_OFF = "1";
+  try {
+    const h = harness();
+
+    await Promise.all([h.run("seq 5", "dup-id"), h.run("seq 5", "dup-id")]);
+
+    assert.equal(h.calls.length, 1);
+  } finally {
+    delete process.env.LIUBAI_RAILS_OFF;
+  }
+});
+
+test("a duplicated call id for a tool the shield cannot wrap is blocked on second delivery", async () => {
+  const h = harness();
+
+  const first = await h.fire({ toolName: "spawn", toolCallId: "sp-1", input: {} }, h.headlessCtx);
+  const second = await h.fire({ toolName: "spawn", toolCallId: "sp-1", input: {} }, h.headlessCtx);
+
+  assert.equal(first, undefined);
+  assert.equal(second?.block, true);
+  assert.ok(h.logs.some((entry) => entry.kind === "duplicate-id" && entry.action === "blocked"));
+});
+
+test("the duplicate-id block for unwrapped tools stays active under LIUBAI_RAILS_OFF", async () => {
+  process.env.LIUBAI_RAILS_OFF = "1";
+  try {
+    const h = harness();
+
+    await h.fire({ toolName: "spawn", toolCallId: "sp-2", input: {} }, h.headlessCtx);
+    const second = await h.fire({ toolName: "spawn", toolCallId: "sp-2", input: {} }, h.headlessCtx);
+
+    assert.equal(second?.block, true);
+  } finally {
+    delete process.env.LIUBAI_RAILS_OFF;
+  }
 });
 
 test("LIUBAI_RAILS_OFF delegates the overridden bash tool byte-identically", async () => {
