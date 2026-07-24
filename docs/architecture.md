@@ -8,17 +8,20 @@ Engine = pi (`@earendil-works/pi-coding-agent`), pinned and vendored via npm. Th
 
 ## Rails extension
 
-`.pi/extensions/rails/` — one pi extension (`index.ts`), loaded globally by `setup.sh` into `~/.pi/agent/extensions/rails`. Four event handlers:
+`.pi/extensions/rails/` — one pi extension (`index.ts`), loaded globally by `setup.sh` into `~/.pi/agent/extensions/rails`:
 
-| Event | Handler | Steers |
+| Event / tool | Handler | Does |
 |---|---|---|
-| `tool_call` (bash) | `command-gate.ts` | deny / ask / allow by regex rules |
+| `bash`, `edit` (tool override) | `overrides.ts` + `dedup.ts` | effect-state dedup of duplicate mutations (see below) |
+| `tool_call` (bash) | `command-gate.ts` | deny / ask / allow by regex rules; dedup escalation ask |
 | `tool_call` (write/edit) | hooks | block or nudge on file content |
+| `tool_call` (all) | `index.ts` | log-only duplicate-`toolCallId` detector |
 | `tool_result` | — | appends accumulated nudges |
 | `before_provider_request` | `web-search.ts` | injects server-side web search (capability, not steering) |
+| `message_end` | `duplicate-delivery.ts` | drops duplicated toolCall blocks (upstream pi bug, #15) |
 | `message_end` | `prose-gate.ts` | strips filler from assistant prose |
 
-`LIUBAI_RAILS_OFF=1` disables steering handlers only; web-search stays on so baseline comparisons vary only the steering, never reach.
+`LIUBAI_RAILS_OFF=1` disables steering handlers only; web-search, duplicate-delivery, and the detector stay on — capability and correctness, not steering — so baseline comparisons vary only the steering.
 
 ### Hook model
 
@@ -36,6 +39,15 @@ The bridge in `index.ts` (`claudePayload`, `runRail`) maps pi's tool names onto 
 ### Command gate
 
 `command-gate.ts` — regex rules from two files: global `~/.pi/agent/command-rules.json` and project `.pi/command-rules.json` (override `LIUBAI_RAILS_RULES`). Project lists replace global per-list; an explicit empty list is a definition. Precedence `deny > allow > ask`; unmatched runs. `ask` blocks in headless mode (no UI to confirm). See `.pi/command-rules.example.json`.
+
+### Dedup
+
+Duplicate side effects have two sources with two fixes:
+
+- **Duplicate delivery** (upstream pi bug, #15): the openai-responses adapter can append one streamed tool call twice. `duplicate-delivery.ts` drops the extra blocks at `message_end` (keep-last — the terminal copy carries authoritative arguments); pi extracts executions and persists from the replaced message, so both double execution and doubled context are cured. A log-only detector flags any duplicate `toolCallId` that still reaches `tool_call`.
+- **Duplicate intent** (model re-issues or re-adds): `bash`/`edit` are overridden via `registerTool` (`overrides.ts`) and ask "is the effect already in the world?" (`dedup.ts`): gh comment/close/reopen and git tag check live state; unqueryable mutations (`curl POST`, `npm publish`) replay a session-cached result non-error; `edit` no-ops when the inserted lines already exist in the file. A re-issue after a no-op notice escalates to a user confirm (headless: block). Commands matched by the `dedup` regex list only; `git commit`/`git push` are excluded by design (#12).
+
+Detection always runs and logs to `~/.pi/agent/liubai-dedup-log.jsonl`; enforcement (no-op/replay/escalation) is behind `LIUBAI_DEDUP_ENFORCE=1` until log data shows an acceptable false-positive rate.
 
 ## Spawn extension
 
