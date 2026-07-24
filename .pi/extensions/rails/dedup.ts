@@ -27,7 +27,8 @@ export type DedupLogKind =
   | "noop"
   | "replay"
   | "escalate-ask"
-  | "escalate-block";
+  | "escalate-block"
+  | "duplicate-id";
 
 export type DedupLog = (entry: {
   kind: DedupLogKind;
