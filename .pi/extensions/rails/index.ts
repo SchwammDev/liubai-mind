@@ -1,11 +1,29 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  createBashToolDefinition,
+  createEditToolDefinition,
+  type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { classify, mergeRules, type CommandRules } from "./command-gate.ts";
-import { bashKey, writeKey, editKey, blockReason, bashMatchesDedup } from "./dedup.ts";
+import {
+  approveRerun,
+  bashKey,
+  bashMatchesDedup,
+  createExec,
+  createFileLog,
+  createSession,
+  createTargetReader,
+  editKey,
+  editList,
+  repeatedDuplicate,
+  type DedupLog,
+  type Exec,
+} from "./dedup.ts";
+import { withBashDedup, withEditDedup, type ToolLike } from "./overrides.ts";
 import { cleanProse } from "./prose-gate.ts";
 import { injectWebSearch } from "./web-search.ts";
 
@@ -26,14 +44,6 @@ const RAILS = [
 
 type ClaudePayload = { tool_name: "Edit" | "Write" | "MultiEdit"; tool_input: Record<string, unknown> };
 type TextPart = { type: "text"; text: string };
-
-// pi's `edit` tool carries an `edits[]` array; older builds emitted a single
-// flat oldText/newText. Both map onto the hooks' MultiEdit payload.
-function editList(input: any): Array<{ oldText: string; newText: string }> {
-  return Array.isArray(input.edits)
-    ? input.edits
-    : [{ oldText: input.oldText, newText: input.newText }];
-}
 
 function claudePayload(toolName: string, input: any): ClaudePayload | null {
   if (toolName === "write") {
@@ -72,6 +82,10 @@ function runRail(name: string, payload: ClaudePayload): { block: string } | { nu
 // baseline without swapping engines, keeping the comparison a clean toggle.
 const railsDisabled = (): boolean => Boolean(process.env.LIUBAI_RAILS_OFF);
 
+// Dedup ships log-only: detectors observe and log until LIUBAI_DEDUP_ENFORCE
+// flips no-ops, replays, and escalations on.
+const dedupEnforced = (): boolean => Boolean(process.env.LIUBAI_DEDUP_ENFORCE);
+
 // A missing or malformed file yields no rules, so the gate stays open rather
 // than bricking the agent on a typo.
 function loadRules(path: string): Partial<CommandRules> {
@@ -84,14 +98,17 @@ function loadRules(path: string): Partial<CommandRules> {
 
 // `ask` needs an interactive prompt; with no UI (headless `-p`/rpc) it blocks,
 // so an unattended run can't slip a gated command through unconfirmed.
+// `skipAsk` bypasses only the confirmation, and only right after the user
+// confirmed this exact duplicate; deny stays absolute.
 async function gateCommand(
   command: string,
   rules: CommandRules,
   ctx: any,
+  skipAsk = false,
 ): Promise<{ block: true; reason: string } | undefined> {
   const decision = classify(command, rules);
   if (decision === "deny") return { block: true, reason: `[command-gate] denied: ${command}` };
-  if (decision === "ask") {
+  if (decision === "ask" && !skipAsk) {
     if (!ctx.hasUI) {
       return { block: true, reason: `[command-gate] '${command}' needs confirmation; no UI available` };
     }
@@ -101,29 +118,86 @@ async function gateCommand(
   return undefined;
 }
 
-export function register(pi: ExtensionAPI): void {
+// Test seam: production wiring uses the real tools and process adapters,
+// tests inject fakes so no command ever leaves the process.
+export type RailsDeps = {
+  bashTool?: ToolLike;
+  editTool?: ToolLike;
+  exec?: Exec;
+  readTargetFile?: (path: string) => Promise<string>;
+  logDedup?: DedupLog;
+};
+
+export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
   const pendingNudges = new Map<string, string[]>();
-  const dedupSeen = new Set<string>();
   const rules = mergeRules(loadRules(GLOBAL_RULES), loadRules(PROJECT_RULES));
+  const dedup = createSession();
+  const logDedup = deps.logDedup ?? createFileLog();
+  const cwd = process.cwd();
+
+  pi.registerTool(
+    withBashDedup((deps.bashTool ?? createBashToolDefinition(cwd)) as ToolLike, {
+      patterns: rules.dedup,
+      session: dedup,
+      exec: deps.exec ?? createExec(cwd),
+      log: logDedup,
+      enforced: dedupEnforced,
+      disabled: railsDisabled,
+    }) as any,
+  );
+  pi.registerTool(
+    withEditDedup((deps.editTool ?? createEditToolDefinition(cwd)) as ToolLike, {
+      session: dedup,
+      readTargetFile: deps.readTargetFile ?? createTargetReader(cwd),
+      log: logDedup,
+      enforced: dedupEnforced,
+      disabled: railsDisabled,
+    }) as any,
+  );
+
+  // A key that already no-opped once is being re-issued despite the notice:
+  // ask the user, since retry loops are exactly what the no-op should end.
+  async function resolveRepeat(
+    key: string,
+    describe: string,
+    tool: string,
+    ctx: any,
+  ): Promise<{ block: true; reason: string } | { skipAsk: boolean }> {
+    if (repeatedDuplicate(dedup, key)) {
+      if (!ctx?.hasUI) {
+        logDedup({ kind: "escalate-block", tool, key, action: "no-ui" });
+        return { block: true, reason: `[dedup] duplicate needs confirmation; no UI available: ${describe}` };
+      }
+      const confirmed = await ctx.ui.confirm("Run duplicate again?", describe);
+      if (!confirmed) {
+        logDedup({ kind: "escalate-block", tool, key, action: "declined" });
+        return { block: true, reason: `[dedup] duplicate declined: ${describe}` };
+      }
+      logDedup({ kind: "escalate-ask", tool, key, action: "approved" });
+      approveRerun(dedup, key);
+      return { skipAsk: true };
+    }
+    return { skipAsk: false };
+  }
 
   pi.on("tool_call", async (event: any, ctx: any) => {
     if (railsDisabled()) return undefined;
 
     if (event.toolName === "bash") {
       const command = event.input?.command ?? "";
-      const key = bashKey(command);
-      if (bashMatchesDedup(command, rules.dedup) && dedupSeen.has(key)) {
-        return { block: true, reason: blockReason("bash") };
+      let skipAsk = false;
+      if (dedupEnforced() && bashMatchesDedup(command, rules.dedup)) {
+        const outcome = await resolveRepeat(bashKey(command), command, "bash", ctx);
+        if ("block" in outcome) return outcome;
+        skipAsk = outcome.skipAsk;
       }
-      return gateCommand(command, rules, ctx);
+      return gateCommand(command, rules, ctx, skipAsk);
     }
 
-    if (event.toolName === "write") {
-      const key = writeKey(event.input.path, event.input.content);
-      if (dedupSeen.has(key)) return { block: true, reason: blockReason("write") };
-    } else if (event.toolName === "edit") {
+    if (event.toolName === "edit" && dedupEnforced()) {
       const key = editKey(event.input.path, editList(event.input));
-      if (dedupSeen.has(key)) return { block: true, reason: blockReason("edit") };
+      const outcome = await resolveRepeat(key, `edit ${event.input.path}`, "edit", ctx);
+      if ("block" in outcome) return outcome;
     }
 
     const payload = claudePayload(event.toolName, event.input);
@@ -143,16 +217,6 @@ export function register(pi: ExtensionAPI): void {
 
   pi.on("tool_result", (event: any) => {
     if (railsDisabled()) return undefined;
-
-    if (!event.isError) {
-      if (event.toolName === "bash" && bashMatchesDedup(event.input?.command, rules.dedup)) {
-        dedupSeen.add(bashKey(event.input.command));
-      } else if (event.toolName === "write") {
-        dedupSeen.add(writeKey(event.input.path, event.input.content));
-      } else if (event.toolName === "edit") {
-        dedupSeen.add(editKey(event.input.path, editList(event.input)));
-      }
-    }
 
     const nudges = pendingNudges.get(event.toolCallId);
     if (!nudges) return undefined;
