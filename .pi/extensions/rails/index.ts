@@ -1,11 +1,6 @@
 import {
   createBashToolDefinition,
   createEditToolDefinition,
-  createFindToolDefinition,
-  createGrepToolDefinition,
-  createLsToolDefinition,
-  createReadToolDefinition,
-  createWriteToolDefinition,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { spawnSync } from "node:child_process";
@@ -29,7 +24,7 @@ import {
   type Exec,
 } from "./dedup.ts";
 import { withBashDedup, withEditDedup, type ToolLike } from "./overrides.ts";
-import { withoutDuplicateToolCalls, withSingleFlight, type InFlightCalls } from "./singleflight.ts";
+import { withoutDuplicateToolCalls } from "./duplicate-delivery.ts";
 import { cleanProse } from "./prose-gate.ts";
 import { injectWebSearch } from "./web-search.ts";
 
@@ -141,50 +136,30 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
   const logDedup = deps.logDedup ?? createFileLog();
   const cwd = process.cwd();
 
-  // Duplicate-id shield: pi can deliver the same tool call twice (see
-  // singleflight.ts). Correctness, not steering — stays on under
-  // LIUBAI_RAILS_OFF. Built-ins coalesce onto one execution; tools this
-  // extension cannot wrap (other extensions' tools, e.g. spawn) get the
-  // second delivery blocked by a hook registered before the main handler.
-  const inFlight: InFlightCalls = new Map();
-  const shield = (tool: ToolLike) => withSingleFlight(tool, inFlight, logDedup);
-
   pi.registerTool(
-    shield(
-      withBashDedup((deps.bashTool ?? createBashToolDefinition(cwd)) as ToolLike, {
-        patterns: rules.dedup,
-        session: dedup,
-        exec: deps.exec ?? createExec(cwd),
-        log: logDedup,
-        enforced: dedupEnforced,
-        disabled: railsDisabled,
-      }),
-    ) as any,
+    withBashDedup((deps.bashTool ?? createBashToolDefinition(cwd)) as ToolLike, {
+      patterns: rules.dedup,
+      session: dedup,
+      exec: deps.exec ?? createExec(cwd),
+      log: logDedup,
+      enforced: dedupEnforced,
+      disabled: railsDisabled,
+    }) as any,
   );
   pi.registerTool(
-    shield(
-      withEditDedup((deps.editTool ?? createEditToolDefinition(cwd)) as ToolLike, {
-        session: dedup,
-        readTargetFile: deps.readTargetFile ?? createTargetReader(cwd),
-        log: logDedup,
-        enforced: dedupEnforced,
-        disabled: railsDisabled,
-      }),
-    ) as any,
+    withEditDedup((deps.editTool ?? createEditToolDefinition(cwd)) as ToolLike, {
+      session: dedup,
+      readTargetFile: deps.readTargetFile ?? createTargetReader(cwd),
+      log: logDedup,
+      enforced: dedupEnforced,
+      disabled: railsDisabled,
+    }) as any,
   );
-  const WRAPPED_BUILTINS = new Set(["bash", "edit"]);
-  for (const create of [
-    createFindToolDefinition,
-    createGrepToolDefinition,
-    createLsToolDefinition,
-    createReadToolDefinition,
-    createWriteToolDefinition,
-  ]) {
-    const tool = shield(create(cwd) as ToolLike);
-    WRAPPED_BUILTINS.add(tool.name);
-    pi.registerTool(tool as any);
-  }
 
+  // Duplicate delivery (issue #15): the message_end drop is the structural
+  // fix; the tool_call detector is a log-only tripwire so a future duplicate
+  // that slips past finalization shows up in the log instead of in silence.
+  // Both are correctness, not steering — active under LIUBAI_RAILS_OFF.
   pi.on("message_end", (event: any) => {
     if (event.message.role !== "assistant") return undefined;
     const deduped = withoutDuplicateToolCalls(event.message, logDedup);
@@ -193,16 +168,12 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
 
   const seenCallIds = new Set<string>();
   pi.on("tool_call", (event: any) => {
-    if (!event.toolCallId || WRAPPED_BUILTINS.has(event.toolName)) return undefined;
+    if (!event.toolCallId) return undefined;
     if (seenCallIds.has(event.toolCallId)) {
-      logDedup({ kind: "duplicate-id", tool: event.toolName, key: event.toolCallId, action: "blocked" });
-      return {
-        block: true,
-        reason:
-          "[dedup] duplicate delivery of an already-issued tool call id; the original result arrives separately — do not retry",
-      };
+      logDedup({ kind: "duplicate-id", tool: event.toolName, key: event.toolCallId, action: "observed" });
+    } else {
+      seenCallIds.add(event.toolCallId);
     }
-    seenCallIds.add(event.toolCallId);
     return undefined;
   });
 

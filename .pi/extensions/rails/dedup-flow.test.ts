@@ -147,52 +147,26 @@ test("an ask-gated command whose effect was undone externally is confirmed again
   assert.equal(h.calls.length, 2);
 });
 
-test("a duplicated tool call id executes the command once and both copies see one result", async () => {
-  const h = harness();
-
-  const [first, second] = await Promise.all([
-    h.run("npm publish", "dup-id"),
-    h.run("npm publish", "dup-id"),
-  ]);
-
-  assert.equal(h.calls.length, 1);
-  assert.equal(first, second);
-  assert.ok(h.logs.some((entry) => entry.kind === "duplicate-id"));
-});
-
-test("the duplicate-id shield stays active under LIUBAI_RAILS_OFF", async () => {
-  process.env.LIUBAI_RAILS_OFF = "1";
-  try {
-    const h = harness();
-
-    await Promise.all([h.run("seq 5", "dup-id"), h.run("seq 5", "dup-id")]);
-
-    assert.equal(h.calls.length, 1);
-  } finally {
-    delete process.env.LIUBAI_RAILS_OFF;
-  }
-});
-
-test("a duplicated call id for a tool the shield cannot wrap is blocked on second delivery", async () => {
+test("a duplicated call id reaching tool_call is logged but never blocked", async () => {
   const h = harness();
 
   const first = await h.fire({ toolName: "spawn", toolCallId: "sp-1", input: {} }, h.headlessCtx);
   const second = await h.fire({ toolName: "spawn", toolCallId: "sp-1", input: {} }, h.headlessCtx);
 
   assert.equal(first, undefined);
-  assert.equal(second?.block, true);
-  assert.ok(h.logs.some((entry) => entry.kind === "duplicate-id" && entry.action === "blocked"));
+  assert.equal(second, undefined);
+  assert.ok(h.logs.some((entry) => entry.kind === "duplicate-id" && entry.action === "observed"));
 });
 
-test("the duplicate-id block for unwrapped tools stays active under LIUBAI_RAILS_OFF", async () => {
+test("the duplicate-id detector stays active under LIUBAI_RAILS_OFF", async () => {
   process.env.LIUBAI_RAILS_OFF = "1";
   try {
     const h = harness();
 
     await h.fire({ toolName: "spawn", toolCallId: "sp-2", input: {} }, h.headlessCtx);
-    const second = await h.fire({ toolName: "spawn", toolCallId: "sp-2", input: {} }, h.headlessCtx);
+    await h.fire({ toolName: "spawn", toolCallId: "sp-2", input: {} }, h.headlessCtx);
 
-    assert.equal(second?.block, true);
+    assert.ok(h.logs.some((entry) => entry.kind === "duplicate-id" && entry.action === "observed"));
   } finally {
     delete process.env.LIUBAI_RAILS_OFF;
   }
