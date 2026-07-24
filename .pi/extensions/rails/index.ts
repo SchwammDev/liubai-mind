@@ -29,7 +29,7 @@ import {
   type Exec,
 } from "./dedup.ts";
 import { withBashDedup, withEditDedup, type ToolLike } from "./overrides.ts";
-import { withSingleFlight, type InFlightCalls } from "./singleflight.ts";
+import { withoutDuplicateToolCalls, withSingleFlight, type InFlightCalls } from "./singleflight.ts";
 import { cleanProse } from "./prose-gate.ts";
 import { injectWebSearch } from "./web-search.ts";
 
@@ -184,6 +184,12 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
     WRAPPED_BUILTINS.add(tool.name);
     pi.registerTool(tool as any);
   }
+
+  pi.on("message_end", (event: any) => {
+    if (event.message.role !== "assistant") return undefined;
+    const deduped = withoutDuplicateToolCalls(event.message, logDedup);
+    return deduped ? { message: deduped } : undefined;
+  });
 
   const seenCallIds = new Set<string>();
   pi.on("tool_call", (event: any) => {

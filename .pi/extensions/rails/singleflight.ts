@@ -39,3 +39,30 @@ function evictBeyondWindow(calls: InFlightCalls): void {
     calls.delete(calls.keys().next().value!);
   }
 }
+
+type MessageLike = { role: string; content: any[] };
+
+// Same upstream bug, caught earlier: dropping the duplicate blocks at
+// message_end stops both the double execution and the doubled context, since
+// pi extracts tool calls and persists from the replaced message. Keep the LAST
+// copy — it comes from the terminal output_item.done event, whose arguments
+// are authoritative. Returns null when the message is already clean.
+export function withoutDuplicateToolCalls<T extends MessageLike>(
+  message: T,
+  log: DedupLog,
+): T | null {
+  const seen = new Set<string>();
+  const kept: any[] = [];
+  for (let i = message.content.length - 1; i >= 0; i--) {
+    const part = message.content[i];
+    if (part?.type === "toolCall") {
+      if (seen.has(part.id)) {
+        log({ kind: "duplicate-id", tool: part.name, key: part.id, action: "dropped-from-message" });
+        continue;
+      }
+      seen.add(part.id);
+    }
+    kept.unshift(part);
+  }
+  return kept.length === message.content.length ? null : { ...message, content: kept };
+}

@@ -69,9 +69,17 @@ function harness() {
     return undefined;
   };
   const hook = (command: string, ctx: any) => fire({ toolName: "bash", input: { command } }, ctx);
+  const finalizeMessage = async (message: any) => {
+    let current = message;
+    for (const handler of handlers.get("message_end") ?? []) {
+      const outcome = await handler({ message: current });
+      if (outcome?.message) current = outcome.message;
+    }
+    return current;
+  };
   const run = (command: string, id?: string) =>
     tools.get("bash").execute(id ?? `call-${++callSeq}`, { command }, undefined, undefined, undefined);
-  return { fire, hook, run, calls, confirms, logs, world, confirmingCtx, headlessCtx, bash: tools.get("bash") };
+  return { fire, hook, run, finalizeMessage, calls, confirms, logs, world, confirmingCtx, headlessCtx, bash: tools.get("bash") };
 }
 
 async function runUntilFirstReplay(h: ReturnType<typeof harness>) {
@@ -188,6 +196,45 @@ test("the duplicate-id block for unwrapped tools stays active under LIUBAI_RAILS
   } finally {
     delete process.env.LIUBAI_RAILS_OFF;
   }
+});
+
+const duplicatedAssistantMessage = () => ({
+  role: "assistant",
+  content: [
+    { type: "toolCall", id: "call-A", name: "bash", arguments: { command: "echo a" } },
+    { type: "thinking", thinking: "t" },
+    { type: "toolCall", id: "call-A", name: "bash", arguments: { command: "echo a" } },
+  ],
+});
+
+test("a finalized assistant message loses duplicated tool call blocks before execution and persistence", async () => {
+  const h = harness();
+
+  const message = await h.finalizeMessage(duplicatedAssistantMessage());
+
+  const ids = message.content.filter((part: any) => part.type === "toolCall").map((part: any) => part.id);
+  assert.deepEqual(ids, ["call-A"]);
+});
+
+test("message dedup stays active under LIUBAI_RAILS_OFF", async () => {
+  process.env.LIUBAI_RAILS_OFF = "1";
+  try {
+    const h = harness();
+
+    const message = await h.finalizeMessage(duplicatedAssistantMessage());
+
+    assert.equal(message.content.filter((part: any) => part.type === "toolCall").length, 1);
+  } finally {
+    delete process.env.LIUBAI_RAILS_OFF;
+  }
+});
+
+test("a user message passes message_end untouched", async () => {
+  const h = harness();
+
+  const message = { role: "user", content: [{ type: "text", text: "hi hi" }] };
+
+  assert.equal(await h.finalizeMessage(message), message);
 });
 
 test("LIUBAI_RAILS_OFF delegates the overridden bash tool byte-identically", async () => {
