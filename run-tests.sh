@@ -1,6 +1,8 @@
 #!/bin/bash
-# One entrypoint for the whole suite: TypeScript extension tests (node --test)
-# and the vendored Python hook tests (pytest). Forwards args verbatim to each.
+# One entrypoint for the whole suite: TypeScript extension tests (node --test),
+# the vendored Python hook tests (pytest), and the tsc type gate. Args are
+# forwarded verbatim to the two test runners; tsc always checks the whole
+# project, since `tsc -p <cfg> <file>` is an error.
 #
 # Node: system node is too old for type stripping, so use the mise-managed
 # node@22 from setup.sh. Python: `uv run --with pytest` injects pytest on demand,
@@ -35,6 +37,17 @@ if [ $py_status -eq 0 ]; then
   echo "✅ Python tests passed"
 else
   echo "$py_out"
+  status=1
+fi
+
+tsc_status=0
+echo
+echo "## Types (tsc)"
+tsc_out=$(mise exec -- ./node_modules/.bin/tsc --noEmit -p "$ROOT/tsconfig.json" 2>&1) || tsc_status=1
+if [ $tsc_status -eq 0 ]; then
+  echo "✅ Types check clean"
+else
+  echo "$tsc_out"
   status=1
 fi
 

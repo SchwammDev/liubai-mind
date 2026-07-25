@@ -11,13 +11,24 @@ const API = "openai-responses";
 const WEB_SEARCH = { type: "web_search" };
 
 export function injectWebSearch(
-  payload: ResponsesPayload,
+  payload: unknown,
   model: ModelTarget | undefined,
 ): ResponsesPayload | undefined {
   if (model?.provider !== PROVIDER || model.api !== API) return undefined;
+  if (!isResponsesPayload(payload)) return undefined;
 
   const tools = payload.tools ?? [];
   if (tools.some((tool) => tool.type === WEB_SEARCH.type)) return undefined;
 
   return { ...payload, tools: [...tools, WEB_SEARCH] };
+}
+
+function isResponsesPayload(payload: unknown): payload is ResponsesPayload {
+  if (typeof payload !== "object" || payload === null) return false;
+  if (!("tools" in payload) || payload.tools === undefined) return true;
+  return Array.isArray(payload.tools) && payload.tools.every(hasToolType);
+}
+
+function hasToolType(tool: unknown): tool is { type: string } {
+  return typeof tool === "object" && tool !== null && "type" in tool && typeof tool.type === "string";
 }

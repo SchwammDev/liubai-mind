@@ -1,14 +1,20 @@
+import type {
+  RpcExtensionUIRequest,
+  RpcExtensionUIResponse,
+} from "@earendil-works/pi-coding-agent";
 import type { Message } from "@earendil-works/pi-ai";
 
 import { CLARIFY_TAG, MAX_CLARIFY, type SingleResult } from "./child.ts";
 
 export type Accumulator = Pick<SingleResult, "messages" | "usage" | "stderr" | "model" | "stopReason" | "errorMessage">;
 
+export type DialogOptions = { signal?: AbortSignal | undefined; timeout?: number | undefined };
+
 export interface UiForwarder {
   hasUI: boolean;
-  confirm(title: string, message: string, opts?: { signal?: AbortSignal; timeout?: number }): Promise<boolean>;
-  select(title: string, options: string[], opts?: { signal?: AbortSignal; timeout?: number }): Promise<string | undefined>;
-  input(title: string, placeholder?: string, opts?: { signal?: AbortSignal; timeout?: number }): Promise<string | undefined>;
+  confirm(title: string, message: string, opts?: DialogOptions): Promise<boolean>;
+  select(title: string, options: string[], opts?: DialogOptions): Promise<string | undefined>;
+  input(title: string, placeholder?: string, opts?: DialogOptions): Promise<string | undefined>;
   editor(title: string, prefill?: string): Promise<string | undefined>;
   notify(message: string, type?: "info" | "warning" | "error"): void;
 }
@@ -37,18 +43,38 @@ export type TurnResult = {
 
 const DIALOG_METHODS = new Set(["confirm", "select", "input", "editor"]);
 const FIRE_AND_FORGET_METHODS = new Set(["setStatus", "setWidget", "setTitle", "set_editor_text"]);
+const MESSAGE_ROLES = new Set(["user", "assistant", "toolResult"]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isMessage(value: unknown): value is Message {
+  return isRecord(value) && typeof value.role === "string" && MESSAGE_ROLES.has(value.role);
+}
+
+// The child is a pi process, so every request that names a method we act on
+// carries that method's payload; anything else is dropped rather than trusted.
+function isUiRequest(value: unknown): value is RpcExtensionUIRequest {
+  if (!isRecord(value) || value.type !== "extension_ui_request") return false;
+  if (typeof value.id !== "string" || typeof value.method !== "string") return false;
+  if (value.method === "notify") return typeof value.message === "string";
+  if (DIALOG_METHODS.has(value.method)) return typeof value.title === "string";
+  return FIRE_AND_FORGET_METHODS.has(value.method);
+}
 
 export function processRpcLine(line: string, acc: Accumulator, bridge: AskBridge): LineOutcome {
   if (!line.trim()) return { settled: false };
-  let event: any;
+  let event: unknown;
   try {
     event = JSON.parse(line);
   } catch {
     return { settled: false };
   }
+  if (!isRecord(event)) return { settled: false };
 
-  if (event.type === "message_end" && event.message) {
-    const msg = event.message as Message;
+  if (event.type === "message_end" && isMessage(event.message)) {
+    const msg = event.message;
     acc.messages.push(msg);
     if (msg.role === "assistant") {
       acc.usage.turns++;
@@ -68,7 +94,7 @@ export function processRpcLine(line: string, acc: Accumulator, bridge: AskBridge
     return { settled: false };
   }
 
-  if (event.type === "extension_ui_request") {
+  if (isUiRequest(event)) {
     const intercept = bridge.interceptClarify(event);
     if (intercept.kind === "suspend") return { settled: false, suspended: { clarifyId: intercept.clarifyId, question: intercept.question } };
     if (intercept.kind === "denied") return { settled: false };
@@ -98,7 +124,7 @@ export class DialogGate {
 }
 
 export class AskBridge {
-  private readonly signal?: AbortSignal;
+  private readonly signal: AbortSignal | undefined;
   private readonly forwarder: UiForwarder;
   private readonly writer: (line: string) => void;
   private readonly gate: DialogGate;
@@ -123,7 +149,7 @@ export class AskBridge {
     this.budget = budget;
   }
 
-  interceptClarify(req: any): ClarifyIntercept {
+  interceptClarify(req: RpcExtensionUIRequest): ClarifyIntercept {
     if (req.method !== "input" || typeof req.title !== "string" || !req.title.startsWith(CLARIFY_TAG)) return { kind: "pass" };
     const question = req.title.slice(CLARIFY_TAG.length);
     // A second clarify while one is already suspended is a duplicate tool call
@@ -142,7 +168,7 @@ export class AskBridge {
     this.clarifyInFlight = false;
   }
 
-  async handle(req: any): Promise<void> {
+  async handle(req: RpcExtensionUIRequest): Promise<void> {
     if (req.method === "notify") {
       this.forwarder.notify(req.message, req.notifyType);
       return;
@@ -157,7 +183,10 @@ export class AskBridge {
       return;
     }
 
-    const opts = { signal: this.signal, timeout: req.timeout };
+    const opts: DialogOptions = {
+      signal: this.signal,
+      timeout: "timeout" in req ? req.timeout : undefined,
+    };
 
     try {
       if (req.method === "confirm") {
@@ -205,16 +234,16 @@ export class AskBridge {
     }
   }
 
-  private writeResponse(obj: Record<string, unknown>): void {
-    this.writer(JSON.stringify(obj));
+  private writeResponse(response: RpcExtensionUIResponse): void {
+    this.writer(JSON.stringify(response));
   }
 }
 
 export class ChildSession {
   private readonly transport: ChildTransport;
   private readonly bridge: AskBridge;
-  private readonly onUpdate?: () => void;
-  private readonly signal?: AbortSignal;
+  private readonly onUpdate: (() => void) | undefined;
+  private readonly signal: AbortSignal | undefined;
   private readonly acc: Accumulator;
   private readonly dialogController = new AbortController();
   private resolver: ((result: TurnResult) => void) | null = null;

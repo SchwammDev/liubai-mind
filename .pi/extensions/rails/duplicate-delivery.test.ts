@@ -1,13 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { withoutDuplicateToolCalls } from "./duplicate-delivery.ts";
+import { withoutDuplicateToolCalls, type MessageLike, type MessagePart } from "./duplicate-delivery.ts";
 
-const toolCall = (id: string, marker: string) => ({ type: "toolCall", id, name: "bash", arguments: { marker } });
+const toolCall = (id: string, marker: string): MessagePart => ({
+  type: "toolCall",
+  id,
+  name: "bash",
+  arguments: { marker },
+});
 
 test("a message carrying the same tool call id twice keeps only the last copy", () => {
   const logs: any[] = [];
-  const message = {
+  const message: MessageLike = {
     role: "assistant",
     content: [
       toolCall("call-A", "early"),
@@ -28,7 +33,7 @@ test("a message carrying the same tool call id twice keeps only the last copy", 
 });
 
 test("a message without duplicate tool calls is reported unchanged", () => {
-  const message = {
+  const message: MessageLike = {
     role: "assistant",
     content: [toolCall("call-A", "only"), toolCall("call-B", "only")],
   };

@@ -87,7 +87,7 @@ class FakeWriter {
     this.lines.push(line);
   }
   json(i: number) {
-    return JSON.parse(this.lines[i]);
+    return JSON.parse(this.lines[i] ?? "");
   }
 }
 
@@ -138,7 +138,7 @@ test("a child ask's timeout is forwarded to the parent dialog", async () => {
 
   await bridge.handle({ type: "extension_ui_request", id: "c1", method: "confirm", title: "T", message: "M", timeout: 5000 });
 
-  assert.equal(f.confirmCalls[0].opts.timeout, 5000);
+  assert.equal(f.confirmCalls[0]?.opts.timeout, 5000);
 });
 
 test("AskBridge select writes {id, value} for a string and {id, cancelled} for undefined", async () => {
@@ -366,8 +366,9 @@ test("a pending parent confirm is dismissed when the child dies mid-ask", async 
 
   assert.equal(f.confirmCalls.length, 1);
 
-  const confirmPromise = f.confirmCalls[0].opts?.signal ? new Promise<void>((resolve) => {
-    f.confirmCalls[0].opts.signal.addEventListener("abort", () => resolve(), { once: true });
+  const pendingSignal: AbortSignal | undefined = f.confirmCalls[0]?.opts?.signal;
+  const confirmPromise = pendingSignal ? new Promise<void>((resolve) => {
+    pendingSignal.addEventListener("abort", () => resolve(), { once: true });
   }) : Promise.resolve();
 
   t.emitClose(9);
@@ -393,8 +394,9 @@ test("a pending parent confirm is dismissed on parent abort", async () => {
 
   assert.equal(f.confirmCalls.length, 1);
 
-  const confirmPromise = f.confirmCalls[0].opts?.signal ? new Promise<void>((resolve) => {
-    f.confirmCalls[0].opts.signal.addEventListener("abort", () => {
+  const pendingSignal: AbortSignal | undefined = f.confirmCalls[0]?.opts?.signal;
+  const confirmPromise = pendingSignal ? new Promise<void>((resolve) => {
+    pendingSignal.addEventListener("abort", () => {
       setImmediate(() => resolve());
     });
   }) : Promise.resolve();
@@ -513,7 +515,7 @@ test("interceptClarify returns the clarifyId and question for a tagged single-mo
   const w = new FakeWriter();
   const bridge = new AskBridge(new FakeForwarder(), (l) => w.write(l), undefined, undefined, "single", { delivered: 0 });
 
-  const out = bridge.interceptClarify({ id: "q1", method: "input", title: CLARIFY_TAG + "which file?" });
+  const out = bridge.interceptClarify({ type: "extension_ui_request", id: "q1", method: "input", title: CLARIFY_TAG + "which file?" });
 
   assert.deepEqual(out, { kind: "suspend", clarifyId: "q1", question: "which file?" });
   assert.equal(w.lines.length, 0);
@@ -523,7 +525,7 @@ test("interceptClarify auto-denies and returns denied in parallel mode", () => {
   const w = new FakeWriter();
   const bridge = new AskBridge(new FakeForwarder(), (l) => w.write(l), undefined, undefined, "parallel", { delivered: 0 });
 
-  const out = bridge.interceptClarify({ id: "q1", method: "input", title: CLARIFY_TAG + "which?" });
+  const out = bridge.interceptClarify({ type: "extension_ui_request", id: "q1", method: "input", title: CLARIFY_TAG + "which?" });
 
   assert.deepEqual(out, { kind: "denied" });
   assert.deepEqual(w.json(0), { type: "extension_ui_response", id: "q1", value: "proceed with best judgment" });
@@ -533,7 +535,7 @@ test("interceptClarify auto-denies and returns denied when the delivered budget 
   const w = new FakeWriter();
   const bridge = new AskBridge(new FakeForwarder(), (l) => w.write(l), undefined, undefined, "single", { delivered: MAX_CLARIFY });
 
-  const out = bridge.interceptClarify({ id: "q1", method: "input", title: CLARIFY_TAG + "which?" });
+  const out = bridge.interceptClarify({ type: "extension_ui_request", id: "q1", method: "input", title: CLARIFY_TAG + "which?" });
 
   assert.deepEqual(out, { kind: "denied" });
   assert.deepEqual(w.json(0), { type: "extension_ui_response", id: "q1", value: "proceed with best judgment" });
@@ -543,7 +545,7 @@ test("interceptClarify returns pass without writing for a non-input request", ()
   const w = new FakeWriter();
   const bridge = new AskBridge(new FakeForwarder(), (l) => w.write(l), undefined, undefined, "single", { delivered: 0 });
 
-  const out = bridge.interceptClarify({ id: "q1", method: "confirm", title: CLARIFY_TAG + "which?" });
+  const out = bridge.interceptClarify({ type: "extension_ui_request", id: "q1", method: "confirm", title: CLARIFY_TAG + "which?", message: "which?" });
 
   assert.deepEqual(out, { kind: "pass" });
   assert.equal(w.lines.length, 0);
@@ -553,7 +555,7 @@ test("interceptClarify returns pass without writing for an untagged input reques
   const w = new FakeWriter();
   const bridge = new AskBridge(new FakeForwarder(), (l) => w.write(l), undefined, undefined, "single", { delivered: 0 });
 
-  const out = bridge.interceptClarify({ id: "q1", method: "input", title: "just a question" });
+  const out = bridge.interceptClarify({ type: "extension_ui_request", id: "q1", method: "input", title: "just a question" });
 
   assert.deepEqual(out, { kind: "pass" });
   assert.equal(w.lines.length, 0);

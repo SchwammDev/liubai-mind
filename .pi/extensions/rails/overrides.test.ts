@@ -1,8 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 
 import { withBashDedup, withEditDedup } from "./overrides.ts";
 import { approveRerun, bashKey, createSession, REPLAY_NOTICE, type Exec } from "./dedup.ts";
+
+type FakeResult = AgentToolResult<undefined> & { isError?: boolean };
 
 const PATTERNS = [
   "\\bgh\\s+(issue|pr)\\s+comment\\b",
@@ -37,7 +40,7 @@ function bashHarness(opts: { world?: World; enforced?: boolean; disabled?: boole
   const world = opts.world ?? ghWorld();
   const delegate = {
     name: "bash",
-    execute: async (_id: string, params: any) => {
+    execute: async (_id: string, params: any): Promise<FakeResult> => {
       calls.push(params.command);
       if (/\bclose\b/.test(params.command)) world.state = "CLOSED";
       if (/\breopen\b/.test(params.command)) world.state = "OPEN";
@@ -52,7 +55,7 @@ function bashHarness(opts: { world?: World; enforced?: boolean; disabled?: boole
     enforced: () => opts.enforced ?? true,
     disabled: () => opts.disabled ?? false,
   });
-  const run = (command: string) => tool.execute("id", { command }, undefined, undefined, undefined);
+  const run = (command: string) => tool.execute("id", { command });
   return { tool, session, logs, calls, world, run };
 }
 
@@ -99,7 +102,7 @@ test("a failed first run is not cached for replay", async () => {
   let attempts = 0;
   const delegate = {
     name: "bash",
-    execute: async () => {
+    execute: async (_id: string, _params: unknown): Promise<FakeResult> => {
       attempts += 1;
       if (attempts === 1) throw new Error("network down");
       return { content: [{ type: "text", text: "published" }], details: undefined };
@@ -113,7 +116,7 @@ test("a failed first run is not cached for replay", async () => {
     enforced: () => true,
     disabled: () => false,
   });
-  const run = () => tool.execute("id", { command: "npm publish" }, undefined, undefined, undefined);
+  const run = () => tool.execute("id", { command: "npm publish" });
 
   await assert.rejects(run);
   const second = await run();
@@ -155,12 +158,12 @@ test("an unparseable dedup-listed command logs a parse miss and executes", async
 });
 
 test("rails off delegates byte-identically without checks or logging", async () => {
-  const sentinel = { content: [{ type: "text", text: "raw" }], details: undefined };
+  const sentinel: FakeResult = { content: [{ type: "text", text: "raw" }], details: undefined };
   const world = ghWorld();
   const session = createSession();
   const logs: any[] = [];
   const tool = withBashDedup(
-    { name: "bash", execute: async () => sentinel },
+    { name: "bash", execute: async (_id: string, _params: unknown) => sentinel },
     {
       patterns: PATTERNS,
       session,
@@ -171,7 +174,7 @@ test("rails off delegates byte-identically without checks or logging", async () 
     },
   );
 
-  const result = await tool.execute("id", { command: "npm publish" }, undefined, undefined, undefined);
+  const result = await tool.execute("id", { command: "npm publish" });
 
   assert.equal(result, sentinel);
   assert.equal(world.execCalls, 0);
@@ -184,7 +187,7 @@ function editHarness(opts: { file?: string; readFails?: boolean; enforced?: bool
   const calls: any[] = [];
   const delegate = {
     name: "edit",
-    execute: async (_id: string, params: any) => {
+    execute: async (_id: string, params: any): Promise<FakeResult> => {
       calls.push(params);
       return { content: [{ type: "text", text: "edited" }], details: undefined };
     },
@@ -200,7 +203,7 @@ function editHarness(opts: { file?: string; readFails?: boolean; enforced?: bool
     disabled: () => false,
   });
   const run = (path: string, edits: Array<{ oldText: string; newText: string }>) =>
-    tool.execute("id", { path, edits }, undefined, undefined, undefined);
+    tool.execute("id", { path, edits });
   return { logs, calls, run };
 }
 

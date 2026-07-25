@@ -1,3 +1,9 @@
+import type {
+  AgentToolResult,
+  createBashToolDefinition,
+  createEditToolDefinition,
+} from "@earendil-works/pi-coding-agent";
+
 import {
   bashKey,
   bashMatchesDedup,
@@ -9,16 +15,18 @@ import {
   effectFamily,
   recordNoop,
   REPLAY_NOTICE,
+  type BashResult,
   type DedupLog,
   type DedupSession,
   type Exec,
   type ReplayEntry,
 } from "./dedup.ts";
 
-export type ToolLike = { name: string; execute: (...args: any[]) => Promise<any> } & Record<
-  string,
-  unknown
->;
+export type BashTool = ReturnType<typeof createBashToolDefinition>;
+export type EditTool = ReturnType<typeof createEditToolDefinition>;
+
+type ResultPart = AgentToolResult<unknown>["content"][number];
+type TextPart = Extract<ResultPart, { type: "text" }>;
 
 export type BashDedupDeps = {
   patterns: string[];
@@ -37,10 +45,13 @@ export type EditDedupDeps = {
   disabled: () => boolean;
 };
 
-export function withBashDedup(delegate: ToolLike, deps: BashDedupDeps): ToolLike {
+export function withBashDedup<T extends Pick<BashTool, "name" | "execute">>(
+  delegate: T,
+  deps: BashDedupDeps,
+): T {
   return {
     ...delegate,
-    async execute(toolCallId: string, params: any, signal: any, onUpdate: any, ctx: any) {
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
       const passthrough = () => delegate.execute(toolCallId, params, signal, onUpdate, ctx);
       if (deps.disabled()) return passthrough();
       const command = String(params?.command ?? "");
@@ -49,7 +60,7 @@ export function withBashDedup(delegate: ToolLike, deps: BashDedupDeps): ToolLike
       const key = bashKey(command);
       const runFresh = async (cacheReplay: boolean) => {
         const result = await passthrough();
-        if (!result?.isError && cacheReplay) {
+        if (!reportedError(result) && cacheReplay) {
           deps.session.replayCache.set(key, snapshot(result));
         }
         return result;
@@ -94,10 +105,13 @@ export function withBashDedup(delegate: ToolLike, deps: BashDedupDeps): ToolLike
   };
 }
 
-export function withEditDedup(delegate: ToolLike, deps: EditDedupDeps): ToolLike {
+export function withEditDedup<T extends Pick<EditTool, "name" | "execute">>(
+  delegate: T,
+  deps: EditDedupDeps,
+): T {
   return {
     ...delegate,
-    async execute(toolCallId: string, params: any, signal: any, onUpdate: any, ctx: any) {
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
       const passthrough = () => delegate.execute(toolCallId, params, signal, onUpdate, ctx);
       if (deps.disabled()) return passthrough();
 
@@ -125,18 +139,28 @@ export function withEditDedup(delegate: ToolLike, deps: EditDedupDeps): ToolLike
   };
 }
 
-function noopResult(notice: string) {
+function noopResult(notice: string): AgentToolResult<undefined> {
   return { content: [{ type: "text", text: `[dedup] ${notice}` }], details: undefined };
 }
 
-function snapshot(result: any): ReplayEntry {
+// pi derives a tool result's error flag from a thrown execute, so its result type
+// carries none; a delegate that reports one anyway must not be cached for replay.
+function reportedError(result: BashResult): boolean {
+  return "isError" in result && result.isError === true;
+}
+
+function snapshot(result: BashResult): ReplayEntry {
   return structuredClone({ content: result.content ?? [], details: result.details });
 }
 
-function replayedResult(entry: ReplayEntry) {
-  const content: any[] = structuredClone(entry.content);
-  const first = content.find((part) => part?.type === "text");
+function replayedResult(entry: ReplayEntry): BashResult {
+  const content: ResultPart[] = structuredClone(entry.content);
+  const first = content.find(isTextPart);
   if (first) first.text = `${REPLAY_NOTICE}\n\n${first.text}`;
   else content.unshift({ type: "text", text: REPLAY_NOTICE });
   return { content, details: structuredClone(entry.details) };
+}
+
+function isTextPart(part: ResultPart): part is TextPart {
+  return part.type === "text";
 }
