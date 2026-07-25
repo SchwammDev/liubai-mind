@@ -1,3 +1,8 @@
+import type {
+  AgentToolResult,
+  BashToolDetails,
+  EditToolInput,
+} from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync } from "node:fs";
@@ -13,7 +18,9 @@ export type EffectCheck =
   | { effect: "unqueryable" }
   | { effect: "unparseable" };
 
-export type ReplayEntry = { content: unknown[]; details: unknown };
+export type BashResult = AgentToolResult<BashToolDetails | undefined>;
+
+export type ReplayEntry = Pick<BashResult, "content" | "details">;
 
 export type DedupSession = {
   noopNotices: Map<string, number>;
@@ -55,17 +62,36 @@ export function bashKey(command: string): string {
   return "bash\0" + command.trim();
 }
 
-export function editKey(
-  path: string,
-  edits: Array<{ oldText: string; newText: string }>,
-): string {
+export type Edit = { oldText: string; newText: string };
+
+// pi's edit tool takes a list of edits; the flat single-edit shape is the legacy
+// form some models still emit. `path` rides along so a tool call named "edit"
+// that carries neither shape can be recognised and left alone.
+export type EditInput = Pick<EditToolInput, "edits"> | Edit;
+export type EditCall = { path: string } & EditInput;
+
+export function editKey(path: string, edits: Edit[]): string {
   return "edit\0" + path + "\0" + sha256(JSON.stringify(edits));
 }
 
-export function editList(input: any): Array<{ oldText: string; newText: string }> {
-  return Array.isArray(input.edits)
-    ? input.edits
-    : [{ oldText: input.oldText, newText: input.newText }];
+export function editList(input: EditInput): Edit[] {
+  return "edits" in input ? input.edits : [{ oldText: input.oldText, newText: input.newText }];
+}
+
+export function editCall(input: unknown): EditCall | null {
+  if (!isRecord(input) || typeof input.path !== "string") return null;
+  const path = input.path;
+  const edits = input.edits;
+  if (Array.isArray(edits)) return edits.every(isEdit) ? { path, edits } : null;
+  return isEdit(input) ? { path, oldText: input.oldText, newText: input.newText } : null;
+}
+
+function isEdit(value: unknown): value is Edit {
+  return isRecord(value) && typeof value.oldText === "string" && typeof value.newText === "string";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 export function bashMatchesDedup(command: string, patterns: string[]): boolean {
@@ -119,7 +145,7 @@ function shellWords(command: string): string[] | null {
   let current = "";
   let inWord = false;
   for (let i = 0; i < command.length; i++) {
-    const ch = command[i];
+    const ch = command.charAt(i);
     if (ch === "'") {
       const end = command.indexOf("'", i + 1);
       if (end < 0) return null;
@@ -159,12 +185,18 @@ function parseGhArgs(
   const args: GhArgs = { values: new Map() };
   for (let i = 0; i < rest.length; i++) {
     const word = rest[i];
+    if (word === undefined) return null;
     const [flag, inline] = word.startsWith("--") ? splitInline(word) : [word, undefined];
     if (rejectFlags.includes(flag)) return null;
     if (flag === "--repo" || flag === "-R") {
-      args.repo = inline ?? rest[++i];
+      const value = inline ?? rest[++i];
+      if (value === undefined) return null;
+      args.repo = value;
     } else if (flag in valueFlags) {
-      args.values.set(valueFlags[flag], inline ?? rest[++i]);
+      const name = valueFlags[flag];
+      const value = inline ?? rest[++i];
+      if (name === undefined || value === undefined) return null;
+      args.values.set(name, value);
     } else if (flag.startsWith("-")) {
       return null;
     } else if (args.target === undefined) {
@@ -195,7 +227,7 @@ function ghViewArgv(kind: string, args: GhArgs, field: string): string[] {
 
 async function ghCommentEffect(words: string[], exec: Exec): Promise<EffectCheck> {
   const [gh, kind, sub, ...rest] = words;
-  if (gh !== "gh" || sub !== "comment") return { effect: "unparseable" };
+  if (gh !== "gh" || kind === undefined || sub !== "comment") return { effect: "unparseable" };
   const args = parseGhArgs(
     rest,
     { "--body": "body", "-b": "body" },
@@ -216,14 +248,17 @@ async function ghCommentEffect(words: string[], exec: Exec): Promise<EffectCheck
 
 async function ghStateEffect(words: string[], exec: Exec): Promise<EffectCheck> {
   const [gh, kind, sub, ...rest] = words;
-  if (gh !== "gh" || (sub !== "close" && sub !== "reopen")) return { effect: "unparseable" };
+  if (gh !== "gh" || kind === undefined || (sub !== "close" && sub !== "reopen")) {
+    return { effect: "unparseable" };
+  }
   const args = parseGhArgs(rest, { "--comment": "comment", "-c": "comment", "--reason": "reason", "-r": "reason" }, []);
   if (!args) return { effect: "unparseable" };
   if (kind === "issue" && !args.target) return { effect: "unparseable" };
 
   const res = await exec(ghViewArgv(kind, args, "state"));
   if (res.exitCode !== 0) return { effect: "absent" };
-  const state = parseJson(res.stdout)?.state;
+  const parsed = parseJson(res.stdout);
+  const state = isRecord(parsed) ? parsed.state : undefined;
   const wanted = sub === "close" ? "CLOSED" : "OPEN";
   if (state !== wanted) return { effect: "absent" };
   return {
@@ -238,6 +273,7 @@ async function gitTagEffect(words: string[], exec: Exec): Promise<EffectCheck> {
   let name: string | undefined;
   for (let i = 0; i < rest.length; i++) {
     const word = rest[i];
+    if (word === undefined) return { effect: "unparseable" };
     if (["-a", "--annotate", "-s", "--sign", "-f", "--force"].includes(word)) continue;
     if (["-m", "--message", "-F", "--file", "-u", "--local-user"].includes(word)) {
       i++;
@@ -258,12 +294,19 @@ async function gitTagEffect(words: string[], exec: Exec): Promise<EffectCheck> {
   return { effect: "present", notice: `tag ${name} already exists at HEAD` };
 }
 
-function parseComments(stdout: string): Array<{ body: string; url: string }> {
-  const comments = parseJson(stdout)?.comments;
-  return Array.isArray(comments) ? comments : [];
+type GhComment = { body: string; url: string };
+
+function parseComments(stdout: string): GhComment[] {
+  const parsed = parseJson(stdout);
+  const comments = isRecord(parsed) ? parsed.comments : undefined;
+  return Array.isArray(comments) ? comments.filter(isGhComment) : [];
 }
 
-function parseJson(text: string): any {
+function isGhComment(value: unknown): value is GhComment {
+  return isRecord(value) && typeof value.body === "string" && typeof value.url === "string";
+}
+
+function parseJson(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
@@ -331,13 +374,15 @@ export function createFileLog(
 }
 
 export function createExec(cwd: string): Exec {
-  return (argv) =>
-    new Promise((resolvePromise) => {
-      execFile(argv[0], argv.slice(1), { cwd, encoding: "utf8" }, (error: any, stdout) => {
+  return ([file, ...args]) => {
+    if (file === undefined) return Promise.resolve({ stdout: "", exitCode: 1 });
+    return new Promise((resolvePromise) => {
+      execFile(file, args, { cwd, encoding: "utf8" }, (error, stdout) => {
         const exitCode = error ? (typeof error.code === "number" ? error.code : 1) : 0;
         resolvePromise({ stdout: stdout ?? "", exitCode });
       });
     });
+  };
 }
 
 export function createTargetReader(cwd: string): (path: string) => Promise<string> {

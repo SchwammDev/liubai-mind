@@ -1,6 +1,11 @@
+import type { MessageEndEvent } from "@earendil-works/pi-coding-agent";
+
 import type { DedupLog } from "./dedup.ts";
 
-type MessageLike = { role: string; content: any[] };
+type AssistantMessage = Extract<MessageEndEvent["message"], { role: "assistant" }>;
+
+export type MessagePart = AssistantMessage["content"][number];
+export type MessageLike = { role: string; content: MessagePart[] };
 
 // pi's openai-responses adapter can append the same streamed tool call twice
 // (identical toolCallId) when the gateway emits inconsistent output_index
@@ -14,10 +19,9 @@ export function withoutDuplicateToolCalls<T extends MessageLike>(
   log: DedupLog,
 ): T | null {
   const seen = new Set<string>();
-  const kept: any[] = [];
-  for (let i = message.content.length - 1; i >= 0; i--) {
-    const part = message.content[i];
-    if (part?.type === "toolCall") {
+  const kept: MessagePart[] = [];
+  for (const part of message.content.toReversed()) {
+    if (part.type === "toolCall") {
       if (seen.has(part.id)) {
         log({ kind: "duplicate-id", tool: part.name, key: part.id, action: "dropped-from-message" });
         continue;

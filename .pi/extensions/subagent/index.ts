@@ -30,6 +30,7 @@ import {
 } from "./child.ts";
 import {
   type ChildTransport,
+  type DialogOptions,
   type UiForwarder,
   ChildSession,
   DialogGate,
@@ -123,11 +124,11 @@ interface SpawnContext {
   cwd: string;
   hasUI: boolean;
   ui: {
-    confirm: (title: string, message: string, opts?: { signal?: AbortSignal; timeout?: number }) => Promise<boolean>;
-    select: (title: string, options: string[], opts?: { signal?: AbortSignal; timeout?: number }) => Promise<string | undefined>;
-    input: (title: string, placeholder?: string, opts?: { signal?: AbortSignal; timeout?: number }) => Promise<string | undefined>;
-    editor: (title: string, prefill?: string) => Promise<string | undefined>;
-    notify: (message: string, type?: "info" | "warning" | "error") => void;
+    confirm(title: string, message: string, opts?: DialogOptions): Promise<boolean>;
+    select(title: string, options: string[], opts?: DialogOptions): Promise<string | undefined>;
+    input(title: string, placeholder?: string, opts?: DialogOptions): Promise<string | undefined>;
+    editor(title: string, prefill?: string): Promise<string | undefined>;
+    notify(message: string, type?: "info" | "warning" | "error"): void;
   };
 }
 
@@ -413,8 +414,8 @@ export function register(pi: ExtensionAPI): void {
         return text.trimEnd();
       };
 
-      if (details.mode === "single" && details.results.length === 1) {
-        const r = details.results[0];
+      const [r] = details.results;
+      if (r && details.mode === "single" && details.results.length === 1) {
         const isError = isFailedResult(r);
         const icon = isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
         const displayItems = getDisplayItems(r.messages);

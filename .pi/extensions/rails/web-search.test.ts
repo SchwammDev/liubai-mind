@@ -38,6 +38,12 @@ test("a payload that already carries web_search is left unchanged", () => {
   assert.equal(result, undefined);
 });
 
+test("a payload that is not a request object passes through untouched", () => {
+  const result = injectWebSearch("not-a-request", aqueductResponses);
+
+  assert.equal(result, undefined);
+});
+
 test("the original payload is not mutated", () => {
   const original = payload({ tools: [{ type: "function", name: "bash" }] });
 

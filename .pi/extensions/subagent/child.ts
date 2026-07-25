@@ -1,3 +1,4 @@
+import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import type { Message } from "@earendil-works/pi-ai";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -172,7 +173,7 @@ export function formatUsageStats(
 export function formatToolCall(
   toolName: string,
   args: Record<string, unknown>,
-  themeFg: (color: any, text: string) => string,
+  themeFg: (color: ThemeColor, text: string) => string,
 ): string {
   const shortenPath = (p: string) => {
     const home = os.homedir();
@@ -238,8 +239,7 @@ export function formatToolCall(
 }
 
 export function getFinalOutput(messages: Message[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
+  for (const msg of messages.toReversed()) {
     if (msg.role === "assistant") {
       for (const part of msg.content) {
         if (part.type === "text") return part.text;
@@ -385,12 +385,14 @@ export async function mapWithConcurrencyLimit<TIn, TOut>(
   if (items.length === 0) return [];
   const limit = Math.max(1, Math.min(concurrency, items.length));
   const results: TOut[] = new Array(items.length);
+  const pending = [...items.entries()];
   let nextIndex = 0;
   const workers = new Array(limit).fill(null).map(async () => {
     while (true) {
-      const current = nextIndex++;
-      if (current >= items.length) return;
-      results[current] = await fn(items[current], current);
+      const next = pending[nextIndex++];
+      if (next === undefined) return;
+      const [index, item] = next;
+      results[index] = await fn(item, index);
     }
   });
   await Promise.all(workers);

@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createBashToolDefinition, createEditToolDefinition } from "@earendil-works/pi-coding-agent";
+
+import type { BashTool, EditTool } from "./overrides.ts";
 
 const RULES = {
   deny: [],
@@ -38,16 +41,19 @@ function harness() {
   const calls: string[] = [];
   const confirms: string[] = [];
   const logs: any[] = [];
-  const bashTool = {
-    name: "bash",
-    execute: async (_id: string, params: any) => {
+  const bashTool: BashTool = {
+    ...createBashToolDefinition(process.cwd()),
+    execute: async (_id, params) => {
       calls.push(params.command);
       if (/\bclose\b/.test(params.command)) world.state = "CLOSED";
       if (/\breopen\b/.test(params.command)) world.state = "OPEN";
       return { content: [{ type: "text", text: `ran#${calls.length}` }], details: undefined };
     },
   };
-  const editTool = { name: "edit", execute: async () => ({ content: [], details: undefined }) };
+  const editTool: EditTool = {
+    ...createEditToolDefinition(process.cwd()),
+    execute: async () => ({ content: [], details: undefined }),
+  };
   const exec = async (argv: string[]) => {
     if (argv.includes("state")) return { stdout: JSON.stringify({ state: world.state }), exitCode: 0 };
     if (argv.includes("comments")) return { stdout: JSON.stringify({ comments: [] }), exitCode: 0 };
@@ -156,6 +162,14 @@ test("a duplicated call id reaching tool_call is logged but never blocked", asyn
   assert.equal(first, undefined);
   assert.equal(second, undefined);
   assert.ok(h.logs.some((entry) => entry.kind === "duplicate-id" && entry.action === "observed"));
+});
+
+test("an edit-named tool call carrying a foreign payload is passed through untouched", async () => {
+  const h = harness();
+
+  const verdict = await h.fire({ toolName: "edit", toolCallId: "e1", input: { query: "who", edits: [null] } }, h.headlessCtx);
+
+  assert.equal(verdict, undefined);
 });
 
 test("the duplicate-id detector stays active under LIUBAI_RAILS_OFF", async () => {

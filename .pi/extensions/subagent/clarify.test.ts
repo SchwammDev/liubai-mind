@@ -61,7 +61,7 @@ class FakeTransport implements ChildTransport {
   emitLine(line: string) { for (const cb of this.lineCbs) cb(line); }
   emitClose(code: number | null) { for (const cb of this.closeCbs) cb(code); }
   writtenJson() { return this.writes.map((w) => JSON.parse(w)); }
-  lastWrite() { return this.writes.length ? JSON.parse(this.writes[this.writes.length - 1]) : null; }
+  lastWrite() { const last = this.writes.at(-1); return last === undefined ? null : JSON.parse(last); }
 }
 
 const makeState = (overrides: Partial<SuspendedState> = {}): SuspendedState => {

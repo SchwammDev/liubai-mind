@@ -7,6 +7,7 @@ import {
   bashMatchesDedup,
   checkBashEffect,
   consumeApproval,
+  createExec,
   createSession,
   duplicateEditInsertion,
   editKey,
@@ -19,7 +20,7 @@ const COMMENT_URL = "https://github.com/o/r/issues/5#issuecomment-1";
 
 function ghExec(payloads: Record<string, unknown>): Exec {
   return async (argv) => {
-    const field = argv[argv.indexOf("--json") + 1];
+    const field = argv[argv.indexOf("--json") + 1] ?? "";
     if (field in payloads) return { stdout: JSON.stringify(payloads[field]), exitCode: 0 };
     return { stdout: "", exitCode: 1 };
   };
@@ -27,7 +28,7 @@ function ghExec(payloads: Record<string, unknown>): Exec {
 
 function gitExec(shaByRev: Record<string, string>): Exec {
   return async (argv) => {
-    const rev = argv[argv.length - 1];
+    const rev = argv.at(-1) ?? "";
     const sha = shaByRev[rev];
     return sha ? { stdout: sha + "\n", exitCode: 0 } : { stdout: "", exitCode: 1 };
   };
@@ -78,6 +79,18 @@ test("a gh comment read from a body file is a parse miss", async () => {
 
 test("a compound command is a parse miss", async () => {
   const check = await checkBashEffect("gh issue comment 5 -b hi && echo done", failingExec);
+
+  assert.equal(check.effect, "unparseable");
+});
+
+test("a repo flag left without a value is a parse miss rather than a repo-less query", async () => {
+  const check = await checkBashEffect("gh issue comment 5 --body hi --repo", failingExec);
+
+  assert.equal(check.effect, "unparseable");
+});
+
+test("a value flag left without a value is a parse miss", async () => {
+  const check = await checkBashEffect("gh issue close 5 --reason", failingExec);
 
   assert.equal(check.effect, "unparseable");
 });
@@ -172,6 +185,12 @@ test("an insertion of content absent from the file is no duplicate", () => {
   const edits = [{ oldText: "# Title", newText: "# Title\nnew one\nnew two\nnew three" }];
 
   assert.equal(duplicateEditInsertion(FILE, edits), null);
+});
+
+test("an empty argv is reported as a failed exec instead of being spawned", async () => {
+  const exec = createExec(process.cwd());
+
+  assert.deepEqual(await exec([]), { stdout: "", exitCode: 1 });
 });
 
 test("a key noopped once counts as a repeated duplicate", () => {

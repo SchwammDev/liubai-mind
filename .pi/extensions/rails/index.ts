@@ -2,6 +2,8 @@ import {
   createBashToolDefinition,
   createEditToolDefinition,
   type ExtensionAPI,
+  type ExtensionContext,
+  type ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -17,13 +19,14 @@ import {
   createFileLog,
   createSession,
   createTargetReader,
+  editCall,
   editKey,
   editList,
   repeatedDuplicate,
   type DedupLog,
   type Exec,
 } from "./dedup.ts";
-import { withBashDedup, withEditDedup, type ToolLike } from "./overrides.ts";
+import { withBashDedup, withEditDedup, type BashTool, type EditTool } from "./overrides.ts";
 import { withoutDuplicateToolCalls } from "./duplicate-delivery.ts";
 import { cleanProse } from "./prose-gate.ts";
 import { injectWebSearch } from "./web-search.ts";
@@ -46,20 +49,22 @@ const RAILS = [
 type ClaudePayload = { tool_name: "Edit" | "Write" | "MultiEdit"; tool_input: Record<string, unknown> };
 type TextPart = { type: "text"; text: string };
 
-function claudePayload(toolName: string, input: any): ClaudePayload | null {
-  if (toolName === "write") {
-    return { tool_name: "Write", tool_input: { file_path: input.path, content: input.content } };
-  }
-  if (toolName === "edit") {
+function claudePayload(event: ToolCallEvent): ClaudePayload | null {
+  if (event.toolName === "write") {
     return {
-      tool_name: "MultiEdit",
-      tool_input: {
-        file_path: input.path,
-        edits: editList(input).map((e) => ({ old_string: e.oldText, new_string: e.newText })),
-      },
+      tool_name: "Write",
+      tool_input: { file_path: event.input.path, content: event.input.content },
     };
   }
-  return null;
+  const edit = event.toolName === "edit" ? editCall(event.input) : null;
+  if (!edit) return null;
+  return {
+    tool_name: "MultiEdit",
+    tool_input: {
+      file_path: edit.path,
+      edits: editList(edit).map((e) => ({ old_string: e.oldText, new_string: e.newText })),
+    },
+  };
 }
 
 // A rail exits 2 to hard-block (message on stderr), or exits 0 with an
@@ -104,7 +109,7 @@ function loadRules(path: string): Partial<CommandRules> {
 async function gateCommand(
   command: string,
   rules: CommandRules,
-  ctx: any,
+  ctx: ExtensionContext,
   skipAsk = false,
 ): Promise<{ block: true; reason: string } | undefined> {
   const decision = classify(command, rules);
@@ -122,8 +127,8 @@ async function gateCommand(
 // Test seam: production wiring uses the real tools and process adapters,
 // tests inject fakes so no command ever leaves the process.
 export type RailsDeps = {
-  bashTool?: ToolLike;
-  editTool?: ToolLike;
+  bashTool?: BashTool;
+  editTool?: EditTool;
   exec?: Exec;
   readTargetFile?: (path: string) => Promise<string>;
   logDedup?: DedupLog;
@@ -137,37 +142,37 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
   const cwd = process.cwd();
 
   pi.registerTool(
-    withBashDedup((deps.bashTool ?? createBashToolDefinition(cwd)) as ToolLike, {
+    withBashDedup(deps.bashTool ?? createBashToolDefinition(cwd), {
       patterns: rules.dedup,
       session: dedup,
       exec: deps.exec ?? createExec(cwd),
       log: logDedup,
       enforced: dedupEnforced,
       disabled: railsDisabled,
-    }) as any,
+    }),
   );
   pi.registerTool(
-    withEditDedup((deps.editTool ?? createEditToolDefinition(cwd)) as ToolLike, {
+    withEditDedup(deps.editTool ?? createEditToolDefinition(cwd), {
       session: dedup,
       readTargetFile: deps.readTargetFile ?? createTargetReader(cwd),
       log: logDedup,
       enforced: dedupEnforced,
       disabled: railsDisabled,
-    }) as any,
+    }),
   );
 
   // Duplicate delivery (issue #15): the message_end drop is the structural
   // fix; the tool_call detector is a log-only tripwire so a future duplicate
   // that slips past finalization shows up in the log instead of in silence.
   // Both are correctness, not steering — active under LIUBAI_RAILS_OFF.
-  pi.on("message_end", (event: any) => {
+  pi.on("message_end", (event) => {
     if (event.message.role !== "assistant") return undefined;
     const deduped = withoutDuplicateToolCalls(event.message, logDedup);
     return deduped ? { message: deduped } : undefined;
   });
 
   const seenCallIds = new Set<string>();
-  pi.on("tool_call", (event: any) => {
+  pi.on("tool_call", (event) => {
     if (!event.toolCallId) return undefined;
     if (seenCallIds.has(event.toolCallId)) {
       logDedup({ kind: "duplicate-id", tool: event.toolName, key: event.toolCallId, action: "observed" });
@@ -183,7 +188,7 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
     key: string,
     describe: string,
     tool: string,
-    ctx: any,
+    ctx: ExtensionContext,
   ): Promise<{ block: true; reason: string } | { skipAsk: boolean }> {
     if (repeatedDuplicate(dedup, key)) {
       if (!ctx?.hasUI) {
@@ -202,11 +207,11 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
     return { skipAsk: false };
   }
 
-  pi.on("tool_call", async (event: any, ctx: any) => {
+  pi.on("tool_call", async (event, ctx) => {
     if (railsDisabled()) return undefined;
 
     if (event.toolName === "bash") {
-      const command = event.input?.command ?? "";
+      const command = typeof event.input.command === "string" ? event.input.command : "";
       let skipAsk = false;
       if (dedupEnforced() && bashMatchesDedup(command, rules.dedup)) {
         const outcome = await resolveRepeat(bashKey(command), command, "bash", ctx);
@@ -216,13 +221,14 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
       return gateCommand(command, rules, ctx, skipAsk);
     }
 
-    if (event.toolName === "edit" && dedupEnforced()) {
-      const key = editKey(event.input.path, editList(event.input));
-      const outcome = await resolveRepeat(key, `edit ${event.input.path}`, "edit", ctx);
+    const edit = event.toolName === "edit" ? editCall(event.input) : null;
+    if (edit && dedupEnforced()) {
+      const key = editKey(edit.path, editList(edit));
+      const outcome = await resolveRepeat(key, `edit ${edit.path}`, "edit", ctx);
       if ("block" in outcome) return outcome;
     }
 
-    const payload = claudePayload(event.toolName, event.input);
+    const payload = claudePayload(event);
     if (!payload) return undefined;
 
     const nudges: string[] = [];
@@ -237,7 +243,7 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
     return undefined;
   });
 
-  pi.on("tool_result", (event: any) => {
+  pi.on("tool_result", (event) => {
     if (railsDisabled()) return undefined;
 
     const nudges = pendingNudges.get(event.toolCallId);
@@ -250,11 +256,9 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
 
   // Capability, not steering: stays on under LIUBAI_RAILS_OFF so baseline
   // comparisons vary only the steering, never what the agent can reach.
-  pi.on("before_provider_request", (event: any, ctx: any) =>
-    injectWebSearch(event.payload, ctx.model),
-  );
+  pi.on("before_provider_request", (event, ctx) => injectWebSearch(event.payload, ctx.model));
 
-  pi.on("message_end", (event: any) => {
+  pi.on("message_end", (event) => {
     if (railsDisabled()) return undefined;
     if (event.message.role !== "assistant") return undefined;
     return { message: cleanProse(event.message) };
