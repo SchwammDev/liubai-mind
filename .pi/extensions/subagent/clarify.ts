@@ -1,4 +1,4 @@
-import type { SingleResult, ReportAssessment } from "./child.ts";
+import type { SingleResult, ReportAssessment, SpawnMode, SubagentDetails } from "./child.ts";
 import type { ChildSession, ChildTransport } from "./bridge.ts";
 import {
   CLARIFY_TIMEOUT_MS,
@@ -18,7 +18,7 @@ export interface ToolContent {
 
 export interface ToolResult {
   content: ToolContent[];
-  details: { mode: "single"; results: SingleResult[] };
+  details: SubagentDetails;
   isError?: boolean;
 }
 
@@ -93,7 +93,7 @@ export interface SuspendedState {
   result: SingleResult;
   budget: { delivered: number };
   onUpdate: ChildUpdate | undefined;
-  mode: "single" | "parallel";
+  mode: SpawnMode;
   timer: ReturnType<typeof setTimeout> | null;
   finished: boolean;
   finalReport?: string;
