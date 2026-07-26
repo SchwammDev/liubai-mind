@@ -6,9 +6,15 @@ Dev-facing. How the steering layer is built and extended.
 
 Engine = pi (`@earendil-works/pi-coding-agent`), pinned and vendored via npm. The contribution is the steering layer on top; pi ships the editor, the hooks, the runtime. See [`landscape.md`](landscape.md) for why pi over alternatives.
 
+## Tree vs installed copy
+
+`extensions/` is the source; `~/.pi/agent/extensions/` is the installation. `setup.sh` copies the two extensions there and records the source repo and commit in `.liubai-installed`, so the tree is never live and promoting is a deliberate step. `liubai --dev` runs the tree instead, through pi's `--no-extensions -e <path>` seam — parent session only, since spawned children start a plain `pi` that loads the installed copy.
+
+The extensions live outside `.pi/` on purpose. Under `.pi/extensions/` pi would auto-load them as project extensions of this repo *and* load the installed copy, and any checkout whose path differs from the installed one registers `bash`, `edit`, `spawn`, `answer` twice — a fatal startup conflict. `.pi/` now holds project config only.
+
 ## Rails extension
 
-`.pi/extensions/rails/` — one pi extension (`index.ts`), loaded globally by `setup.sh` into `~/.pi/agent/extensions/rails`:
+`extensions/rails/` — one pi extension (`index.ts`), installed globally by `setup.sh` into `~/.pi/agent/extensions/rails`:
 
 | Event / tool | Handler | Does |
 |---|---|---|
@@ -53,7 +59,7 @@ Detection always runs and logs to `~/.pi/agent/liubai-dedup-log.jsonl`; enforcem
 
 ## Spawn extension
 
-`.pi/extensions/subagent/` — a generic `spawn` tool, loaded globally by `setup.sh` into `~/.pi/agent/extensions/subagent`. It spawns a child `pi --mode rpc` per task with an isolated context window; the child process stays alive across turns and its final report lands in the parent. Two modes: single (`task`) and parallel (`tasks` array, capped at 8, concurrency 4). The `task` string carries everything — no role roster, no per-spawn system prompt. Children inherit the rails through the same global extensions dir.
+`extensions/subagent/` — a generic `spawn` tool, installed globally by `setup.sh` into `~/.pi/agent/extensions/subagent`. It spawns a child `pi --mode rpc` per task with an isolated context window; the child process stays alive across turns and its final report lands in the parent. Two modes: single (`task`) and parallel (`tasks` array, capped at 8, concurrency 4). The `task` string carries everything — no role roster, no per-spawn system prompt. Children inherit the rails through the same global extensions dir.
 
 Every spawn requires a `complexity` estimate (`trivial | easy | medium | hard`; per item in parallel mode, tier definitions in the tool schema). The agent never names a model: the extension resolves the tier to a model id from the user-owned table `~/.pi/agent/complexity.json` — a flat object with exactly the four tier keys and non-empty model-id strings (example: `config/complexity.example.json`) — and passes it to the child as `--model`. Missing or invalid config fails the spawn loudly; there is no fallback to the session model. The compress-bounce resumes the child session with the same resolved model.
 

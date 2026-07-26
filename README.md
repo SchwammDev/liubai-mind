@@ -16,10 +16,13 @@ Principles in [`docs/vision.md`](docs/vision.md); how the steering is built in [
 
 mise + node@22, the pinned pi engine, the global steering rails, and a `liubai` command on PATH. Idempotent — re-run is safe.
 
+The rails are *copied* into `~/.pi/agent/extensions/`, so editing this repo does not change your running sessions. Re-run `./setup.sh` to promote.
+
 ## Run
 
 ```
 liubai            # steering on (default)
+liubai --dev ...                # steer from this working tree, not the installed copy
 LIUBAI_RAILS_OFF=1 liubai ...   # un-steered baseline, same engine
 liubai update [version]         # bump the pinned engine (review + commit the lockfile)
 ```
