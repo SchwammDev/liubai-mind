@@ -281,6 +281,20 @@ test("a failed child surfaces its error message over its partial output", () => 
   assert.equal(getResultOutput(failed), "provider timed out");
 });
 
+test("a child that dies before its first turn reports what its stderr said", () => {
+  const crashed = childResult({
+    exitCode: 1,
+    settled: false,
+    errorMessage: "child exited (code 1) before completing its turn",
+    stderr: 'Error: Tool "bash" conflicts with /elsewhere/rails/index.ts\n',
+  });
+
+  const output = getResultOutput(crashed);
+
+  assert.match(output, /before completing its turn/);
+  assert.match(output, /conflicts with/);
+});
+
 test("a child that exits cleanly without settling is a failed result", () => {
   const unsettled = childResult({ exitCode: 0, settled: false });
 
