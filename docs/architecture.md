@@ -27,6 +27,8 @@ Engine = pi (`@earendil-works/pi-coding-agent`), pinned and vendored via npm. Th
 
 Content rails are Python scripts in `hooks/`, spawned per tool call with a Claude-shaped JSON payload on stdin. Exit 2 = hard block (stderr message); exit 0 with `hookSpecificOutput.additionalContext` = soft nudge, appended to the tool result and shown to the agent without blocking. This block/nudge split is the deterministic feedforward rail; `prose-gate` is the feedback lever on output.
 
+Any other exit — or a `python3` that won't spawn — means the rail could not judge the call. That fails open, but loudly: every occurrence lands in the dedup log as `rail-error`, and the operator is notified once per session. It never blocks and never enters the agent's context, which the model could do nothing with.
+
 Current rails (all deterministic, all on `write`/`edit`):
 
 - `no_added_comments.py` — block added code comments (pragma/`noqa`/shebang exempt).

@@ -23,6 +23,7 @@ import {
   editKey,
   editList,
   repeatedDuplicate,
+  writeCall,
   type DedupLog,
   type Exec,
 } from "./dedup.ts";
@@ -39,7 +40,7 @@ const PROJECT_RULES =
 
 const HOOK_DIR = join(import.meta.dirname, "hooks");
 
-const RAILS = [
+export const RAILS = [
   "no_added_comments.py",
   "long_test_nudge.py",
   "cyclomatic_complexity_nudge.py",
@@ -51,9 +52,11 @@ type TextPart = { type: "text"; text: string };
 
 function claudePayload(event: ToolCallEvent): ClaudePayload | null {
   if (event.toolName === "write") {
+    const write = writeCall(event.input);
+    if (!write) return null;
     return {
       tool_name: "Write",
-      tool_input: { file_path: event.input.path, content: event.input.content },
+      tool_input: { file_path: write.path, content: write.content },
     };
   }
   const edit = event.toolName === "edit" ? editCall(event.input) : null;
@@ -67,15 +70,23 @@ function claudePayload(event: ToolCallEvent): ClaudePayload | null {
   };
 }
 
+type RailOutcome = { block: string } | { nudge: string } | { failed: string };
+
+const lastLine = (text: string): string => text.trim().split("\n").at(-1)?.trim() ?? "";
+
 // A rail exits 2 to hard-block (message on stderr), or exits 0 with an
-// `additionalContext` advisory to nudge without blocking.
-function runRail(name: string, payload: ClaudePayload): { block: string } | { nudge: string } | null {
+// `additionalContext` advisory to nudge without blocking. Any other exit — or a
+// failure to spawn at all — means the rail could not judge this call, which is
+// reported rather than mistaken for a clean verdict.
+function runRail(name: string, payload: ClaudePayload): RailOutcome | null {
   const res = spawnSync("python3", [join(HOOK_DIR, name)], {
     input: JSON.stringify(payload),
     encoding: "utf8",
   });
+  if (res.error) return { failed: res.error.message };
   if (res.status === 2) return { block: res.stderr.trim() };
-  if (res.status !== 0 || !res.stdout.trim()) return null;
+  if (res.status !== 0) return { failed: lastLine(res.stderr) || `exit ${res.status}` };
+  if (!res.stdout.trim()) return null;
   try {
     const advisory = JSON.parse(res.stdout)?.hookSpecificOutput?.additionalContext;
     return typeof advisory === "string" && advisory ? { nudge: advisory } : null;
@@ -207,6 +218,17 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
     return { skipAsk: false };
   }
 
+  // A rail that cannot run fails open: the log keeps every occurrence, while the
+  // operator hears once per session — four broken rails on every write would be
+  // noise, and the agent can do nothing with the news either way.
+  let railFailureNotified = false;
+  const reportRailFailure = (rail: string, tool: string, reason: string, ctx?: ExtensionContext) => {
+    logDedup({ kind: "rail-error", tool, key: rail, action: reason });
+    if (!ctx?.hasUI || railFailureNotified) return;
+    railFailureNotified = true;
+    ctx.ui.notify(`[${rail}] rail failed: ${reason}`, "error");
+  };
+
   pi.on("tool_call", async (event, ctx) => {
     if (railsDisabled()) return undefined;
 
@@ -234,10 +256,13 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
     const nudges: string[] = [];
     for (const name of RAILS) {
       const outcome = runRail(name, payload);
-      if (outcome && "block" in outcome) {
-        return { block: true, reason: `[${name}] ${outcome.block}` };
+      if (!outcome) continue;
+      if ("block" in outcome) return { block: true, reason: `[${name}] ${outcome.block}` };
+      if ("nudge" in outcome) {
+        nudges.push(`[${name}] ${outcome.nudge}`);
+        continue;
       }
-      if (outcome && "nudge" in outcome) nudges.push(`[${name}] ${outcome.nudge}`);
+      reportRailFailure(name, event.toolName, outcome.failed, ctx);
     }
     if (nudges.length) pendingNudges.set(event.toolCallId, nudges);
     return undefined;

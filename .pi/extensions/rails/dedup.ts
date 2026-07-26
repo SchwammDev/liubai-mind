@@ -35,7 +35,8 @@ export type DedupLogKind =
   | "replay"
   | "escalate-ask"
   | "escalate-block"
-  | "duplicate-id";
+  | "duplicate-id"
+  | "rail-error";
 
 export type DedupLog = (entry: {
   kind: DedupLogKind;
@@ -88,6 +89,14 @@ export function editCall(input: unknown): EditCall | null {
 
 function isEdit(value: unknown): value is Edit {
   return isRecord(value) && typeof value.oldText === "string" && typeof value.newText === "string";
+}
+
+export type WriteCall = { path: string; content: string };
+
+export function writeCall(input: unknown): WriteCall | null {
+  if (!isRecord(input)) return null;
+  const { path, content } = input;
+  return typeof path === "string" && typeof content === "string" ? { path, content } : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
