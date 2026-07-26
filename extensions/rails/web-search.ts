@@ -8,6 +8,13 @@
 // the same config and the gate applies to the child's own resolved model.
 
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+// Liubai's own capability toggles, owner-namespaced because `~/.pi/agent/` is
+// shared with pi's settings.json and models.json. It lives here rather than in
+// the rails entry point so the spawn tool reads the same allowlist.
+export const LIUBAI_CONFIG = join(homedir(), ".pi/agent/liubai.json");
 
 export type ModelTarget = { provider: string; api: string };
 export type ToolPayload = { tools?: unknown[] } & Record<string, unknown>;
@@ -24,13 +31,32 @@ export const SEARCH_TOOL_BY_API: Record<string, SearchTool> = {
   },
 };
 
+export type SearchAvailability = { ok: true } | { ok: false; reason: string };
+
+// The spawn tool predicts a child's search capability from this same predicate,
+// so the prediction cannot drift from what the child's rails actually do.
+export function searchAvailability(
+  model: ModelTarget | undefined,
+  allowedProviders: readonly string[],
+  searchTools: Record<string, SearchTool> = SEARCH_TOOL_BY_API,
+): SearchAvailability {
+  if (!model) return { ok: false, reason: "no model is resolved" };
+  if (!allowedProviders.includes(model.provider)) {
+    return { ok: false, reason: `provider "${model.provider}" is not in the web-search allowlist` };
+  }
+  if (!searchTools[model.api]) {
+    return { ok: false, reason: `the "${model.api}" api has no server-side search payload` };
+  }
+  return { ok: true };
+}
+
 export function injectWebSearch(
   payload: unknown,
   model: ModelTarget | undefined,
   allowedProviders: readonly string[],
   searchTools: Record<string, SearchTool> = SEARCH_TOOL_BY_API,
 ): ToolPayload | undefined {
-  if (!model || !allowedProviders.includes(model.provider)) return undefined;
+  if (!model || !searchAvailability(model, allowedProviders, searchTools).ok) return undefined;
 
   const search = searchTools[model.api];
   if (!search || !isToolPayload(payload)) return undefined;

@@ -7,6 +7,7 @@ import * as path from "node:path";
 import {
   injectWebSearch,
   loadWebSearchConfig,
+  searchAvailability,
   SEARCH_TOOL_BY_API,
   type SearchTool,
 } from "./web-search.ts";
@@ -111,6 +112,24 @@ test("an api's own already-present check suppresses a second injection", () => {
   const result = injectWebSearch(payload({ tools: [GENAI_SEARCH] }), genaiApi, allowAqueduct, withTypelessApi);
 
   assert.equal(result, undefined);
+});
+
+const refusalFor = (model: { provider: string; api: string }): string => {
+  const availability = searchAvailability(model, allowAqueduct);
+  assert.equal(availability.ok, false, "expected search to be unavailable");
+  return availability.ok ? "" : availability.reason;
+};
+
+test("an allowlisted provider on a supported api can search", () => {
+  assert.deepEqual(searchAvailability(aqueductResponses, allowAqueduct), { ok: true });
+});
+
+test("a provider outside the allowlist cannot search, and the reason names the allowlist", () => {
+  assert.match(refusalFor({ provider: "openai", api: "openai-responses" }), /"openai".*allowlist/);
+});
+
+test("an api with no known tool shape cannot search, and the reason names the api", () => {
+  assert.match(refusalFor({ provider: "aqueduct", api: "anthropic-messages" }), /"anthropic-messages"/);
 });
 
 const configFile = (contents: string): string => {

@@ -30,17 +30,13 @@ import {
 import { withBashDedup, withEditDedup, type BashTool, type EditTool } from "./overrides.ts";
 import { withoutDuplicateToolCalls } from "./duplicate-delivery.ts";
 import { cleanProse } from "./prose-gate.ts";
-import { injectWebSearch, loadWebSearchConfig } from "./web-search.ts";
+import { injectWebSearch, loadWebSearchConfig, LIUBAI_CONFIG } from "./web-search.ts";
 
 // Command-gate rules merge a personal global file under a project-local one;
 // either may be absent (no gating). LIUBAI_RAILS_RULES overrides the project path.
 const GLOBAL_RULES = join(homedir(), ".pi/agent/command-rules.json");
 const PROJECT_RULES =
   process.env.LIUBAI_RAILS_RULES ?? join(import.meta.dirname, "../../command-rules.json");
-
-// Liubai's own capability toggles, owner-namespaced because `~/.pi/agent/` is
-// shared with pi's settings.json and models.json.
-const LIUBAI_CONFIG = join(homedir(), ".pi/agent/liubai.json");
 
 const HOOK_DIR = join(import.meta.dirname, "hooks");
 
