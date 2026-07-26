@@ -99,6 +99,20 @@ test("a single child's usage is reported with the model that ran it", () => {
   assert.match(shown(nodes), /2 turns ↑1\.2k some-model/);
 });
 
+test("a child whose tier lost a capability shows what it lost next to its usage", () => {
+  const limited = child({ model: "offgrid/big", notes: ["no web search — provider is not allowlisted"] });
+
+  const nodes = describeResult(spawnResult(single(limited)), false, plainTheme);
+
+  assert.match(shown(nodes), /offgrid\/big\n⚠ no web search — provider is not allowlisted/);
+});
+
+test("a child whose tier kept every capability shows no warning line", () => {
+  const nodes = describeResult(spawnResult(single(child({ model: "gw/big", notes: [] }))), false, plainTheme);
+
+  assert.doesNotMatch(shown(nodes), /⚠/);
+});
+
 test("a running parallel batch counts what is still in flight", () => {
   const nodes = describeResult(spawnResult(parallel(child(), child({ exitCode: -1 }))), false, plainTheme);
 
