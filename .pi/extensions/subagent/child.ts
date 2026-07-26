@@ -51,6 +51,13 @@ export interface SingleResult {
   settled?: boolean;
 }
 
+export type SpawnMode = "single" | "parallel";
+
+export interface SubagentDetails {
+  mode: SpawnMode;
+  results: SingleResult[];
+}
+
 export const COMPLEXITY_LEVELS = ["trivial", "easy", "medium", "hard"] as const;
 export type Complexity = (typeof COMPLEXITY_LEVELS)[number];
 
