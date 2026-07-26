@@ -28,10 +28,19 @@ import {
   type SuspendedState,
   type ToolResult,
 } from "./clarify.ts";
+import {
+  assignTasks,
+  chooseTier,
+  type ModelCatalog,
+  type TaskAssignment,
+  type TierChoice,
+} from "./tier-model.ts";
+import { LIUBAI_CONFIG, loadWebSearchConfig, type WebSearchConfig } from "../rails/web-search.ts";
 
 export interface SpawnContext {
   cwd: string;
   hasUI: boolean;
+  modelRegistry: ModelCatalog;
   ui: {
     confirm(title: string, message: string, opts?: DialogOptions): Promise<boolean>;
     select(title: string, options: string[], opts?: DialogOptions): Promise<string | undefined>;
@@ -51,6 +60,7 @@ export type TransportFactory = (
 export interface SpawnDeps {
   spawnTransport: TransportFactory;
   loadComplexity?: () => ComplexityMap;
+  loadWebSearch?: () => WebSearchConfig;
 }
 
 export interface SpawnParams {
@@ -83,7 +93,7 @@ async function runChild(
   deps: SpawnDeps,
   ctx: SpawnContext,
   task: string,
-  model: string,
+  choice: TierChoice,
   signal: AbortSignal | undefined,
   onUpdate: ChildUpdate | undefined,
   gate: DialogGate,
@@ -96,7 +106,8 @@ async function runChild(
     messages: [],
     stderr: "",
     usage: emptyUsage(),
-    model,
+    model: choice.reference,
+    notes: choice.notes,
   };
   const budget = { delivered: 0 };
 
@@ -111,7 +122,7 @@ async function runChild(
     notify: (m, ty) => ctx.ui.notify(m, ty),
   };
 
-  const transport = deps.spawnTransport(ctx.cwd, model, depthEnv, (s) => {
+  const transport = deps.spawnTransport(ctx.cwd, choice.reference, depthEnv, (s) => {
     result.stderr += s;
   });
   const session = new ChildSession(transport, forwarder, result, emitUpdate, signal, gate, mode, budget);
@@ -150,7 +161,7 @@ async function runSingle(
   deps: SpawnDeps,
   ctx: SpawnContext,
   task: string,
-  model: string,
+  choice: TierChoice,
   signal: AbortSignal | undefined,
   onUpdate: SpawnUpdate | undefined,
   gate: DialogGate,
@@ -165,7 +176,7 @@ async function runSingle(
         })
     : undefined;
 
-  return singleSpawnResult(await runChild(deps, ctx, task, model, signal, childUpdate, gate, "single"));
+  return singleSpawnResult(await runChild(deps, ctx, task, choice, signal, childUpdate, gate, "single"));
 }
 
 // Every task is seeded as running (exitCode -1) so the progress line can count
@@ -173,19 +184,19 @@ async function runSingle(
 async function runParallel(
   deps: SpawnDeps,
   ctx: SpawnContext,
-  tasks: { task: string; complexity: Complexity }[],
-  complexityMap: ComplexityMap,
+  assignments: TaskAssignment[],
   signal: AbortSignal | undefined,
   onUpdate: SpawnUpdate | undefined,
   gate: DialogGate,
 ): Promise<ToolResult> {
-  const allResults: SingleResult[] = tasks.map((t) => ({
-    task: t.task,
+  const allResults: SingleResult[] = assignments.map((a) => ({
+    task: a.task,
     exitCode: -1,
     messages: [],
     stderr: "",
     usage: emptyUsage(),
-    model: complexityMap[t.complexity],
+    model: a.choice.reference,
+    notes: a.choice.notes,
   }));
 
   const emitProgress = () => {
@@ -198,12 +209,12 @@ async function runParallel(
     });
   };
 
-  const results = await mapWithConcurrencyLimit(tasks, MAX_CONCURRENCY, async (t, index) => {
+  const results = await mapWithConcurrencyLimit(assignments, MAX_CONCURRENCY, async (a, index) => {
     const outcome = await runChild(
       deps,
       ctx,
-      t.task,
-      complexityMap[t.complexity],
+      a.task,
+      a.choice,
       signal,
       (r) => {
         allResults[index] = r;
@@ -252,7 +263,18 @@ export async function runSpawn(
     return textResult(selection.kind, e instanceof Error ? e.message : String(e), true);
   }
 
-  return selection.kind === "parallel"
-    ? runParallel(deps, ctx, params.tasks!, complexityMap, signal, onUpdate, gate)
-    : runSingle(deps, ctx, params.task!, complexityMap[params.complexity!], signal, onUpdate, gate);
+  const catalog = ctx.modelRegistry;
+  const searchProviders = (deps.loadWebSearch ?? (() => loadWebSearchConfig(LIUBAI_CONFIG)))().providers;
+
+  if (selection.kind === "parallel") {
+    const assigned = assignTasks(params.tasks!, complexityMap, catalog, searchProviders);
+    return assigned.kind === "error"
+      ? textResult("parallel", assigned.message, true)
+      : runParallel(deps, ctx, assigned.value, signal, onUpdate, gate);
+  }
+
+  const chosen = chooseTier(params.complexity!, complexityMap, catalog, searchProviders);
+  return chosen.kind === "error"
+    ? textResult("single", chosen.message, true)
+    : runSingle(deps, ctx, params.task!, chosen.value, signal, onUpdate, gate);
 }

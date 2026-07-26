@@ -2,10 +2,18 @@ import { type ExtensionAPI, getMarkdownTheme } from "@earendil-works/pi-coding-a
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
-import { canSpawn, currentDepth, assessQuestion, buildClarifyTitle, QUESTION_CAP } from "./child.ts";
+import {
+  canSpawn,
+  currentDepth,
+  assessQuestion,
+  buildClarifyTitle,
+  loadComplexityMap,
+  QUESTION_CAP,
+} from "./child.ts";
 import { DialogGate } from "./bridge.ts";
 import { answerClarify, answerToolResult } from "./clarify.ts";
 import { runSpawn } from "./orchestrate.ts";
+import { tableProblems } from "./tier-model.ts";
 import { spawnRpcTransport } from "./transport.ts";
 import { describeCall, describeResult, type ViewNode } from "./view.ts";
 
@@ -137,6 +145,20 @@ export function register(pi: ExtensionAPI): void {
       const outcome = await answerClarify(params.text, signal);
       return answerToolResult(outcome);
     },
+  });
+
+  // A table that cannot be read at all still fails loudly at the first spawn,
+  // with the remedy in the message; warning about it here would nag a session
+  // that never spawns. What is worth a launch warning is a readable table whose
+  // tiers no longer resolve, because that is silent until a task depends on it.
+  pi.on("session_start", (_event, ctx) => {
+    let problems: string | undefined;
+    try {
+      problems = tableProblems(loadComplexityMap(), ctx.modelRegistry);
+    } catch {
+      return;
+    }
+    if (problems) ctx.ui.notify(`[spawn] ${problems}`, "warning");
   });
 }
 

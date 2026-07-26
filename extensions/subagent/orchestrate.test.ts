@@ -6,12 +6,34 @@ import { DialogGate } from "./bridge.ts";
 import { __resetClarifyState, type ToolResult } from "./clarify.ts";
 import { runSpawn, type SpawnContext, type TransportFactory } from "./orchestrate.ts";
 import { FakeTransport } from "./testing.ts";
+import type { CatalogModel, ModelCatalog } from "./tier-model.ts";
 
-const MODELS: ComplexityMap = { trivial: "tiny", easy: "small", medium: "mid", hard: "big" };
+const MODELS: ComplexityMap = { trivial: "gw/tiny", easy: "gw/small", medium: "gw/mid", hard: "gw/big" };
+
+const entry = (provider: string, id: string): CatalogModel => ({ provider, id, api: "openai-responses" });
+
+const CATALOG_ENTRIES = [
+  entry("gw", "tiny"),
+  entry("gw", "small"),
+  entry("gw", "mid"),
+  entry("gw", "big"),
+  entry("offgrid", "big"),
+  entry("unpaid", "big"),
+];
+
+const SEARCHING_PROVIDERS = ["gw", "unpaid"];
+const CREDENTIALLED_PROVIDERS = ["gw", "offgrid"];
+
+const catalog: ModelCatalog = {
+  find: (provider, modelId) => CATALOG_ENTRIES.find((m) => m.provider === provider && m.id === modelId),
+  getAll: () => [...CATALOG_ENTRIES],
+  hasConfiguredAuth: (model) => CREDENTIALLED_PROVIDERS.includes(model.provider),
+};
 
 const silentContext = (): SpawnContext => ({
   cwd: "/repo",
   hasUI: false,
+  modelRegistry: catalog,
   ui: {
     confirm: () => Promise.resolve(true),
     select: () => Promise.resolve(undefined),
@@ -48,7 +70,11 @@ const spawning = (
 ) => {
   const children = options.children ?? new SpawnedChildren();
   const result = runSpawn(
-    { spawnTransport: children.factory, loadComplexity: options.loadComplexity ?? (() => MODELS) },
+    {
+      spawnTransport: children.factory,
+      loadComplexity: options.loadComplexity ?? (() => MODELS),
+      loadWebSearch: () => ({ providers: SEARCHING_PROVIDERS }),
+    },
     silentContext(),
     params,
     undefined,
@@ -112,7 +138,44 @@ test("the child is spawned on the model its complexity maps to", async () => {
   children.at(0).transport.emitLine(settling());
   await result;
 
-  assert.deepEqual(children.models, ["big"]);
+  assert.deepEqual(children.models, ["gw/big"]);
+});
+
+test("a tier whose model id lacks a provider prefix fails the spawn before any child starts", async () => {
+  const { children, result } = spawning(
+    { task: "do it", complexity: "hard" },
+    { loadComplexity: () => ({ ...MODELS, hard: "big" }) },
+  );
+
+  const spawn = await result;
+
+  assert.equal(spawn.isError, true);
+  assert.match(textOf(spawn), /"hard".*provider prefix/s);
+  assert.equal(children.spawns.length, 0);
+});
+
+test("a tier outside the web-search allowlist still runs, carrying the loss as a note", async () => {
+  const { children, result } = spawning(
+    { task: "do it", complexity: "hard" },
+    { loadComplexity: () => ({ ...MODELS, hard: "offgrid/big" }) },
+  );
+
+  children.at(0).transport.emitLine(settling());
+
+  const [child] = (await result).details.results;
+  assert.deepEqual(child?.notes, ['no web search — provider "offgrid" is not in the web-search allowlist']);
+});
+
+test("a tier whose provider has no configured credentials still runs, carrying that as a note", async () => {
+  const { children, result } = spawning(
+    { task: "do it", complexity: "hard" },
+    { loadComplexity: () => ({ ...MODELS, hard: "unpaid/big" }) },
+  );
+
+  children.at(0).transport.emitLine(settling());
+
+  const [child] = (await result).details.results;
+  assert.deepEqual(child?.notes, ['no configured credentials for provider "unpaid"']);
 });
 
 test("the child runs one level below its parent", async () => {
@@ -187,7 +250,7 @@ test("every parallel task is spawned on the model its own complexity maps to", a
   children.at(1).transport.emitLine(settling());
   await result;
 
-  assert.deepEqual(children.models, ["tiny", "big"]);
+  assert.deepEqual(children.models, ["gw/tiny", "gw/big"]);
 });
 
 test("progress is reported as each parallel child settles", async () => {

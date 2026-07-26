@@ -45,6 +45,7 @@ export interface SingleResult {
   stderr: string;
   usage: UsageStats;
   model?: string;
+  notes?: string[];
   stopReason?: string;
   errorMessage?: string;
   finalReport?: string;

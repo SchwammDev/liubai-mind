@@ -62,6 +62,9 @@ function displayItemLines(items: DisplayItem[], limit: number, expanded: boolean
   return out.trimEnd();
 }
 
+const capabilityLine = (result: SingleResult): string | undefined =>
+  result.notes?.length ? `⚠ ${result.notes.join("; ")}` : undefined;
+
 function singleExpanded(result: SingleResult, theme: ViewTheme): ViewNode[] {
   const failed = isFailedResult(result);
   const items = getDisplayItems(result.messages);
@@ -84,6 +87,9 @@ function singleExpanded(result: SingleResult, theme: ViewTheme): ViewNode[] {
 
   const usage = formatUsageStats(result.usage, result.model);
   if (usage) nodes.push(spacer(), text(theme.fg("dim", usage)));
+
+  const lost = capabilityLine(result);
+  if (lost) nodes.push(text(theme.fg("warning", lost)));
   return nodes;
 }
 
@@ -102,6 +108,9 @@ function singleCollapsed(result: SingleResult, theme: ViewTheme): ViewNode[] {
 
   const usage = formatUsageStats(result.usage, result.model);
   if (usage) out += `\n${theme.fg("dim", usage)}`;
+
+  const lost = capabilityLine(result);
+  if (lost) out += `\n${theme.fg("warning", lost)}`;
   return [text(out)];
 }
 
@@ -148,6 +157,9 @@ function parallelExpanded(results: SingleResult[], theme: ViewTheme): ViewNode[]
 
     const usage = formatUsageStats(result.usage, result.model);
     if (usage) nodes.push(text(theme.fg("dim", usage)));
+
+    const lost = capabilityLine(result);
+    if (lost) nodes.push(text(theme.fg("warning", lost)));
   }
 
   const total = formatUsageStats(aggregateUsage(results));
