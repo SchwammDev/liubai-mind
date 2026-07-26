@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Daily driver: the pinned pi engine + steering rails, runnable from any working
-# directory. Rails load globally (see setup.sh); the provider and model come from
-# pi's own settings.json (~/.pi/agent/). Run `setup.sh` once before first use.
+# directory. Rails load from the copy setup.sh installs into ~/.pi/agent/extensions;
+# the provider and model come from pi's own settings.json (~/.pi/agent/). Run
+# `setup.sh` once before first use, and again to promote rails changes.
 #
 # Steering is on by default. For the un-steered baseline: LIUBAI_RAILS_OFF=1 liubai ...
 set -euo pipefail
@@ -24,5 +25,20 @@ if [ "${1:-}" = "update" ]; then
 fi
 
 [ -x "$PI_BIN" ] || { echo "liubai: engine not installed — run $REPO/setup.sh" >&2; exit 1; }
+
+# `liubai --dev` steers the session from the working tree instead of the installed
+# copy, using pi's own dev seam. `--no-extensions` also drops every other globally
+# discovered extension, and spawned children still load the installed copy, so the
+# seam covers the parent session only.
+if [ "${1:-}" = "--dev" ]; then
+  shift
+  exec mise exec -- "$PI_BIN" --no-extensions \
+    -e "$REPO/extensions/rails" -e "$REPO/extensions/subagent" "$@"
+fi
+
+INSTALLED_RAILS="$HOME/.pi/agent/extensions/rails"
+if [ ! -d "$INSTALLED_RAILS" ] || [ -L "$INSTALLED_RAILS" ]; then
+  echo "liubai: steering rails are not installed — run $REPO/setup.sh" >&2
+fi
 
 exec mise exec -- "$PI_BIN" "$@"

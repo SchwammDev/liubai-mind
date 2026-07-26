@@ -10,13 +10,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-TS_DIR="$ROOT/.pi/extensions/rails"
-PY_DIR="$ROOT/.pi/extensions/rails/hooks"
+TS_DIR="$ROOT/extensions/rails"
+PY_DIR="$ROOT/extensions/rails/hooks"
 
 args=("$@")
 ts_args=("${args[@]}")
 py_args=("${args[@]}")
-[ ${#args[@]} -eq 0 ] && ts_args=("$TS_DIR"/*.test.ts "$ROOT/.pi/extensions/subagent"/*.test.ts)
+[ ${#args[@]} -eq 0 ] && ts_args=("$TS_DIR"/*.test.ts "$ROOT/extensions/subagent"/*.test.ts)
 [ ${#args[@]} -eq 0 ] && py_args=("$PY_DIR")
 
 status=0

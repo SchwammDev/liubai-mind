@@ -29,5 +29,5 @@
       ]
     }
   },
-  "include": [".pi/extensions/**/*.ts"]
+  "include": ["extensions/**/*.ts"]
 }
