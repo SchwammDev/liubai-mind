@@ -13,6 +13,7 @@ import {
   editKey,
   recordNoop,
   repeatedDuplicate,
+  writeCall,
   type Exec,
 } from "./dedup.ts";
 
@@ -45,6 +46,14 @@ test("editKey differs when the edits differ", () => {
   const e2 = [{ oldText: "a", newText: "c" }];
 
   assert.notEqual(editKey("a.txt", e1), editKey("a.txt", e2));
+});
+
+test("a write call missing content is not a write call", () => {
+  assert.equal(writeCall({ path: "a.py" }), null);
+});
+
+test("a write call carrying path and content is recognised", () => {
+  assert.deepEqual(writeCall({ path: "a.py", content: "x = 1" }), { path: "a.py", content: "x = 1" });
 });
 
 test("bashMatchesDedup respects regex word boundaries", () => {
