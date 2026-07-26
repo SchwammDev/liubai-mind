@@ -265,6 +265,13 @@ export function isFailedResult(result: SingleResult): boolean {
   );
 }
 
+function failureReport(result: SingleResult): string {
+  const diagnosis = [result.errorMessage, result.stderr]
+    .filter((part): part is string => Boolean(part?.trim()))
+    .join("\n");
+  return diagnosis || getFinalOutput(result.messages);
+}
+
 // Failure output skips the compress bounce (no live child to ask), so the cap
 // is enforced by hard truncation — a crashing child's stderr flood must not
 // land uncapped in the parent's context.
@@ -272,7 +279,7 @@ export function getResultOutput(result: SingleResult): string {
   if (!isFailedResult(result)) {
     return getFinalOutput(result.messages) || "(no output)";
   }
-  const raw = result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)";
+  const raw = failureReport(result) || "(no output)";
   const { report, omitted } = hardTruncateReport(raw);
   return omitted > 0 ? `${report}\n\n${truncationNotice(omitted)}` : report;
 }
