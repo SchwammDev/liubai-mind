@@ -1,11 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, BashToolDetails } from "@earendil-works/pi-coding-agent";
 
 import { withBashDedup, withEditDedup } from "./overrides.ts";
-import { approveRerun, bashKey, createSession, REPLAY_NOTICE, type Exec } from "./dedup.ts";
+import {
+  approveRerun,
+  bashKey,
+  createSession,
+  REPLAY_NOTICE,
+  type BashResult,
+  type Exec,
+} from "./dedup.ts";
 
-type FakeResult = AgentToolResult<undefined> & { isError?: boolean };
+type FakeResult = AgentToolResult<undefined>;
 
 const PATTERNS = [
   "\\bgh\\s+(issue|pr)\\s+comment\\b",
@@ -33,18 +40,23 @@ function ghWorld(initial: Partial<World> = {}): World {
   return world;
 }
 
-function bashHarness(opts: { world?: World; enforced?: boolean; disabled?: boolean } = {}) {
+function bashHarness(
+  opts: { world?: World; enforced?: boolean; disabled?: boolean; details?: BashToolDetails } = {},
+) {
   const session = createSession();
   const logs: any[] = [];
   const calls: string[] = [];
   const world = opts.world ?? ghWorld();
   const delegate = {
     name: "bash",
-    execute: async (_id: string, params: any): Promise<FakeResult> => {
+    execute: async (_id: string, params: any): Promise<BashResult> => {
       calls.push(params.command);
       if (/\bclose\b/.test(params.command)) world.state = "CLOSED";
       if (/\breopen\b/.test(params.command)) world.state = "OPEN";
-      return { content: [{ type: "text", text: `ran#${calls.length}: ${params.command}` }], details: undefined };
+      return {
+        content: [{ type: "text", text: `ran#${calls.length}: ${params.command}` }],
+        details: opts.details,
+      };
     },
   };
   const tool = withBashDedup(delegate, {
@@ -70,7 +82,6 @@ test("a duplicate gh comment no-ops without executing and reports the existing U
   const result = await h.run('gh issue comment 5 --body "fix confirmed, thanks!"');
 
   assert.equal(h.calls.length, 0);
-  assert.notEqual(result.isError, true);
   assert.match(resultText(result), new RegExp(COMMENT_URL));
 });
 
@@ -91,7 +102,6 @@ test("a replayed duplicate returns the original result prefixed with the dedup n
   const replayed = await h.run("npm publish");
 
   assert.equal(h.calls.length, 1);
-  assert.notEqual(replayed.isError, true);
   assert.match(resultText(replayed), new RegExp(`^\\[dedup\\]`));
   assert.ok(resultText(replayed).startsWith(REPLAY_NOTICE));
   assert.match(resultText(replayed), /ran#1: npm publish/);
@@ -123,6 +133,19 @@ test("a failed first run is not cached for replay", async () => {
 
   assert.equal(attempts, 2);
   assert.equal(resultText(second), "published");
+});
+
+const UNCLONABLE_DETAILS = { fullOutputPath: () => "/tmp/out.log" } as unknown as BashToolDetails;
+
+test("a result that cannot be cloned still returns and simply is not replayed", async () => {
+  const h = bashHarness({ details: UNCLONABLE_DETAILS });
+
+  const first = await h.run("npm publish");
+  const second = await h.run("npm publish");
+
+  assert.equal(h.calls.length, 2);
+  assert.match(resultText(first), /ran#1/);
+  assert.match(resultText(second), /ran#2/);
 });
 
 test("an approved rerun executes fresh and refreshes the replay cache", async () => {
@@ -216,7 +239,6 @@ test("an edit re-adding content already in the file no-ops with its location", a
   const result = await h.run("notes.md", REINSERT);
 
   assert.equal(h.calls.length, 0);
-  assert.notEqual(result.isError, true);
   assert.match(resultText(result), /already present at notes\.md:3/);
 });
 

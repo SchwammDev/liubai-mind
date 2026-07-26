@@ -58,11 +58,12 @@ export function withBashDedup<T extends Pick<BashTool, "name" | "execute">>(
       if (!bashMatchesDedup(command, deps.patterns)) return passthrough();
 
       const key = bashKey(command);
+      // pi signals a failed command by throwing, so a rejected passthrough never
+      // reaches the cache; that rejection is the whole guard against replaying a
+      // failure as a completed run.
       const runFresh = async (cacheReplay: boolean) => {
         const result = await passthrough();
-        if (!reportedError(result) && cacheReplay) {
-          deps.session.replayCache.set(key, snapshot(result));
-        }
+        if (cacheReplay) rememberForReplay(deps.session, key, result);
         return result;
       };
       if (consumeApproval(deps.session, key)) return runFresh(effectFamily(command) === null);
@@ -143,10 +144,13 @@ function noopResult(notice: string): AgentToolResult<undefined> {
   return { content: [{ type: "text", text: `[dedup] ${notice}` }], details: undefined };
 }
 
-// pi derives a tool result's error flag from a thrown execute, so its result type
-// carries none; a delegate that reports one anyway must not be cached for replay.
-function reportedError(result: BashResult): boolean {
-  return "isError" in result && result.isError === true;
+function rememberForReplay(session: DedupSession, key: string, result: BashResult): void {
+  try {
+    session.replayCache.set(key, snapshot(result));
+  } catch {
+    // A result that cannot be cloned is merely unreplayable; caching must never
+    // turn a command that already ran into a reported failure.
+  }
 }
 
 function snapshot(result: BashResult): ReplayEntry {
