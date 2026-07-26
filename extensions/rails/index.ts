@@ -30,13 +30,17 @@ import {
 import { withBashDedup, withEditDedup, type BashTool, type EditTool } from "./overrides.ts";
 import { withoutDuplicateToolCalls } from "./duplicate-delivery.ts";
 import { cleanProse } from "./prose-gate.ts";
-import { injectWebSearch } from "./web-search.ts";
+import { injectWebSearch, loadWebSearchConfig } from "./web-search.ts";
 
 // Command-gate rules merge a personal global file under a project-local one;
 // either may be absent (no gating). LIUBAI_RAILS_RULES overrides the project path.
 const GLOBAL_RULES = join(homedir(), ".pi/agent/command-rules.json");
 const PROJECT_RULES =
   process.env.LIUBAI_RAILS_RULES ?? join(import.meta.dirname, "../../command-rules.json");
+
+// Liubai's own capability toggles, owner-namespaced because `~/.pi/agent/` is
+// shared with pi's settings.json and models.json.
+const LIUBAI_CONFIG = join(homedir(), ".pi/agent/liubai.json");
 
 const HOOK_DIR = join(import.meta.dirname, "hooks");
 
@@ -148,6 +152,7 @@ export type RailsDeps = {
 export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
   const pendingNudges = new Map<string, string[]>();
   const rules = mergeRules(loadRules(GLOBAL_RULES), loadRules(PROJECT_RULES));
+  const webSearch = loadWebSearchConfig(LIUBAI_CONFIG);
   const dedup = createSession();
   const logDedup = deps.logDedup ?? createFileLog();
   const cwd = process.cwd();
@@ -279,9 +284,21 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
     return { content: [...event.content, advisory] };
   });
 
+  // A malformed liubai.json leaves web search off, which is safe but silent, so
+  // the operator hears the reason once rather than on every LLM call.
+  let webSearchConfigNotified = false;
+  const reportWebSearchConfig = (ctx: ExtensionContext) => {
+    if (!webSearch.error || !ctx.hasUI || webSearchConfigNotified) return;
+    webSearchConfigNotified = true;
+    ctx.ui.notify(`[web-search] ${webSearch.error}`, "error");
+  };
+
   // Capability, not steering: stays on under LIUBAI_RAILS_OFF so baseline
   // comparisons vary only the steering, never what the agent can reach.
-  pi.on("before_provider_request", (event, ctx) => injectWebSearch(event.payload, ctx.model));
+  pi.on("before_provider_request", (event, ctx) => {
+    reportWebSearchConfig(ctx);
+    return injectWebSearch(event.payload, ctx.model, webSearch.providers);
+  });
 
   pi.on("message_end", (event) => {
     if (railsDisabled()) return undefined;
