@@ -1,9 +1,26 @@
-import type { AnalyzeReq, AnalyzeResp, Env, Extracted, Rule, RuleContext } from "./contract.ts";
+import type { AnalyzeReq, AnalyzeResp, Env, Extracted, Lang, RailError, Rule, RuleContext } from "./contract.ts";
 import { detectLang } from "./lang.ts";
 import { shouldSkip } from "./prefilter.ts";
 
 const emptyResp = (): AnalyzeResp => ({ nudges: [], errors: [] });
 const emptyExtracted: Extracted = { functions: [], comments: [] };
+
+async function extractFacts(
+  req: AnalyzeReq,
+  lang: Lang,
+  env: Env,
+  errors: RailError[],
+): Promise<Extracted> {
+  const extractor = env.extractors?.[lang];
+  if (extractor === undefined) return emptyExtracted;
+
+  try {
+    return await extractor.extract({ ...(req.before !== undefined ? { before: req.before } : {}), after: req.after });
+  } catch (err) {
+    errors.push({ source: `extract:${lang}`, msg: String(err) });
+    return emptyExtracted;
+  }
+}
 
 export async function analyze(req: AnalyzeReq, env: Env, rules: readonly Rule[]): Promise<AnalyzeResp> {
   const lang = req.lang ?? detectLang(req.path);
@@ -11,10 +28,9 @@ export async function analyze(req: AnalyzeReq, env: Env, rules: readonly Rule[])
 
   if (shouldSkip(req.path, req.after)) return emptyResp();
 
-  const extractor = env.extractors?.[lang];
-  const extracted = extractor === undefined
-    ? emptyExtracted
-    : extractor.extract({ ...(req.before !== undefined ? { before: req.before } : {}), after: req.after });
+  const nudges: AnalyzeResp["nudges"] = [];
+  const errors: AnalyzeResp["errors"] = [];
+  const extracted = await extractFacts(req, lang, env, errors);
 
   const ctx: RuleContext = {
     path: req.path,
@@ -24,9 +40,6 @@ export async function analyze(req: AnalyzeReq, env: Env, rules: readonly Rule[])
     extracted,
     ...(req.before !== undefined ? { before: req.before } : {}),
   };
-
-  const nudges: AnalyzeResp["nudges"] = [];
-  const errors: AnalyzeResp["errors"] = [];
 
   for (const rule of rules) {
     try {
