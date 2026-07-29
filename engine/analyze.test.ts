@@ -2,7 +2,31 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { analyze } from "./analyze.ts";
-import type { Env, Nudge, Rule, RuleContext } from "./contract.ts";
+import type { Env, Extracted, Nudge, Rule, RuleContext } from "./contract.ts";
+
+const FACTS_ENV: Env = {
+  extractors: {
+    python: {
+      extract: () => ({
+        functions: [
+          {
+            id: "app.f",
+            name: "f",
+            startLine: 1,
+            endLine: 3,
+            cyclomaticComplexity: 9,
+            missingAnnotations: ["x"],
+            isTest: false,
+            bodyLineCount: 2,
+            signatureChanged: true,
+            bodyChanged: true,
+          },
+        ],
+        comments: [],
+      }),
+    },
+  },
+};
 
 const ENV: Env = {};
 
@@ -103,6 +127,31 @@ test("rules receive a context carrying before after env and lang", async () => {
   assert.equal(got.after, "after-text");
   assert.equal(got.before, "before-text");
   assert.equal(got.env, ENV);
+  assert.deepEqual(got.extracted, { functions: [], comments: [] });
+});
+
+test("an extractor's facts reach the rule context", async () => {
+  const seen: Extracted[] = [];
+  const rule: Rule = { name: "snoop", run: (ctx) => { seen.push(ctx.extracted); return []; } };
+
+  await analyze({ path: "app/foo.py", after: "def f():\n  pass" }, FACTS_ENV, [rule]);
+
+  assert.equal(seen.length, 1);
+  const got = seen[0];
+  if (got === undefined) { assert.fail("rule was never run"); return; }
+  const fn = got.functions[0];
+  if (fn === undefined) { assert.fail("expected one function fact"); return; }
+  assert.equal(fn.name, "f");
+  assert.equal(fn.cyclomaticComplexity, 9);
+});
+
+test("a lang with no registered extractor yields empty facts", async () => {
+  const seen: Extracted[] = [];
+  const rule: Rule = { name: "snoop", run: (ctx) => { seen.push(ctx.extracted); return []; } };
+
+  await analyze({ path: "src/main.cpp", after: "int main(){}" }, FACTS_ENV, [rule]);
+
+  assert.deepEqual(seen[0], { functions: [], comments: [] });
 });
 
 test("two identical calls produce deep-equal responses (determinism)", async () => {

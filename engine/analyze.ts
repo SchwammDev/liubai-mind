@@ -1,8 +1,9 @@
-import type { AnalyzeReq, AnalyzeResp, Env, Rule, RuleContext } from "./contract.ts";
+import type { AnalyzeReq, AnalyzeResp, Env, Extracted, Rule, RuleContext } from "./contract.ts";
 import { detectLang } from "./lang.ts";
 import { shouldSkip } from "./prefilter.ts";
 
 const emptyResp = (): AnalyzeResp => ({ nudges: [], errors: [] });
+const emptyExtracted: Extracted = { functions: [], comments: [] };
 
 export async function analyze(req: AnalyzeReq, env: Env, rules: readonly Rule[]): Promise<AnalyzeResp> {
   const lang = req.lang ?? detectLang(req.path);
@@ -10,11 +11,17 @@ export async function analyze(req: AnalyzeReq, env: Env, rules: readonly Rule[])
 
   if (shouldSkip(req.path, req.after)) return emptyResp();
 
+  const extractor = env.extractors?.[lang];
+  const extracted = extractor === undefined
+    ? emptyExtracted
+    : extractor.extract({ ...(req.before !== undefined ? { before: req.before } : {}), after: req.after });
+
   const ctx: RuleContext = {
     path: req.path,
     lang,
     after: req.after,
     env,
+    extracted,
     ...(req.before !== undefined ? { before: req.before } : {}),
   };
 
