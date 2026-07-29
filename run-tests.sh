@@ -1,8 +1,8 @@
 #!/bin/bash
-# One entrypoint for the whole suite: TypeScript extension tests (node --test),
-# the vendored Python hook tests (pytest), and the tsc type gate. Args are
-# forwarded verbatim to the two test runners; tsc always checks the whole
-# project, since `tsc -p <cfg> <file>` is an error.
+# One entrypoint for the whole suite: TypeScript tests in extensions/ and
+# engine/ (node --test), the vendored Python hook tests (pytest), and the tsc
+# type gate. Args are forwarded verbatim to the two test runners; tsc always
+# checks the whole project, since `tsc -p <cfg> <file>` is an error.
 #
 # Node: system node is too old for type stripping, so use the mise-managed
 # node@22 from setup.sh. Python: `uv run --with pytest` injects pytest on demand,
@@ -16,7 +16,7 @@ PY_DIR="$ROOT/extensions/rails/hooks"
 args=("$@")
 ts_args=("${args[@]}")
 py_args=("${args[@]}")
-[ ${#args[@]} -eq 0 ] && ts_args=("$TS_DIR"/*.test.ts "$ROOT/extensions/subagent"/*.test.ts)
+[ ${#args[@]} -eq 0 ] && ts_args=("$TS_DIR"/*.test.ts "$ROOT/extensions/subagent"/*.test.ts "$ROOT/engine"/*.test.ts)
 [ ${#args[@]} -eq 0 ] && py_args=("$PY_DIR")
 
 status=0
