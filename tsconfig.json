@@ -29,5 +29,5 @@
       ]
     }
   },
-  "include": ["extensions/**/*.ts"]
+  "include": ["extensions/**/*.ts", "engine/**/*.ts"]
 }
