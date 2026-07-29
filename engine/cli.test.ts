@@ -48,3 +48,11 @@ test("a non-object payload exits 1 with empty stdout and a stderr message", () =
   assert.equal(res.stdout, "");
   assert.ok(res.stderr.trim().length > 0);
 });
+
+test("a payload missing required fields exits 1 with empty stdout and a stderr message", () => {
+  const res = runCli("{}");
+
+  assert.equal(res.status, 1);
+  assert.equal(res.stdout, "");
+  assert.match(res.stderr, /^[^\n]+\n$/);
+});
