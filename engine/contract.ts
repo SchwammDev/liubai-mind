@@ -26,7 +26,7 @@ export interface FunctionFacts {
 export interface CommentFacts {
   line: number;
   text: string;
-  kind: "line" | "doc" | "block";
+  kind: "line" | "doc" | "block" | "tooling";
   added: boolean;
 }
 
@@ -36,6 +36,7 @@ export interface Extractor {
 
 export interface Env {
   extractors?: Partial<Record<Lang, Extractor>>;
+  helpers?: () => string[];
 }
 
 export interface RuleContext {
