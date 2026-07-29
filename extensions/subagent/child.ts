@@ -50,6 +50,7 @@ export interface SingleResult {
   errorMessage?: string;
   finalReport?: string;
   settled?: boolean;
+  profile?: string;
 }
 
 export type SpawnMode = "single" | "parallel";
@@ -74,40 +75,132 @@ export function defaultComplexityConfigPath(): string {
 
 export type ComplexityMap = Record<Complexity, string>;
 
-export function loadComplexityMap(configPath: string = defaultComplexityConfigPath()): ComplexityMap {
-  const remedy = `Copy ${COMPLEXITY_EXAMPLE} from the repo to ${configPath} and fill in real model ids.`;
+export interface ComplexitySelection {
+  profile: string;
+  map: ComplexityMap;
+}
 
+export function defaultActiveProfilePath(): string {
+  return path.join(os.homedir(), ".pi", "agent", "active-profile.json");
+}
+
+export function loadProfilesRaw(configPath: string = defaultComplexityConfigPath()): unknown {
+  const remedy = `Copy ${COMPLEXITY_EXAMPLE} from the repo to ${configPath} and fill in real model ids.`;
   let raw: string;
   try {
     raw = fs.readFileSync(configPath, "utf8");
   } catch {
     throw new Error(`Complexity config not found at ${configPath}. ${remedy}`);
   }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error(`Complexity config at ${configPath} is not valid JSON. ${remedy}`);
+  }
+}
 
+export function extractProfiles(parsed: unknown): Record<string, unknown> | null {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  const obj = parsed as Record<string, unknown>;
+  const profiles = obj["profiles"];
+  if (typeof profiles !== "object" || profiles === null || Array.isArray(profiles)) return null;
+  return profiles as Record<string, unknown>;
+}
+
+export function validateProfile(name: string, raw: unknown): string | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return `Profile "${name}" must be an object.`;
+  }
+  const obj = raw as Record<string, unknown>;
+  const keys = Object.keys(obj);
+  const expected = new Set<string>(COMPLEXITY_LEVELS);
+  for (const key of keys) {
+    if (!expected.has(key)) {
+      return `Profile "${name}" has unknown key "${key}". Allowed keys: ${COMPLEXITY_LEVELS.join(", ")}.`;
+    }
+  }
+  for (const level of COMPLEXITY_LEVELS) {
+    const value = obj[level];
+    if (typeof value !== "string" || value.trim() === "") {
+      return `Profile "${name}" needs a non-empty model id string for "${level}".`;
+    }
+  }
+  return undefined;
+}
+
+const TARGET_SHAPE = `Expected shape: { "profiles": { "<name>": { ${COMPLEXITY_LEVELS.join(", ")} } } }. Copy ${COMPLEXITY_EXAMPLE} from the repo as a starting point.`;
+
+export function validateProfilesConfig(parsed: unknown): string[] {
+  const profiles = extractProfiles(parsed);
+  if (profiles === null) {
+    return [`Complexity config is a flat object. ${TARGET_SHAPE}`];
+  }
+  const problems: string[] = [];
+  for (const name of Object.keys(profiles)) {
+    const problem = validateProfile(name, profiles[name]);
+    if (problem) problems.push(problem);
+  }
+  return problems;
+}
+
+export function firstProfileName(profiles: Record<string, unknown>): string | undefined {
+  const names = Object.keys(profiles);
+  return names.length > 0 ? names[0] : undefined;
+}
+
+export function loadActiveProfileName(profilePath: string = defaultActiveProfilePath()): string | undefined {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(profilePath, "utf8");
+  } catch (e) {
+    if (e instanceof Error && "code" in e && e.code === "ENOENT") return undefined;
+    throw e;
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new Error(`Complexity config at ${configPath} is not valid JSON. ${remedy}`);
+    throw new Error(`Active profile config at ${profilePath} is not valid JSON.`);
   }
-
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error(`Complexity config at ${configPath} must be a flat object. ${remedy}`);
+    throw new Error(`Active profile config at ${profilePath} must be an object.`);
+  }
+  const profile = (parsed as Record<string, unknown>)["profile"];
+  if (typeof profile !== "string" || profile.trim() === "") {
+    throw new Error(`Active profile config at ${profilePath} needs a "profile" string.`);
+  }
+  return profile;
+}
+
+export function loadComplexitySelection(
+  configPath: string = defaultComplexityConfigPath(),
+  profilePath: string = defaultActiveProfilePath(),
+): ComplexitySelection {
+  const parsed = loadProfilesRaw(configPath);
+  const profiles = extractProfiles(parsed);
+  if (profiles === null) {
+    throw new Error(`Complexity config at ${configPath} is a flat object. ${TARGET_SHAPE}`);
   }
 
-  const entries = parsed as Record<string, unknown>;
-  for (const key of Object.keys(entries)) {
-    if (!isComplexity(key)) {
-      throw new Error(`Complexity config at ${configPath} has unknown key "${key}". Allowed keys: ${COMPLEXITY_LEVELS.join(", ")}. ${remedy}`);
-    }
+  const profileNames = Object.keys(profiles);
+  if (profileNames.length === 0) {
+    throw new Error(`Complexity config at ${configPath} defines no profiles. ${TARGET_SHAPE}`);
   }
-  for (const level of COMPLEXITY_LEVELS) {
-    const value = entries[level];
-    if (typeof value !== "string" || value.trim() === "") {
-      throw new Error(`Complexity config at ${configPath} needs a non-empty model id string for "${level}". ${remedy}`);
-    }
+
+  const activeName = loadActiveProfileName(profilePath) ?? firstProfileName(profiles)!;
+  if (!(activeName in profiles)) {
+    throw new Error(
+      `Active profile "${activeName}" is not defined in ${configPath}. Available profiles: ${profileNames.join(", ")}.`,
+    );
   }
-  return entries as ComplexityMap;
+
+  const activeProblem = validateProfile(activeName, profiles[activeName]);
+  if (activeProblem) {
+    throw new Error(`${activeProblem}`);
+  }
+
+  const map = profiles[activeName] as ComplexityMap;
+  return { profile: activeName, map };
 }
 
 export type ModeSelection = { kind: "single" } | { kind: "parallel" } | { kind: "error"; message: string };

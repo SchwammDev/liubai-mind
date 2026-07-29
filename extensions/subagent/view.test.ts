@@ -99,6 +99,14 @@ test("a single child's usage is reported with the model that ran it", () => {
   assert.match(shown(nodes), /2 turns ↑1\.2k some-model/);
 });
 
+test("a single child's usage line shows the profile next to the model", () => {
+  const billed = child({ model: "some-model", profile: "default", usage: { ...child().usage, input: 1200, turns: 2 } });
+
+  const nodes = describeResult(spawnResult(single(billed)), false, plainTheme);
+
+  assert.match(shown(nodes), /some-model · default/);
+});
+
 test("a child whose tier lost a capability shows what it lost next to its usage", () => {
   const limited = child({ model: "offgrid/big", notes: ["no web search — provider is not allowlisted"] });
 

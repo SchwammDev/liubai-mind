@@ -65,6 +65,9 @@ function displayItemLines(items: DisplayItem[], limit: number, expanded: boolean
 const capabilityLine = (result: SingleResult): string | undefined =>
   result.notes?.length ? `⚠ ${result.notes.join("; ")}` : undefined;
 
+const withProfile = (usage: string, profile: string | undefined): string =>
+  profile ? `${usage} · ${profile}` : usage;
+
 function singleExpanded(result: SingleResult, theme: ViewTheme): ViewNode[] {
   const failed = isFailedResult(result);
   const items = getDisplayItems(result.messages);
@@ -86,7 +89,7 @@ function singleExpanded(result: SingleResult, theme: ViewTheme): ViewNode[] {
   }
 
   const usage = formatUsageStats(result.usage, result.model);
-  if (usage) nodes.push(spacer(), text(theme.fg("dim", usage)));
+  if (usage) nodes.push(spacer(), text(theme.fg("dim", withProfile(usage, result.profile))));
 
   const lost = capabilityLine(result);
   if (lost) nodes.push(text(theme.fg("warning", lost)));
@@ -107,7 +110,7 @@ function singleCollapsed(result: SingleResult, theme: ViewTheme): ViewNode[] {
   }
 
   const usage = formatUsageStats(result.usage, result.model);
-  if (usage) out += `\n${theme.fg("dim", usage)}`;
+  if (usage) out += `\n${theme.fg("dim", withProfile(usage, result.profile))}`;
 
   const lost = capabilityLine(result);
   if (lost) out += `\n${theme.fg("warning", lost)}`;
@@ -156,7 +159,7 @@ function parallelExpanded(results: SingleResult[], theme: ViewTheme): ViewNode[]
     if (report) nodes.push(spacer(), markdown(report.trim()));
 
     const usage = formatUsageStats(result.usage, result.model);
-    if (usage) nodes.push(text(theme.fg("dim", usage)));
+    if (usage) nodes.push(text(theme.fg("dim", withProfile(usage, result.profile))));
 
     const lost = capabilityLine(result);
     if (lost) nodes.push(text(theme.fg("warning", lost)));
