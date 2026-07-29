@@ -6,7 +6,13 @@ import * as path from "node:path";
 
 import {
   selectMode,
-  loadComplexityMap,
+  loadProfilesRaw,
+  extractProfiles,
+  validateProfile,
+  validateProfilesConfig,
+  firstProfileName,
+  loadActiveProfileName,
+  loadComplexitySelection,
   aggregateUsage,
   getFinalOutput,
   getResultOutput,
@@ -98,66 +104,148 @@ test("a parallel task item without a complexity is rejected", () => {
   assert.equal(selection.kind, "error");
 });
 
-const complexityConfigFile = (contents: string): string => {
+const profileConfigFiles = (complexity: string, active?: string): { configPath: string; profilePath: string } => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "complexity-"));
-  const file = path.join(dir, "complexity.json");
-  fs.writeFileSync(file, contents);
-  return file;
+  const configPath = path.join(dir, "complexity.json");
+  fs.writeFileSync(configPath, complexity);
+  const profilePath = path.join(dir, "active-profile.json");
+  if (active !== undefined) fs.writeFileSync(profilePath, active);
+  return { configPath, profilePath };
 };
 
 const FULL_TIER_MAP = { trivial: "t-model", easy: "e-model", medium: "m-model", hard: "h-model" };
 
-test("a valid config maps every complexity tier to its model id", () => {
-  const file = complexityConfigFile(JSON.stringify(FULL_TIER_MAP));
+const PROFILES = { default: FULL_TIER_MAP, heavy: { ...FULL_TIER_MAP, hard: "h-heavy" } };
 
-  const map = loadComplexityMap(file);
+test("a nested config returns the active profile's tier map", () => {
+  const { configPath, profilePath } = profileConfigFiles(
+    JSON.stringify({ profiles: PROFILES }),
+    JSON.stringify({ profile: "heavy" }),
+  );
 
-  assert.deepEqual(map, FULL_TIER_MAP);
+  const selection = loadComplexitySelection(configPath, profilePath);
+
+  assert.equal(selection.profile, "heavy");
+  assert.deepEqual(selection.map, PROFILES.heavy);
 });
 
-test("a missing config file errors naming the path and the example file", () => {
+test("a flat form config is rejected naming the profiles target shape", () => {
+  const { configPath, profilePath } = profileConfigFiles(JSON.stringify(FULL_TIER_MAP));
+
+  assert.throws(() => loadComplexitySelection(configPath, profilePath), /profiles/);
+});
+
+test("a profile missing a tier is rejected", () => {
+  const profiles = { default: { trivial: "t", easy: "e", medium: "m" } };
+  const { configPath, profilePath } = profileConfigFiles(JSON.stringify({ profiles }), JSON.stringify({ profile: "default" }));
+
+  assert.throws(() => loadComplexitySelection(configPath, profilePath), /hard/);
+});
+
+test("a profile with an empty model id is rejected", () => {
+  const profiles = { default: { ...FULL_TIER_MAP, easy: "" } };
+  const { configPath, profilePath } = profileConfigFiles(JSON.stringify({ profiles }), JSON.stringify({ profile: "default" }));
+
+  assert.throws(() => loadComplexitySelection(configPath, profilePath), /easy/);
+});
+
+test("the active profile is selected by name", () => {
+  const { configPath, profilePath } = profileConfigFiles(
+    JSON.stringify({ profiles: PROFILES }),
+    JSON.stringify({ profile: "default" }),
+  );
+
+  const selection = loadComplexitySelection(configPath, profilePath);
+
+  assert.equal(selection.profile, "default");
+  assert.deepEqual(selection.map, PROFILES.default);
+});
+
+test("the first profile in insertion order is used when active-profile.json is absent", () => {
+  const { configPath, profilePath } = profileConfigFiles(JSON.stringify({ profiles: PROFILES }));
+
+  const selection = loadComplexitySelection(configPath, profilePath);
+
+  assert.equal(selection.profile, "default");
+  assert.deepEqual(selection.map, PROFILES.default);
+});
+
+test("an unknown active profile name is rejected listing the available profiles", () => {
+  const { configPath, profilePath } = profileConfigFiles(
+    JSON.stringify({ profiles: PROFILES }),
+    JSON.stringify({ profile: "ghost" }),
+  );
+
+  assert.throws(() => loadComplexitySelection(configPath, profilePath), /ghost/);
+});
+
+test("validateProfilesConfig flags a flat form naming the profiles target shape", () => {
+  const problems = validateProfilesConfig(FULL_TIER_MAP);
+
+  assert.ok(problems.length > 0, "flat form should be flagged");
+  assert.ok(problems.some((p) => /profiles/.test(p)), "flat complaint should name the target shape");
+});
+
+test("validateProfilesConfig reports each bad profile among good ones", () => {
+  const profiles = {
+    good: FULL_TIER_MAP,
+    missingTier: { trivial: "t", easy: "e", medium: "m" },
+    emptyModel: { ...FULL_TIER_MAP, easy: "" },
+  };
+  const problems = validateProfilesConfig({ profiles });
+
+  assert.ok(problems.some((p) => /missingTier/.test(p) && /hard/.test(p)), "missing tier flagged for its profile");
+  assert.ok(problems.some((p) => /emptyModel/.test(p) && /easy/.test(p)), "empty model flagged for its profile");
+  assert.ok(!problems.some((p) => /^good/.test(p)), "the good profile should not be flagged");
+});
+
+test("loadProfilesRaw throws on a missing config file naming the path and the example file", () => {
   const missing = path.join(os.tmpdir(), "does-not-exist", "complexity.json");
 
-  assert.throws(() => loadComplexityMap(missing), (e: Error) => {
+  assert.throws(() => loadProfilesRaw(missing), (e: Error) => {
     assert.match(e.message, new RegExp(missing.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(e.message, /complexity\.example\.json/);
     return true;
   });
 });
 
-test("malformed JSON in the config errors naming the path", () => {
-  const file = complexityConfigFile("{ not json");
+test("loadProfilesRaw throws on malformed JSON naming the path and the example file", () => {
+  const { configPath } = profileConfigFiles("{ not json");
 
-  assert.throws(() => loadComplexityMap(file), (e: Error) => {
-    assert.match(e.message, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.throws(() => loadProfilesRaw(configPath), (e: Error) => {
+    assert.match(e.message, new RegExp(configPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(e.message, /complexity\.example\.json/);
     return true;
   });
 });
 
-test("a config missing a tier is rejected", () => {
-  const { hard, ...incomplete } = FULL_TIER_MAP;
-  const file = complexityConfigFile(JSON.stringify(incomplete));
-
-  assert.throws(() => loadComplexityMap(file), /hard/);
+test("extractProfiles returns the profiles object for a nested config and null for a flat form", () => {
+  assert.deepEqual(extractProfiles({ profiles: PROFILES }), PROFILES);
+  assert.equal(extractProfiles(FULL_TIER_MAP), null);
 });
 
-test("a config with an unknown extra key is rejected", () => {
-  const file = complexityConfigFile(JSON.stringify({ ...FULL_TIER_MAP, extreme: "x-model" }));
-
-  assert.throws(() => loadComplexityMap(file), /extreme/);
+test("validateProfile flags a profile with an extra tier key", () => {
+  assert.match(validateProfile("p", { ...FULL_TIER_MAP, extreme: "x" })!, /extreme/);
 });
 
-test("an empty model id is rejected", () => {
-  const file = complexityConfigFile(JSON.stringify({ ...FULL_TIER_MAP, easy: "" }));
-
-  assert.throws(() => loadComplexityMap(file), /easy/);
+test("firstProfileName returns the first profile in insertion order, or undefined when empty", () => {
+  assert.equal(firstProfileName(PROFILES), "default");
+  assert.equal(firstProfileName({}), undefined);
 });
 
-test("a non-string model id is rejected", () => {
-  const file = complexityConfigFile(JSON.stringify({ ...FULL_TIER_MAP, medium: 42 }));
+test("loadActiveProfileName returns undefined when the active-profile file is absent", () => {
+  const { profilePath } = profileConfigFiles(JSON.stringify({ profiles: PROFILES }));
 
-  assert.throws(() => loadComplexityMap(file), /medium/);
+  assert.equal(loadActiveProfileName(profilePath), undefined);
+});
+
+test("loadActiveProfileName returns the selected name when present", () => {
+  const { profilePath } = profileConfigFiles(
+    JSON.stringify({ profiles: PROFILES }),
+    JSON.stringify({ profile: "heavy" }),
+  );
+
+  assert.equal(loadActiveProfileName(profilePath), "heavy");
 });
 
 test("a report under the cap is accepted", () => {

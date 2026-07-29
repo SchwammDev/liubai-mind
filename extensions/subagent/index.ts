@@ -7,12 +7,16 @@ import {
   currentDepth,
   assessQuestion,
   buildClarifyTitle,
-  loadComplexityMap,
+  loadProfilesRaw,
+  loadComplexitySelection,
+  validateProfilesConfig,
+  type ComplexitySelection,
   QUESTION_CAP,
 } from "./child.ts";
 import { DialogGate } from "./bridge.ts";
 import { answerClarify, answerToolResult } from "./clarify.ts";
 import { runSpawn } from "./orchestrate.ts";
+import { availableProfileNames, runProfileCommand } from "./profile.ts";
 import { tableProblems } from "./tier-model.ts";
 import { spawnRpcTransport } from "./transport.ts";
 import { describeCall, describeResult, type ViewNode } from "./view.ts";
@@ -147,18 +151,45 @@ export function register(pi: ExtensionAPI): void {
     },
   });
 
-  // A table that cannot be read at all still fails loudly at the first spawn,
-  // with the remedy in the message; warning about it here would nag a session
-  // that never spawns. What is worth a launch warning is a readable table whose
-  // tiers no longer resolve, because that is silent until a task depends on it.
+  // A config that cannot be read or parsed at all is swallowed here: no child
+  // has spawned yet, and the spawn tool itself surfaces the remedy on the
+  // first real attempt. What is worth a launch warning is a readable config
+  // whose structure is broken (flat form, bad profile) or whose tiers no
+  // longer resolve against the live catalog — those are silent until a task
+  // depends on them.
   pi.on("session_start", (_event, ctx) => {
-    let problems: string | undefined;
+    let raw: unknown;
     try {
-      problems = tableProblems(loadComplexityMap(), ctx.modelRegistry);
+      raw = loadProfilesRaw();
     } catch {
       return;
     }
+    const structural = validateProfilesConfig(raw);
+    if (structural.length > 0) {
+      ctx.ui.notify(`[spawn] ${structural.join("; ")}`, "warning");
+      return;
+    }
+    let complexity: ComplexitySelection;
+    try {
+      complexity = loadComplexitySelection();
+    } catch (e) {
+      ctx.ui.notify(`[spawn] ${e instanceof Error ? e.message : String(e)}`, "warning");
+      return;
+    }
+    const problems = tableProblems(complexity.map, ctx.modelRegistry);
     if (problems) ctx.ui.notify(`[spawn] ${problems}`, "warning");
+  });
+
+  pi.registerCommand("profile", {
+    description: "Show or switch the active spawn profile.",
+    getArgumentCompletions: (argumentPrefix) => {
+      const names = availableProfileNames().filter((n) => n.startsWith(argumentPrefix));
+      return names.length > 0 ? names.map((n) => ({ value: n, label: n })) : null;
+    },
+    async handler(args, ctx) {
+      const outcome = runProfileCommand(args, ctx.modelRegistry);
+      ctx.ui.notify(outcome.message, outcome.kind);
+    },
   });
 }
 

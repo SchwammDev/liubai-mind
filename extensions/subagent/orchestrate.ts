@@ -5,12 +5,12 @@ import {
   getFinalOutput,
   getResultOutput,
   isFailedResult,
-  loadComplexityMap,
+  loadComplexitySelection,
   mapWithConcurrencyLimit,
   selectMode,
   taskPreview,
   type Complexity,
-  type ComplexityMap,
+  type ComplexitySelection,
   type SingleResult,
   type SpawnMode,
   type SubagentDetails,
@@ -59,7 +59,7 @@ export type TransportFactory = (
 
 export interface SpawnDeps {
   spawnTransport: TransportFactory;
-  loadComplexity?: () => ComplexityMap;
+  loadComplexity?: () => ComplexitySelection;
   loadWebSearch?: () => WebSearchConfig;
 }
 
@@ -160,6 +160,7 @@ async function runChild(
 async function runSingle(
   deps: SpawnDeps,
   ctx: SpawnContext,
+  profile: string,
   task: string,
   choice: TierChoice,
   signal: AbortSignal | undefined,
@@ -176,7 +177,9 @@ async function runSingle(
         })
     : undefined;
 
-  return singleSpawnResult(await runChild(deps, ctx, task, choice, signal, childUpdate, gate, "single"));
+  const outcome = await runChild(deps, ctx, task, choice, signal, childUpdate, gate, "single");
+  outcome.result.profile = profile;
+  return singleSpawnResult(outcome);
 }
 
 // Every task is seeded as running (exitCode -1) so the progress line can count
@@ -184,6 +187,7 @@ async function runSingle(
 async function runParallel(
   deps: SpawnDeps,
   ctx: SpawnContext,
+  profile: string,
   assignments: TaskAssignment[],
   signal: AbortSignal | undefined,
   onUpdate: SpawnUpdate | undefined,
@@ -197,6 +201,7 @@ async function runParallel(
     usage: emptyUsage(),
     model: a.choice.reference,
     notes: a.choice.notes,
+    profile,
   }));
 
   const emitProgress = () => {
@@ -224,6 +229,7 @@ async function runParallel(
       "parallel",
     );
     allResults[index] = outcome.result;
+    outcome.result.profile = profile;
     emitProgress();
     return outcome.result;
   });
@@ -253,28 +259,29 @@ export async function runSpawn(
   onUpdate: SpawnUpdate | undefined,
   gate: DialogGate,
 ): Promise<ToolResult> {
-  const selection = selectMode(params);
-  if (selection.kind === "error") return textResult("single", selection.message);
+  const mode = selectMode(params);
+  if (mode.kind === "error") return textResult("single", mode.message);
 
-  let complexityMap: ComplexityMap;
+  let complexity: ComplexitySelection;
   try {
-    complexityMap = (deps.loadComplexity ?? loadComplexityMap)();
+    complexity = (deps.loadComplexity ?? loadComplexitySelection)();
   } catch (e) {
-    return textResult(selection.kind, e instanceof Error ? e.message : String(e), true);
+    return textResult(mode.kind, e instanceof Error ? e.message : String(e), true);
   }
+  const complexityMap = complexity.map;
 
   const catalog = ctx.modelRegistry;
   const searchProviders = (deps.loadWebSearch ?? (() => loadWebSearchConfig(LIUBAI_CONFIG)))().providers;
 
-  if (selection.kind === "parallel") {
+  if (mode.kind === "parallel") {
     const assigned = assignTasks(params.tasks!, complexityMap, catalog, searchProviders);
     return assigned.kind === "error"
       ? textResult("parallel", assigned.message, true)
-      : runParallel(deps, ctx, assigned.value, signal, onUpdate, gate);
+      : runParallel(deps, ctx, complexity.profile, assigned.value, signal, onUpdate, gate);
   }
 
   const chosen = chooseTier(params.complexity!, complexityMap, catalog, searchProviders);
   return chosen.kind === "error"
     ? textResult("single", chosen.message, true)
-    : runSingle(deps, ctx, params.task!, chosen.value, signal, onUpdate, gate);
+    : runSingle(deps, ctx, complexity.profile, params.task!, chosen.value, signal, onUpdate, gate);
 }

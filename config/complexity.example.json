@@ -1,6 +1,16 @@
 {
-  "trivial": "provider/small-model-id",
-  "easy": "provider/mid-model-id",
-  "medium": "provider/reasoning-model-id",
-  "hard": "provider/flagship-model-id"
+  "profiles": {
+    "default": {
+      "trivial": "provider/small-model-id",
+      "easy": "provider/mid-model-id",
+      "medium": "provider/reasoning-model-id",
+      "hard": "provider/flagship-model-id"
+    },
+    "cheap": {
+      "trivial": "provider/small-model-id",
+      "easy": "provider/small-model-id",
+      "medium": "provider/mid-model-id",
+      "hard": "provider/mid-model-id"
+    }
+  }
 }

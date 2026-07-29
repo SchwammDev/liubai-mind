@@ -1,7 +1,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { CLARIFY_TAG, type ComplexityMap } from "./child.ts";
+import { CLARIFY_TAG, type ComplexitySelection, type ComplexityMap } from "./child.ts";
 import { DialogGate } from "./bridge.ts";
 import { __resetClarifyState, type ToolResult } from "./clarify.ts";
 import { runSpawn, type SpawnContext, type TransportFactory } from "./orchestrate.ts";
@@ -66,13 +66,13 @@ class SpawnedChildren {
 
 const spawning = (
   params: Parameters<typeof runSpawn>[2],
-  options: { children?: SpawnedChildren; loadComplexity?: () => ComplexityMap; onUpdate?: (u: ToolResult) => void } = {},
+  options: { children?: SpawnedChildren; loadComplexity?: () => ComplexitySelection; onUpdate?: (u: ToolResult) => void } = {},
 ) => {
   const children = options.children ?? new SpawnedChildren();
   const result = runSpawn(
     {
       spawnTransport: children.factory,
-      loadComplexity: options.loadComplexity ?? (() => MODELS),
+      loadComplexity: options.loadComplexity ?? (() => ({ profile: "default", map: MODELS })),
       loadWebSearch: () => ({ providers: SEARCHING_PROVIDERS }),
     },
     silentContext(),
@@ -144,7 +144,7 @@ test("the child is spawned on the model its complexity maps to", async () => {
 test("a tier whose model id lacks a provider prefix fails the spawn before any child starts", async () => {
   const { children, result } = spawning(
     { task: "do it", complexity: "hard" },
-    { loadComplexity: () => ({ ...MODELS, hard: "big" }) },
+    { loadComplexity: () => ({ profile: "default", map: { ...MODELS, hard: "big" } }) },
   );
 
   const spawn = await result;
@@ -157,7 +157,7 @@ test("a tier whose model id lacks a provider prefix fails the spawn before any c
 test("a tier outside the web-search allowlist still runs, carrying the loss as a note", async () => {
   const { children, result } = spawning(
     { task: "do it", complexity: "hard" },
-    { loadComplexity: () => ({ ...MODELS, hard: "offgrid/big" }) },
+    { loadComplexity: () => ({ profile: "default", map: { ...MODELS, hard: "offgrid/big" } }) },
   );
 
   children.at(0).transport.emitLine(settling());
@@ -169,13 +169,25 @@ test("a tier outside the web-search allowlist still runs, carrying the loss as a
 test("a tier whose provider has no configured credentials still runs, carrying that as a note", async () => {
   const { children, result } = spawning(
     { task: "do it", complexity: "hard" },
-    { loadComplexity: () => ({ ...MODELS, hard: "unpaid/big" }) },
+    { loadComplexity: () => ({ profile: "default", map: { ...MODELS, hard: "unpaid/big" } }) },
   );
 
   children.at(0).transport.emitLine(settling());
 
   const [child] = (await result).details.results;
   assert.deepEqual(child?.notes, ['no configured credentials for provider "unpaid"']);
+});
+
+test("a spawn surfaces the active profile name on each child result", async () => {
+  const { children, result } = spawning(
+    { task: "do it", complexity: "easy" },
+    { loadComplexity: () => ({ profile: "nightly", map: MODELS }) },
+  );
+
+  children.at(0).transport.emitLine(settling());
+
+  const [child] = (await result).details.results;
+  assert.equal(child?.profile, "nightly");
 });
 
 test("the child runs one level below its parent", async () => {
