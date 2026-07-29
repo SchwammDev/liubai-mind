@@ -18,8 +18,8 @@ import {
 } from "./child.ts";
 import { ChildSession, type ChildTransport, type DialogGate, type DialogOptions, type UiForwarder } from "./bridge.ts";
 import {
+  ClarifyStore,
   gateChildReport,
-  getSuspended,
   initSuspend,
   singleSpawnResult,
   spawnBlockedResult,
@@ -59,6 +59,7 @@ export type TransportFactory = (
 
 export interface SpawnDeps {
   spawnTransport: TransportFactory;
+  store: ClarifyStore;
   loadComplexity?: () => ComplexitySelection;
   loadWebSearch?: () => WebSearchConfig;
 }
@@ -141,7 +142,7 @@ async function runChild(
       timer: null,
       finished: false,
     };
-    initSuspend(state, signal);
+    initSuspend(deps.store, state, signal);
     return { kind: "suspended", clarify: t.clarify, result };
   }
 
@@ -167,7 +168,7 @@ async function runSingle(
   onUpdate: SpawnUpdate | undefined,
   gate: DialogGate,
 ): Promise<ToolResult> {
-  if (getSuspended()) return spawnBlockedResult();
+  if (deps.store.getSuspended()) return spawnBlockedResult();
 
   const childUpdate: ChildUpdate | undefined = onUpdate
     ? (r) =>

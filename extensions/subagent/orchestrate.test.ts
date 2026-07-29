@@ -1,9 +1,9 @@
-import { test, beforeEach, afterEach } from "node:test";
+import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { CLARIFY_TAG, type ComplexitySelection, type ComplexityMap } from "./child.ts";
 import { DialogGate } from "./bridge.ts";
-import { __resetClarifyState, type ToolResult } from "./clarify.ts";
+import { ClarifyStore, type ToolResult } from "./clarify.ts";
 import { runSpawn, type SpawnContext, type TransportFactory } from "./orchestrate.ts";
 import { FakeTransport } from "./testing.ts";
 import type { CatalogModel, ModelCatalog } from "./tier-model.ts";
@@ -64,14 +64,19 @@ class SpawnedChildren {
   }
 }
 
+let sharedStore = new ClarifyStore();
+afterEach(() => { sharedStore.reset(); sharedStore = new ClarifyStore(); });
+
 const spawning = (
   params: Parameters<typeof runSpawn>[2],
   options: { children?: SpawnedChildren; loadComplexity?: () => ComplexitySelection; onUpdate?: (u: ToolResult) => void } = {},
 ) => {
   const children = options.children ?? new SpawnedChildren();
+  const store = sharedStore;
   const result = runSpawn(
     {
       spawnTransport: children.factory,
+      store,
       loadComplexity: options.loadComplexity ?? (() => ({ profile: "default", map: MODELS })),
       loadWebSearch: () => ({ providers: SEARCHING_PROVIDERS }),
     },
@@ -92,9 +97,6 @@ const askingClarify = (id: string, question: string) =>
   JSON.stringify({ type: "extension_ui_request", id, method: "input", title: CLARIFY_TAG + question });
 
 const textOf = (result: ToolResult) => result.content.map((c) => c.text).join("");
-
-beforeEach(__resetClarifyState);
-afterEach(__resetClarifyState);
 
 test("a task without a complexity is rejected before any child is spawned", async () => {
   const { children, result } = spawning({ task: "do it" });

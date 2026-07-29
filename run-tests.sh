@@ -5,8 +5,11 @@
 # checks the whole project, since `tsc -p <cfg> <file>` is an error.
 #
 # Node: system node is too old for type stripping, so use the mise-managed
-# node@22 from setup.sh. Python: `uv run --with pytest` injects pytest on demand,
-# so no venv or pyproject is required. Full output is shown on failure only.
+# node@22 from setup.sh. Concurrency pinned to 1: async tests with live timers
+# (clarify suspend-path) interleave TAP output and keep the process from exiting
+# cleanly under higher concurrency — serial execution is the deterministic surface.
+# Python: `uv run --with pytest` injects pytest on demand, so no venv or pyproject
+# is required. Full output is shown on failure only.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -22,7 +25,7 @@ py_args=("${args[@]}")
 status=0
 
 echo "## TypeScript (node --test)"
-ts_out=$(mise exec -- node --test --experimental-strip-types "${ts_args[@]}" 2>&1) || status=1
+ts_out=$(mise exec -- node --test --experimental-strip-types --test-concurrency=1 "${ts_args[@]}" 2>&1) || status=1
 if [ $status -eq 0 ]; then
   echo "✅ TypeScript tests passed"
 else

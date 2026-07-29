@@ -5,6 +5,7 @@ import { CLARIFY_TAG, getResultOutput, type SingleResult } from "./child.ts";
 import { ChildSession, type UiForwarder } from "./bridge.ts";
 import { FakeTransport } from "./testing.ts";
 import {
+  ClarifyStore,
   completeClarify,
   onClarifyTimeout,
   wireAbortDuringSuspend,
@@ -14,10 +15,6 @@ import {
   answerToolResult,
   spawnBlockedResult,
   type SuspendedState,
-  getSuspended,
-  __getLateReport,
-  __setSuspended,
-  __resetClarifyState,
 } from "./clarify.ts";
 
 const makeResult = (overrides: Partial<SingleResult> = {}): SingleResult => ({
@@ -69,10 +66,10 @@ const makeState = (overrides: Partial<SuspendedState> = {}): SuspendedState => {
 };
 
 test("completeClarify writes the response and returns done after the child settles", async () => {
-  __resetClarifyState();
+  const store = new ClarifyStore();
   const t = new FakeTransport();
   const state = makeState({ transport: t });
-  __setSuspended(state);
+  store.setSuspended(state);
 
   const outcomeP = completeClarify(state, "use file A");
   assert.deepEqual(t.lastWrite(), { type: "extension_ui_response", id: "q1", value: "use file A" });
@@ -84,10 +81,10 @@ test("completeClarify writes the response and returns done after the child settl
 });
 
 test("completeClarify returns suspended when the child asks again after the answer", async () => {
-  __resetClarifyState();
+  const store = new ClarifyStore();
   const t = new FakeTransport();
   const state = makeState({ transport: t });
-  __setSuspended(state);
+  store.setSuspended(state);
 
   const outcomeP = completeClarify(state, "ans1");
   t.emitLine(JSON.stringify({ type: "extension_ui_request", id: "q2", method: "input", title: CLARIFY_TAG + "second?" }));
@@ -103,12 +100,12 @@ test("completeClarify returns suspended when the child asks again after the answ
 });
 
 test("completeClarify flags a clean early exit on resume instead of surfacing the preamble as the report", async () => {
-  __resetClarifyState();
+  const store = new ClarifyStore();
   const t = new FakeTransport();
   const preamble = [{ role: "assistant", content: [{ type: "text", text: "preamble before the clarify tool call" }] }] as any;
   const result = makeResult({ messages: preamble });
   const state = makeState({ transport: t, result });
-  __setSuspended(state);
+  store.setSuspended(state);
 
   const outcomeP = completeClarify(state, "use file A");
   assert.deepEqual(t.lastWrite(), { type: "extension_ui_response", id: "q1", value: "use file A" });
@@ -122,72 +119,72 @@ test("completeClarify flags a clean early exit on resume instead of surfacing th
 });
 
 test("onClarifyTimeout auto-denies, settles the child, stashes a late report, and clears the slot", async () => {
-  __resetClarifyState();
+  const store = new ClarifyStore();
   const t = new FakeTransport();
   const state = makeState({ transport: t });
-  __setSuspended(state);
+  store.setSuspended(state);
 
-  const timeoutP = onClarifyTimeout(state);
+  const timeoutP = onClarifyTimeout(store, state);
   assert.deepEqual(t.lastWrite(), { type: "extension_ui_response", id: "q1", value: "proceed with best judgment" });
   t.emitLine(JSON.stringify(assistantMsg("late report")));
   t.emitLine(JSON.stringify({ type: "agent_settled" }));
 
   await timeoutP;
-  assert.equal(getSuspended(), null);
-  assert.equal(__getLateReport(), "late report");
+  assert.equal(store.getSuspended(), null);
+  assert.equal(store.getLateReport(), "late report");
   assert.equal(t.killed, true);
 });
 
 test("onClarifyTimeout re-suspends when the child asks again after the auto-deny", async () => {
-  __resetClarifyState();
+  const store = new ClarifyStore();
   const t = new FakeTransport();
   const state = makeState({ transport: t });
-  __setSuspended(state);
+  store.setSuspended(state);
 
-  const timeoutP = onClarifyTimeout(state);
+  const timeoutP = onClarifyTimeout(store, state);
   t.emitLine(JSON.stringify({ type: "extension_ui_request", id: "q2", method: "input", title: CLARIFY_TAG + "again?" }));
 
   const r = await timeoutP;
   void r;
-  assert.equal(getSuspended(), state);
+  assert.equal(store.getSuspended(), state);
   assert.equal(state.clarifyId, "q2");
   assert.equal(state.question, "again?");
   assert.equal(t.killed, false);
   if (state.timer) { clearTimeout(state.timer); state.timer = null; }
-  __resetClarifyState();
+  store.reset();
 });
 
 test("wireAbortDuringSuspend kills the child and stashes a late report on abort", () => {
-  __resetClarifyState();
+  const store = new ClarifyStore();
   const t = new FakeTransport();
   const ac = new AbortController();
   const state = makeState({ transport: t });
-  __setSuspended(state);
+  store.setSuspended(state);
 
-  wireAbortDuringSuspend(state, ac.signal);
+  wireAbortDuringSuspend(store, state, ac.signal);
   ac.abort();
 
   assert.equal(t.killed, true);
-  assert.equal(getSuspended(), null);
-  assert.ok(__getLateReport());
+  assert.equal(store.getSuspended(), null);
+  assert.ok(store.getLateReport());
 });
 
 test("answerClarify with nothing pending returns the no-question message", async () => {
-  __resetClarifyState();
+  const store = new ClarifyStore();
 
-  const outcome = await answerClarify("x");
+  const outcome = await answerClarify(store, "x");
 
   assert.equal(outcome.kind, "none");
   if (outcome.kind === "none") assert.equal(outcome.text, "No child is asking a question.");
 });
 
 test("answerClarify writes the response and returns the child's final report", async () => {
-  __resetClarifyState();
+  const store = new ClarifyStore();
   const t = new FakeTransport();
   const state = makeState({ transport: t });
-  __setSuspended(state);
+  store.setSuspended(state);
 
-  const answerP = answerClarify("use file A");
+  const answerP = answerClarify(store, "use file A");
   assert.deepEqual(t.lastWrite(), { type: "extension_ui_response", id: "q1", value: "use file A" });
   t.emitLine(JSON.stringify(assistantMsg("done: file A")));
   t.emitLine(JSON.stringify({ type: "agent_settled" }));
@@ -199,63 +196,63 @@ test("answerClarify writes the response and returns the child's final report", a
     assert.equal(outcome.failed, false);
   }
   assert.equal(state.budget.delivered, 1);
-  assert.equal(getSuspended(), null);
+  assert.equal(store.getSuspended(), null);
   assert.equal(t.killed, true);
 });
 
 test("answerClarify returns ask when the child asks again and keeps the slot suspended", async () => {
-  __resetClarifyState();
+  const store = new ClarifyStore();
   const t = new FakeTransport();
   const state = makeState({ transport: t });
-  __setSuspended(state);
+  store.setSuspended(state);
 
-  const answerP = answerClarify("ans1");
+  const answerP = answerClarify(store, "ans1");
   t.emitLine(JSON.stringify({ type: "extension_ui_request", id: "q2", method: "input", title: CLARIFY_TAG + "second?" }));
 
   const outcome = await answerP;
   assert.equal(outcome.kind, "ask");
   if (outcome.kind === "ask") assert.equal(outcome.question, "second?");
   assert.equal(state.budget.delivered, 1);
-  assert.equal(getSuspended(), state);
+  assert.equal(store.getSuspended(), state);
   assert.equal(state.clarifyId, "q2");
   assert.equal(t.killed, false);
   if (state.timer) { clearTimeout(state.timer); state.timer = null; }
-  __resetClarifyState();
+  store.reset();
 });
 
 test("answerClarify returns the late report after a timeout cleared the slot", async () => {
-  __resetClarifyState();
+  const store = new ClarifyStore();
   const t = new FakeTransport();
   const state = makeState({ transport: t });
-  __setSuspended(state);
+  store.setSuspended(state);
 
-  const timeoutP = onClarifyTimeout(state);
+  const timeoutP = onClarifyTimeout(store, state);
   t.emitLine(JSON.stringify(assistantMsg("late report")));
   t.emitLine(JSON.stringify({ type: "agent_settled" }));
   await timeoutP;
-  assert.equal(getSuspended(), null);
-  assert.equal(__getLateReport(), "late report");
+  assert.equal(store.getSuspended(), null);
+  assert.equal(store.getLateReport(), "late report");
 
-  const outcome = await answerClarify("anything");
+  const outcome = await answerClarify(store, "anything");
   assert.equal(outcome.kind, "none");
   if (outcome.kind === "none") assert.equal(outcome.text, "late report");
-  assert.equal(__getLateReport(), null);
+  assert.equal(store.getLateReport(), null);
 });
 
 test("answerClarify returns the abort late report after abort cleared the slot", async () => {
-  __resetClarifyState();
+  const store = new ClarifyStore();
   const t = new FakeTransport();
   const ac = new AbortController();
   const state = makeState({ transport: t });
-  __setSuspended(state);
+  store.setSuspended(state);
 
   t.emitLine(JSON.stringify(assistantMsg("partial work")));
-  wireAbortDuringSuspend(state, ac.signal);
+  wireAbortDuringSuspend(store, state, ac.signal);
   ac.abort();
-  assert.equal(getSuspended(), null);
-  assert.ok(__getLateReport());
+  assert.equal(store.getSuspended(), null);
+  assert.ok(store.getLateReport());
 
-  const outcome = await answerClarify("x");
+  const outcome = await answerClarify(store, "x");
   assert.equal(outcome.kind, "none");
   if (outcome.kind === "none") assert.equal(outcome.text, "partial work");
 });

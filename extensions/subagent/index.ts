@@ -14,7 +14,7 @@ import {
   QUESTION_CAP,
 } from "./child.ts";
 import { DialogGate } from "./bridge.ts";
-import { answerClarify, answerToolResult } from "./clarify.ts";
+import { answerClarify, answerToolResult, ClarifyStore } from "./clarify.ts";
 import { runSpawn } from "./orchestrate.ts";
 import { availableProfileNames, runProfileCommand } from "./profile.ts";
 import { tableProblems } from "./tier-model.ts";
@@ -112,6 +112,7 @@ export function register(pi: ExtensionAPI): void {
   }
 
   const dialogGate = new DialogGate();
+  const clarifyStore = new ClarifyStore();
 
   pi.registerTool({
     name: "spawn",
@@ -123,7 +124,7 @@ export function register(pi: ExtensionAPI): void {
     parameters: SpawnParams,
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      return runSpawn({ spawnTransport: spawnRpcTransport }, ctx, params, signal, onUpdate, dialogGate);
+      return runSpawn({ spawnTransport: spawnRpcTransport, store: clarifyStore }, ctx, params, signal, onUpdate, dialogGate);
     },
 
     renderCall(args, theme, _context) {
@@ -146,7 +147,7 @@ export function register(pi: ExtensionAPI): void {
     parameters: AnswerParams,
 
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
-      const outcome = await answerClarify(params.text, signal);
+      const outcome = await answerClarify(clarifyStore, params.text, signal);
       return answerToolResult(outcome);
     },
   });
