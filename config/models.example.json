@@ -1,10 +1,10 @@
 {
   "providers": {
-    "your-provider": {
-      "name": "Your provider",
-      "baseUrl": "https://your-openai-compatible-endpoint/v1",
-      "apiKey": "$YOUR_API_KEY_ENV_VAR",
-      "api": "openai-completions",
+    "gateway": {
+      "name": "Paid gateway (Responses API)",
+      "baseUrl": "https://your-openai-responses-endpoint/v1",
+      "apiKey": "$GATEWAY_API_KEY",
+      "api": "openai-responses",
       "models": [
         {
           "id": "model-id",
@@ -14,6 +14,20 @@
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
           "contextWindow": 262144,
           "maxTokens": 32768
+        }
+      ]
+    },
+    "local": {
+      "name": "Local / self-hosted",
+      "baseUrl": "http://localhost:11434/v1",
+      "apiKey": "ollama",
+      "api": "openai-completions",
+      "compat": { "supportsDeveloperRole": false },
+      "models": [
+        {
+          "id": "llama3.1:8b",
+          "reasoning": false,
+          "input": ["text"]
         }
       ]
     }
