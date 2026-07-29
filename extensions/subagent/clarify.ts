@@ -101,28 +101,18 @@ export interface SuspendedState {
   abortHandler?: (() => void) | null;
 }
 
-let suspended: SuspendedState | null = null;
-let lateReport: string | null = null;
+export class ClarifyStore {
+  suspended: SuspendedState | null = null;
+  lateReport: string | null = null;
 
-export function getSuspended(): SuspendedState | null {
-  return suspended;
-}
-
-export function __getLateReport(): string | null {
-  return lateReport;
-}
-
-export function __setSuspended(state: SuspendedState | null): void {
-  suspended = state;
-}
-
-export function __resetClarifyState(): void {
-  if (suspended?.timer) {
-    clearTimeout(suspended.timer);
-    suspended.timer = null;
+  getSuspended(): SuspendedState | null { return this.suspended; }
+  getLateReport(): string | null { return this.lateReport; }
+  setSuspended(state: SuspendedState | null): void { this.suspended = state; }
+  reset(): void {
+    if (this.suspended?.timer) { clearTimeout(this.suspended.timer); this.suspended.timer = null; }
+    this.suspended = null;
+    this.lateReport = null;
   }
-  suspended = null;
-  lateReport = null;
 }
 
 // The compress bounce runs only after final settlement (never on suspend), so it
@@ -163,9 +153,9 @@ export async function gateChildReport(
       : gated.report;
 }
 
-export function startClarifyTimer(state: SuspendedState): void {
+export function startClarifyTimer(store: ClarifyStore, state: SuspendedState): void {
   state.timer = setTimeout(() => {
-    void onClarifyTimeout(state);
+    void onClarifyTimeout(store, state);
   }, CLARIFY_TIMEOUT_MS);
 }
 
@@ -176,11 +166,11 @@ function removeAbortListener(state: SuspendedState): void {
   }
 }
 
-export function wireAbortDuringSuspend(state: SuspendedState, signal?: AbortSignal): void {
+export function wireAbortDuringSuspend(store: ClarifyStore, state: SuspendedState, signal?: AbortSignal): void {
   if (!signal) return;
   state.signal = signal;
   const onAbort = () => {
-    if (suspended !== state) return;
+    if (store.suspended !== state) return;
     if (state.timer) {
       clearTimeout(state.timer);
       state.timer = null;
@@ -191,18 +181,18 @@ export function wireAbortDuringSuspend(state: SuspendedState, signal?: AbortSign
     state.result.stopReason = "aborted";
     state.finished = true;
     state.finalReport = getResultOutput(state.result);
-    lateReport = state.finalReport;
-    suspended = null;
+    store.lateReport = state.finalReport;
+    store.suspended = null;
     signal.removeEventListener("abort", onAbort);
   };
   state.abortHandler = onAbort;
   signal.addEventListener("abort", onAbort, { once: true });
 }
 
-export function initSuspend(state: SuspendedState, signal?: AbortSignal): void {
-  suspended = state;
-  startClarifyTimer(state);
-  wireAbortDuringSuspend(state, signal);
+export function initSuspend(store: ClarifyStore, state: SuspendedState, signal?: AbortSignal): void {
+  store.suspended = state;
+  startClarifyTimer(store, state);
+  wireAbortDuringSuspend(store, state, signal);
 }
 
 export async function completeClarify(state: SuspendedState, value: string): Promise<RunChildOutcome> {
@@ -225,8 +215,8 @@ export async function completeClarify(state: SuspendedState, value: string): Pro
   return { kind: "done", result: state.result };
 }
 
-export async function onClarifyTimeout(state: SuspendedState): Promise<void> {
-  if (suspended !== state) return;
+export async function onClarifyTimeout(store: ClarifyStore, state: SuspendedState): Promise<void> {
+  if (store.suspended !== state) return;
   if (state.timer) {
     clearTimeout(state.timer);
     state.timer = null;
@@ -237,29 +227,29 @@ export async function onClarifyTimeout(state: SuspendedState): Promise<void> {
   if (outcome.kind === "suspended") {
     state.clarifyId = outcome.clarify.id;
     state.question = outcome.clarify.question;
-    startClarifyTimer(state);
+    startClarifyTimer(store, state);
     return;
   }
 
   state.finished = true;
   state.finalReport = outcome.result.finalReport ?? getResultOutput(outcome.result);
-  lateReport = state.finalReport;
-  suspended = null;
+  store.lateReport = state.finalReport;
+  store.suspended = null;
 }
 
-export async function answerClarify(text: string, signal?: AbortSignal): Promise<AnswerOutcome> {
-  const state = suspended;
+export async function answerClarify(store: ClarifyStore, text: string, signal?: AbortSignal): Promise<AnswerOutcome> {
+  const state = store.suspended;
 
   if (!state) {
-    const out = lateReport ?? "No child is asking a question.";
-    lateReport = null;
+    const out = store.lateReport ?? "No child is asking a question.";
+    store.lateReport = null;
     return { kind: "none", text: out };
   }
 
   if (state.finished) {
-    const out = state.finalReport ?? lateReport ?? "The child has already finished.";
-    suspended = null;
-    lateReport = null;
+    const out = state.finalReport ?? store.lateReport ?? "The child has already finished.";
+    store.suspended = null;
+    store.lateReport = null;
     return { kind: "none", text: out };
   }
 
@@ -275,15 +265,15 @@ export async function answerClarify(text: string, signal?: AbortSignal): Promise
   if (outcome.kind === "suspended") {
     state.clarifyId = outcome.clarify.id;
     state.question = outcome.clarify.question;
-    startClarifyTimer(state);
-    wireAbortDuringSuspend(state, signal);
+    startClarifyTimer(store, state);
+    wireAbortDuringSuspend(store, state, signal);
     return { kind: "ask", question: outcome.clarify.question, result: state.result };
   }
 
   state.finished = true;
   const report = outcome.result.finalReport ?? getResultOutput(outcome.result);
   const failed = isFailedResult(outcome.result);
-  suspended = null;
-  lateReport = null;
+  store.suspended = null;
+  store.lateReport = null;
   return { kind: "done", report, result: outcome.result, failed };
 }
