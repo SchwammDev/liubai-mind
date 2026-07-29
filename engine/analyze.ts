@@ -2,13 +2,13 @@ import type { AnalyzeReq, AnalyzeResp, Env, Rule, RuleContext } from "./contract
 import { detectLang } from "./lang.ts";
 import { shouldSkip } from "./prefilter.ts";
 
-const EMPTY_RESP: AnalyzeResp = { nudges: [], errors: [] };
+const emptyResp = (): AnalyzeResp => ({ nudges: [], errors: [] });
 
 export async function analyze(req: AnalyzeReq, env: Env, rules: readonly Rule[]): Promise<AnalyzeResp> {
   const lang = req.lang ?? detectLang(req.path);
-  if (lang === undefined) return EMPTY_RESP;
+  if (lang === undefined) return emptyResp();
 
-  if (shouldSkip(req.path, req.after)) return EMPTY_RESP;
+  if (shouldSkip(req.path, req.after)) return emptyResp();
 
   const ctx: RuleContext = {
     path: req.path,
