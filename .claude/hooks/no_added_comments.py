@@ -19,22 +19,35 @@ def is_allowed_comment(text: str) -> bool:
 
 
 def find_comment_lines(text: str) -> dict[int, str]:
-    found: dict[int, str] = {}
     lines = text.split("\n")
-
     try:
-        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
-            if tok.type == tokenize.COMMENT:
-                if not is_allowed_comment(tok.string):
-                    found[tok.start[0]] = lines[tok.start[0] - 1]
-            elif tok.type == tokenize.STRING and tok.string.lstrip().startswith(('"""', "'''")):
-                start_line, end_line = tok.start[0], tok.end[0]
-                for ln in range(start_line, end_line + 1):
-                    found[ln] = lines[ln - 1]
-        return found
-    except (tokenize.TokenizeError, IndentationError, SyntaxError):
-        pass
+        return _tokenized_comment_lines(text, lines)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return _manual_comment_scan(lines)
 
+
+def _tokenized_comment_lines(text: str, lines: list[str]) -> dict[int, str]:
+    found: dict[int, str] = {}
+    for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+        if tok.type == tokenize.COMMENT and not is_allowed_comment(tok.string):
+            found[tok.start[0]] = lines[tok.start[0] - 1]
+        elif tok.type == tokenize.STRING and tok.string.lstrip().startswith(('"""', "'''")):
+            for ln in range(tok.start[0], tok.end[0] + 1):
+                found[ln] = lines[ln - 1]
+    return found
+
+
+def _comment_text(stripped: str, line: str) -> str | None:
+    if stripped.startswith("#"):
+        return stripped
+    m = re.search(r"\s+#", line)
+    if m:
+        return "#" + line[m.start() + 1:].strip()
+    return None
+
+
+def _manual_comment_scan(lines: list[str]) -> dict[int, str]:
+    found: dict[int, str] = {}
     in_triple = False
     triple_quote = ""
     for i, line in enumerate(lines, start=1):
@@ -44,32 +57,17 @@ def find_comment_lines(text: str) -> dict[int, str]:
                 in_triple = False
             continue
 
-        stripped = line.strip()
-        if not stripped:
-            continue
-
         triple_match = re.search(r'("""|\'\'\')', line)
         if triple_match:
-            quote = triple_match.group(1)
-            after = line[triple_match.end():]
-            if quote in after:
-                found[i] = line
-            else:
-                found[i] = line
+            found[i] = line
+            if triple_match.group(1) not in line[triple_match.end():]:
                 in_triple = True
-                triple_quote = quote
+                triple_quote = triple_match.group(1)
             continue
 
-        if stripped.startswith("#"):
-            if not is_allowed_comment(stripped):
-                found[i] = line
-            continue
-
-        m = re.search(r"\s+#", line)
-        if m:
-            tail = line[m.start() + 1:].strip()
-            if not is_allowed_comment("#" + tail):
-                found[i] = line
+        comment = _comment_text(line.strip(), line)
+        if comment is not None and not is_allowed_comment(comment):
+            found[i] = line
 
     return found
 
