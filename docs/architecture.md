@@ -23,11 +23,13 @@ The extensions live outside `.pi/` on purpose. Under `.pi/extensions/` pi would 
 | `tool_call` (write/edit) | hooks | block or nudge on file content |
 | `tool_call` (all) | `index.ts` | log-only duplicate-`toolCallId` detector |
 | `tool_result` | — | appends accumulated nudges |
-| `before_provider_request` | `web-search.ts` | injects server-side web search (capability, not steering) |
+| `before_provider_request` | `web-search.ts` | injects server-side web search, allowlist-gated (capability, not steering) |
 | `message_end` | `duplicate-delivery.ts` | drops duplicated toolCall blocks (upstream pi bug, #15) |
 | `message_end` | `prose-gate.ts` | strips filler from assistant prose |
 
 `LIUBAI_RAILS_OFF=1` disables steering handlers only; web-search, duplicate-delivery, and the detector stay on — capability and correctness, not steering — so baseline comparisons vary only the steering.
+
+liubai-owned capability config lives in `~/.pi/agent/liubai.json`, distinct from pi-owned `~/.pi/agent/models.json` (the catalog) and `~/.pi/agent/complexity.json` (spawn tiers): those describe the providers and models, this says which ones liubai trusts with a capability. Today the only capability is web search, whose allowlist (`webSearch.providers`) names provider ids from `models.json`.
 
 ### Hook model
 
