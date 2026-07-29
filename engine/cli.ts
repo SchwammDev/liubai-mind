@@ -20,15 +20,21 @@ async function main(): Promise<void> {
     fail("malformed json on stdin");
   }
 
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    fail("payload is not a json object");
+  if (!isAnalyzeReq(parsed)) {
+    fail("payload is not an analyze request: need { path: string, after: string }");
   }
 
   const { env, rules } = backends();
-  const resp = await analyze(parsed as AnalyzeReq, env, rules);
+  const resp = await analyze(parsed, env, rules);
 
   process.stdout.write(`${JSON.stringify(resp)}\n`);
   process.exit(0);
+}
+
+function isAnalyzeReq(value: unknown): value is AnalyzeReq {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const req = value as Record<string, unknown>;
+  return typeof req["path"] === "string" && typeof req["after"] === "string";
 }
 
 function readStdin(): Promise<string> {
