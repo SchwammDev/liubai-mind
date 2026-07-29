@@ -1,6 +1,16 @@
 export type Lang = "python" | "typescript" | "cpp";
 export type Severity = "block" | "nudge";
-export interface Nudge { rule: string; msg: string; severity: Severity; line?: number }
+
+export const RULE = {
+  cc: "cc",
+  typeAnnotation: "type-annotation",
+  testBody: "test-body",
+  discourageComments: "discourage-comments",
+} as const;
+
+export type RuleName = (typeof RULE)[keyof typeof RULE];
+
+export interface Nudge { rule: RuleName; msg: string; severity: Severity; line?: number }
 export interface RailError { source: string; msg: string }
 export interface AnalyzeReq { path: string; after: string; before?: string; lang?: Lang }
 export interface AnalyzeResp { nudges: Nudge[]; errors: RailError[] }
@@ -10,17 +20,17 @@ export interface Extracted {
   comments: CommentFacts[];
 }
 
+export type Change = "new" | "changed" | "same";
+
 export interface FunctionFacts {
-  id: string;
   name: string;
   startLine: number;
-  endLine: number;
   cyclomaticComplexity: number;
   missingAnnotations: string[];
   isTest: boolean;
   bodyLineCount: number;
-  signatureChanged: boolean;
-  bodyChanged: boolean;
+  signature: Change;
+  body: Change;
 }
 
 export interface CommentFacts {
@@ -31,12 +41,12 @@ export interface CommentFacts {
 }
 
 export interface Extractor {
-  extract(input: { before?: string; after: string }): Extracted;
+  extract(input: { before?: string; after: string }): Extracted | Promise<Extracted>;
 }
 
 export interface Env {
   extractors?: Partial<Record<Lang, Extractor>>;
-  helpers?: () => string[];
+  helpers?: (lang: Lang) => string[];
 }
 
 export interface RuleContext {
@@ -52,13 +62,13 @@ export interface Rule { name: string; run(ctx: RuleContext): Nudge[] | Promise<N
 
 export type Exemption = {
   langs?: Lang[];
-  paths?: string[];
+  pathSuffixes?: string[];
   kinds?: CommentFacts["kind"][];
 };
 
 export type RuleConfig = {
   enabled: Lang[];
   severity: Severity;
-  threshold?: Partial<Record<Lang, number>>;
+  threshold?: Record<Lang, number>;
   exemptions?: Exemption[];
 };

@@ -46,4 +46,8 @@ function readStdin(): Promise<string> {
   });
 }
 
-await main();
+try {
+  await main();
+} catch (err) {
+  fail(String(err));
+}
