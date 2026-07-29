@@ -15,7 +15,7 @@ async function extractFacts(
   if (extractor === undefined) return emptyExtracted;
 
   try {
-    return await extractor.extract({ ...(req.before !== undefined ? { before: req.before } : {}), after: req.after });
+    return await extractor.extract({ path: req.path, ...(req.before !== undefined ? { before: req.before } : {}), after: req.after });
   } catch (err) {
     errors.push({ source: `extract:${lang}`, msg: String(err) });
     return emptyExtracted;

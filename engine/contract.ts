@@ -41,7 +41,7 @@ export interface CommentFacts {
 }
 
 export interface Extractor {
-  extract(input: { before?: string; after: string }): Extracted | Promise<Extracted>;
+  extract(input: { path: string; before?: string; after: string }): Extracted | Promise<Extracted>;
 }
 
 export interface Env {
