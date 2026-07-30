@@ -193,12 +193,20 @@ test("a spawn surfaces the active profile name on each child result", async () =
 });
 
 test("the child runs one level below its parent", async () => {
-  const { children, result } = spawning({ task: "do it", complexity: "easy" });
+  const savedDepth = process.env.LIUBAI_SPAWN_DEPTH;
+  try {
+    delete process.env.LIUBAI_SPAWN_DEPTH;
 
-  children.at(0).transport.emitLine(settling());
+    const { children, result } = spawning({ task: "do it", complexity: "easy" });
+
+    children.at(0).transport.emitLine(settling());
   await result;
 
-  assert.equal(children.at(0).depthEnv, "1");
+    assert.equal(children.at(0).depthEnv, "1");
+  } finally {
+    if (savedDepth === undefined) delete process.env.LIUBAI_SPAWN_DEPTH;
+    else process.env.LIUBAI_SPAWN_DEPTH = savedDepth;
+  }
 });
 
 test("what the child wrote to stderr is kept on the result", async () => {
