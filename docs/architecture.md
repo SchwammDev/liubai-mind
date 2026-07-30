@@ -31,20 +31,22 @@ The extensions live outside `.pi/` on purpose. Under `.pi/extensions/` pi would 
 
 liubai-owned capability config lives in `~/.pi/agent/liubai.json`, distinct from pi-owned `~/.pi/agent/models.json` (the catalog) and `~/.pi/agent/complexity.json` (spawn tiers): those describe the providers and models, this says which ones liubai trusts with a capability. Today the only capability is web search, whose allowlist (`webSearch.providers`) names provider ids from `models.json`.
 
-### Hook model
+### Steering engine
 
-Content rails are Python scripts in `hooks/`, spawned per tool call with a Claude-shaped JSON payload on stdin. Exit 2 = hard block (stderr message); exit 0 with `hookSpecificOutput.additionalContext` = soft nudge, appended to the tool result and shown to the agent without blocking. This block/nudge split is the deterministic feedforward rail; `prose-gate` is the feedback lever on output.
+Content rails run in-process: `index.ts` reconstructs the file's `before`/`after` (disk read + applied edit), then calls the shared `engine/analyze()` (`analyze.ts`) with the python extractor (`extract-python.ts`) and the rules built from `DEFAULT_POLICY` (`policy.ts`). `before` is the file on disk, `after` is the disk content with the edit applied — not the edit's own old/new strings, so function rules get full-file context and the comment rule's before/after line-set diff sees added lines.
 
-Any other exit — or a `python3` that won't spawn — means the rail could not judge the call. That fails open, but loudly: every occurrence lands in the dedup log as `rail-error`, and the operator is notified once per session. It never blocks and never enters the agent's context, which the model could do nothing with.
+`analyze()` returns `Nudge[]` with a `severity`. `discourage-comments` is `block` — the bridge aggregates block-nudges into one `[discourage-comments]` reason (path, line list, guidance, tooling-directives footer) and returns `{block}`, dropping any nudge-severity nudges since the edit won't run. The rest are `nudge` — accumulated per `toolCallId` and appended to the `tool_result`. This block/nudge split is the deterministic feedforward rail; `prose-gate` is the feedback lever on output.
 
-Current rails (all deterministic, all on `write`/`edit`):
+`engine/` is installed alongside `extensions/` (sibling, not child) so the rails' `../../engine/` import resolves in the installed copy. The engine carries its own tests (`*.test.ts`); the Python extractor script (`extract-python.py`) is exercised through its TS wrapper.
 
-- `no_added_comments.py` — block added code comments (pragma/`noqa`/shebang exempt).
-- `long_test_nudge.py` — nudge when a test body exceeds the line threshold.
-- `cyclomatic_complexity_nudge.py` — nudge past the complexity threshold.
-- `type_annotation_nudge.py` — nudge for missing return annotations.
+An extractor that fails to run (no `python3`) fails open, but loudly: every occurrence lands in the dedup log as a `rail-error` keyed `extract:python`, and the operator is notified once per session. It never blocks and never enters the agent's context.
 
-The bridge in `index.ts` (`claudePayload`, `runRail`) maps pi's tool names onto the hooks' payload and interprets their exit codes. Hooks carry their own tests alongside (`test_*.py`).
+Current rules (all deterministic, all on `write`/`edit`, all Python-scoped today — `DEFAULT_POLICY` enables TS/cpp but only the python extractor exists):
+
+- `discourage-comments` — block added code comments/docstrings (pragma/`noqa`/shebang exempt).
+- `test-body` — nudge when a test body exceeds the line threshold.
+- `cc` — nudge past the cyclomatic-complexity threshold.
+- `type-annotation` — nudge for missing return/param annotations.
 
 ### Command gate
 
