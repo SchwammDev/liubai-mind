@@ -3,7 +3,7 @@
 #
 #   1. mise + node@22   (user-local, no sudo; system node is too old for pi)
 #   2. pinned pi engine (npm install honours the exact pin in package.json)
-#   3. global steering  (a copy of extensions/, loaded in every repo you open)
+#   3. global steering  (a copy of extensions/ + engine/, loaded in every repo you open)
 #   4. PATH command     (`liubai` available everywhere)
 #
 # Step 3 installs a snapshot, so the working tree is never live: this script is
@@ -27,6 +27,12 @@ install_extension() {
   find "$dest" -name __pycache__ -type d -prune -exec rm -rf {} +
 }
 
+install_engine() {
+  local dest="$AGENT_DIR/engine"
+  rm -rf "$dest"
+  cp -a "$REPO/engine" "$dest"
+}
+
 installed_source() {
   local commit dirty
   commit="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo "no-git")"
@@ -47,6 +53,7 @@ step "pinned pi engine"
 
 step "global steering rails"
 mkdir -p "$AGENT_DIR/extensions"
+install_engine
 install_extension rails
 install_extension subagent
 installed_source > "$AGENT_DIR/extensions/.liubai-installed"
