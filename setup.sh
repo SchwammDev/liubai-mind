@@ -63,6 +63,10 @@ step "liubai command"
 mkdir -p "$LOCAL_BIN"
 ln -sfn "$REPO/bin/liubai" "$LOCAL_BIN/liubai"
 
+step "Claude Code global hook"
+mkdir -p "$HOME/.claude"
+"$MISE" exec -- node "$REPO/bin/sync-claude-settings.mjs" "$HOME/.claude/settings.json" "$REPO/config/claude-managed-hooks.json"
+
 printf '\n\033[1mDone.\033[0m '
 case ":$PATH:" in
   *":$LOCAL_BIN:"*) echo "Run: liubai" ;;

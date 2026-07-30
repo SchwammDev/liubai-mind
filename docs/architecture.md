@@ -48,6 +48,14 @@ Current rules (all deterministic, all on `write`/`edit`, all Python-scoped today
 - `cc` — nudge past the cyclomatic-complexity threshold.
 - `type-annotation` — nudge for missing return/param annotations.
 
+### Claude Code adapter
+
+The pi rails bridge is one adapter; `engine/cc-hook.ts` is the second, for Claude Code. It is a standalone CLI (no pi SDK) that ships the same `engine/analyze()` core: stdin CC PreToolUse payload → `reconstruct()` (disk read + applied edit) → `analyze()` → split by severity. The shared pieces live in `engine/` (`reconstruct.ts`, `env.ts`, `messages.ts`) so both adapters run one implementation.
+
+CC's PreToolUse hook has two channels the adapter maps onto the block/nudge split: block-nudges exit 2 with the aggregated reason on stderr (edit denied); nudge-nudges exit 0 with a JSON `hookSpecificOutput` (`permissionDecision:"allow"` + `additionalContext`) so the edit runs and the model sees the nudge on its next request. One PreToolUse pass, feedforward like pi, before-state intact. Fails open on every error path — a malformed payload or extractor failure never bricks an edit.
+
+`bin/liubai cc-hook` runs the installed `~/.pi/agent/engine/cc-hook.ts` under mise. `setup.sh` idempotently merges a managed-hooks manifest (`config/claude-managed-hooks.json`) into `~/.claude/settings.json` via `bin/sync-claude-settings.mjs` — strip-then-re-add keyed on the leading binary token, so stale `liubai *` hooks fall out on manifest evolution and user hooks survive. Re-run `./setup.sh` to promote. The per-repo `.claude/hooks/*.py` duplicates retire with #35.
+
 ### Command gate
 
 `command-gate.ts` — regex rules from two files: global `~/.pi/agent/command-rules.json` and project `.pi/command-rules.json` (override `LIUBAI_RAILS_RULES`). Project lists replace global per-list; an explicit empty list is a definition. Precedence `deny > allow > ask`; unmatched runs. `ask` blocks in headless mode (no UI to confirm). See `.pi/command-rules.example.json`.

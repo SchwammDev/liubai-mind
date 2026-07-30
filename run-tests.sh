@@ -26,6 +26,15 @@ else
   echo "$ts_out"
 fi
 
+echo
+echo "## Setup tooling (node --test)"
+mjs_out=$(mise exec -- node --test "$ROOT"/bin/*.test.mjs 2>&1) || status=1
+if [ $status -eq 0 ]; then
+  echo "✅ Setup tooling tests passed"
+else
+  echo "$mjs_out"
+fi
+
 tsc_status=0
 echo
 echo "## Types (tsc)"

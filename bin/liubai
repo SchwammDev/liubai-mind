@@ -24,6 +24,14 @@ if [ "${1:-}" = "update" ]; then
   exit 0
 fi
 
+# `liubai cc-hook` runs the Claude Code PreToolUse adapter from the installed
+# engine copy. Installed by setup.sh into ~/.claude/settings.json as a global
+# PreToolUse hook. Cold-subprocess latency tracked in #25.
+if [ "${1:-}" = "cc-hook" ]; then
+  shift
+  exec mise exec -- node --experimental-strip-types "$HOME/.pi/agent/engine/cc-hook.ts" "$@"
+fi
+
 [ -x "$PI_BIN" ] || { echo "liubai: engine not installed — run $REPO/setup.sh" >&2; exit 1; }
 
 # `liubai --dev` steers the session from the working tree instead of the installed

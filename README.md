@@ -14,7 +14,7 @@ Principles in [`docs/vision.md`](docs/vision.md); how the steering is built in [
 ./setup.sh
 ```
 
-mise + node@22, the pinned pi engine, the global steering rails, and a `liubai` command on PATH. Idempotent — re-run is safe.
+mise + node@22, the pinned pi engine, the global steering rails, a `liubai` command on PATH, and the Claude Code PreToolUse hook wired into `~/.claude/settings.json`. Idempotent — re-run is safe.
 
 The rails are *copied* into `~/.pi/agent/extensions/`, so editing this repo does not change your running sessions. Re-run `./setup.sh` to promote.
 

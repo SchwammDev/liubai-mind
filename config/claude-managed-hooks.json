@@ -1,0 +1,8 @@
+{
+  "PreToolUse": [
+    {
+      "matcher": "Edit|Write|MultiEdit",
+      "commands": ["$HOME/.local/bin/liubai cc-hook"]
+    }
+  ]
+}

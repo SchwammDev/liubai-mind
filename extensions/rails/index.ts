@@ -5,7 +5,6 @@ import {
   type ExtensionContext,
   type ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -32,10 +31,11 @@ import { withoutDuplicateToolCalls } from "./duplicate-delivery.ts";
 import { cleanProse } from "./prose-gate.ts";
 import { injectWebSearch, loadWebSearchConfig, LIUBAI_CONFIG } from "./web-search.ts";
 import { analyze } from "../../engine/analyze.ts";
-import { pythonExtractor } from "../../engine/extract-python.ts";
+import { defaultEnv } from "../../engine/env.ts";
 import { detectLang } from "../../engine/lang.ts";
+import { formatBlockReason } from "../../engine/messages.ts";
 import { buildRules, DEFAULT_POLICY } from "../../engine/policy.ts";
-import type { Env, Lang, Nudge } from "../../engine/contract.ts";
+import { reconstruct, type FileChange } from "../../engine/reconstruct.ts";
 
 // Command-gate rules merge a personal global file under a project-local one;
 // either may be absent (no gating). LIUBAI_RAILS_RULES overrides the project path.
@@ -45,89 +45,14 @@ const PROJECT_RULES =
 
 type TextPart = { type: "text"; text: string };
 
-const DISCOURAGE_COMMENTS_GUIDANCE =
-  "Comments and docstrings are both noise here — write expressive code. " +
-  "Remove docstrings too, not just '#' lines. " +
-  "If you truly think a WHY-comment is justified, propose it to the user before writing it.";
-
-const TOOLING_DIRECTIVES_FOOTER =
-  "Tooling directives are allowed and not blocked: '# ty: ignore[...]', '# type: ignore', '# noqa', '# pragma:', '# pyright:'.";
-
-// `before` is the file on disk and `after` is the disk content with the edit
-// applied — not the edit's own old/new strings, which carry no surrounding
-// context. Function rules need the full file; the comment rule's before/after
-// line-set diff then sees added lines correctly.
-function applyEdits(text: string, edits: { oldText: string; newText: string }[]): string {
-  let out = text;
-  for (const edit of edits) out = out.replace(edit.oldText, edit.newText);
-  return out;
-}
-
-async function safeRead(read: (path: string) => Promise<string>, path: string): Promise<string> {
-  try {
-    return await read(path);
-  } catch {
-    return "";
-  }
-}
-
-async function reconstructStates(
-  event: ToolCallEvent,
-  readTargetFile: (path: string) => Promise<string>,
-): Promise<{ path: string; before: string; after: string } | null> {
+function eventToChange(event: ToolCallEvent): FileChange | null {
   if (event.toolName === "write") {
     const write = writeCall(event.input);
-    if (!write) return null;
-    const before = await safeRead(readTargetFile, write.path);
-    return { path: write.path, before, after: write.content };
+    return write ? { kind: "write", path: write.path, content: write.content } : null;
   }
   const edit = event.toolName === "edit" ? editCall(event.input) : null;
   if (!edit) return null;
-  const before = await safeRead(readTargetFile, edit.path);
-  return { path: edit.path, before, after: applyEdits(before, editList(edit)) };
-}
-
-// The discourage-comments nudge embeds the comment snippet in its msg as
-// `L{n}: "{snippet}" — …`; the block reason lists one line per added comment,
-// so the snippet is peeled back out rather than re-extracting.
-function snippetFromNudgeMsg(msg: string): string {
-  const marker = ': "';
-  const start = msg.indexOf(marker);
-  if (start === -1) return "";
-  const rest = msg.slice(start + marker.length);
-  const end = rest.indexOf('" —');
-  return end === -1 ? rest : rest.slice(0, end);
-}
-
-function formatBlockReason(path: string, blockNudges: Nudge[]): string {
-  const lines = blockNudges
-    .map((n) => `  L${n.line ?? "?"}: ${snippetFromNudgeMsg(n.msg) || "(comment)"}`)
-    .join("\n");
-  return `Blocked: new Python comments/docstrings detected in ${path}:\n${lines}\n\n${DISCOURAGE_COMMENTS_GUIDANCE}\n${TOOLING_DIRECTIVES_FOOTER}`;
-}
-
-// Mirrors the old long_test_nudge.py helper inventory: `assert_*` / `_*`
-// helpers in tests/, deduped, capped. Empty when there is no tests/ or grep is
-// unavailable. The engine's test-body rule only calls this when a long test is
-// flagged, so it never runs on a clean call.
-function helpersFor(lang: Lang): string[] {
-  if (lang !== "python") return [];
-  const res = spawnSync("grep", ["-rh", "-E", "^def (assert_|_)", "tests"], {
-    encoding: "utf8",
-    timeout: 5000,
-  });
-  if (res.error || res.status !== 0) return [];
-  const names: string[] = [];
-  const seen = new Set<string>();
-  for (const line of res.stdout.split("\n")) {
-    const match = /^def (\w+)/.exec(line);
-    if (!match || match[1] === undefined) continue;
-    const name = match[1];
-    if (name === "_" || seen.has(name)) continue;
-    seen.add(name);
-    names.push(name);
-  }
-  return names.slice(0, 6);
+  return { kind: "edit", path: edit.path, edits: editList(edit) };
 }
 
 // Rails steer by default; setting LIUBAI_RAILS_OFF yields the un-steered
@@ -287,13 +212,14 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
       if ("block" in outcome) return outcome;
     }
 
-    const states = await reconstructStates(event, readTargetFile);
-    if (!states) return undefined;
+    const change = eventToChange(event);
+    if (!change) return undefined;
+    const states = await reconstruct(change, readTargetFile);
 
     const lang = detectLang(states.path);
     if (!lang) return undefined;
 
-    const env: Env = { extractors: { python: pythonExtractor }, helpers: helpersFor };
+    const env = defaultEnv();
     const analyzeRules = buildRules(DEFAULT_POLICY, lang);
     const resp = await analyze(
       { path: states.path, before: states.before, after: states.after, lang },
