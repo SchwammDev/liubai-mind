@@ -1,13 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { RAILS, register } from "./index.ts";
+import { register } from "./index.ts";
 import type { DedupLog } from "./dedup.ts";
 
 const MODULE_FILE = "/tmp/liubai-rails/subject.py";
 const TEST_FILE = "/tmp/liubai-rails/tests/test_subject.py";
 const NON_PYTHON_FILE = "/tmp/liubai-rails/notes.md";
-
 const TOOL_RESULT = "edited 1 file";
 
 const LONG_TEST = [
@@ -42,10 +41,13 @@ function notifyingCtx(notices: string[]) {
 
 const railFailures = (logs: LogEntry[]) => logs.filter((entry) => entry.kind === "rail-error");
 
-function railsSession(ctx?: unknown) {
+function railsSession(ctx?: unknown, files = new Map<string, string>()) {
   const { pi, handlers } = fakePi();
   const logs: LogEntry[] = [];
-  register(pi, { logDedup: (entry) => logs.push(entry) });
+  register(pi, {
+    logDedup: (entry) => logs.push(entry),
+    readTargetFile: (path: string) => Promise.resolve(files.get(path) ?? ""),
+  });
 
   async function apply(
     callId: string,
@@ -73,24 +75,11 @@ function railsSession(ctx?: unknown) {
   const write = (callId: string, path: string, content: string) =>
     apply(callId, "write", { path, content }, path);
 
-  return { apply, write, logs };
+  return { apply, write, logs, files };
 }
 
-async function applyEdit(
-  callId: string,
-  path: string,
-  oldText: string,
-  newText: string,
-): Promise<ToolOutcome> {
-  return applyEditCall(callId, path, { path, edits: [{ oldText, newText }] });
-}
-
-async function applyEditCall(
-  callId: string,
-  path: string,
-  input: Record<string, unknown>,
-): Promise<ToolOutcome> {
-  return railsSession().apply(callId, "edit", input, path);
+function editInput(path: string, oldText: string, newText: string) {
+  return { path, edits: [{ oldText, newText }] };
 }
 
 async function applyWrite(callId: string, path: string, content: string): Promise<ToolOutcome> {
@@ -98,33 +87,42 @@ async function applyWrite(callId: string, path: string, content: string): Promis
 }
 
 test("a newly introduced comment is rejected before the edit runs", async () => {
-  const outcome = await applyEdit("comment", MODULE_FILE, "x = 1", "x = 1  # noise");
+  const session = railsSession();
+  session.files.set(MODULE_FILE, "x = 1");
+
+  const outcome = await session.apply("comment", "edit", editInput(MODULE_FILE, "x = 1", "x = 1  # noise"), MODULE_FILE);
 
   assert.equal(outcome.blocked, true);
-  assert.match(outcome.reason ?? "", /no_added_comments/);
+  assert.match(outcome.reason ?? "", /discourage-comments/);
+  assert.match(outcome.reason ?? "", /docstrings are both noise/);
+  assert.match(outcome.reason ?? "", /Tooling directives are allowed/);
 });
 
 test("a comment added through the legacy flat edit shape is still rejected", async () => {
-  const outcome = await applyEditCall("legacy", MODULE_FILE, {
-    path: MODULE_FILE,
-    oldText: "x = 1",
-    newText: "x = 1  # noise",
-  });
+  const session = railsSession();
+  session.files.set(MODULE_FILE, "x = 1");
+
+  const outcome = await session.apply(
+    "legacy",
+    "edit",
+    { path: MODULE_FILE, oldText: "x = 1", newText: "x = 1  # noise" },
+    MODULE_FILE,
+  );
 
   assert.equal(outcome.blocked, true);
-  assert.match(outcome.reason ?? "", /no_added_comments/);
+  assert.match(outcome.reason ?? "", /discourage-comments/);
 });
 
-test("a long test's refactor nudge rides along on the tool result", async () => {
-  const outcome = await applyEdit("long", TEST_FILE, "", LONG_TEST);
+test("a long test's nudge rides along on the tool result", async () => {
+  const outcome = await railsSession().apply("long", "edit", editInput(TEST_FILE, "", LONG_TEST), TEST_FILE);
 
   assert.equal(outcome.blocked, false);
   assert.match(outcome.text, /edited 1 file/);
-  assert.match(outcome.text, /Long test detected/);
+  assert.match(outcome.text, /Long test/);
 });
 
 test("an edit that triggers no rail leaves the result untouched", async () => {
-  const outcome = await applyEdit("clean", NON_PYTHON_FILE, "old", "new");
+  const outcome = await railsSession().apply("clean", "edit", editInput(NON_PYTHON_FILE, "old", "new"), NON_PYTHON_FILE);
 
   assert.equal(outcome.blocked, false);
   assert.equal(outcome.text, TOOL_RESULT);
@@ -134,7 +132,7 @@ test("a comment written into a Python file is rejected before the write runs", a
   const outcome = await applyWrite("written-comment", MODULE_FILE, "x = 1  # noise\n");
 
   assert.equal(outcome.blocked, true);
-  assert.match(outcome.reason ?? "", /no_added_comments/);
+  assert.match(outcome.reason ?? "", /discourage-comments/);
 });
 
 test("a write-named call carrying a foreign payload reaches no rail", async () => {
@@ -156,7 +154,7 @@ async function withoutPython<T>(action: () => Promise<T>): Promise<T> {
   }
 }
 
-test("a rail that cannot be run is logged instead of silently passing the write", async () => {
+test("an extractor that cannot run is logged instead of silently passing the write", async () => {
   const session = railsSession();
 
   const outcome = await withoutPython(() => session.write("unrunnable", MODULE_FILE, "x = 1  # noise\n"));
@@ -164,11 +162,11 @@ test("a rail that cannot be run is logged instead of silently passing the write"
   assert.equal(outcome.blocked, false);
   assert.deepEqual(
     railFailures(session.logs).map((entry) => entry.key),
-    RAILS,
+    ["extract:python"],
   );
 });
 
-test("a broken rail is reported to the operator once, however many rails fail", async () => {
+test("a broken extractor is reported to the operator once, however many calls fail", async () => {
   const notices: string[] = [];
   const session = railsSession(notifyingCtx(notices));
 
@@ -191,12 +189,6 @@ test("filler is stripped from a finalized assistant message", () => {
   assert.equal(out.message.content[0].text, "The rails fire on edit.");
 });
 
-test("LIUBAI_RAILS_OFF leaves a finalized assistant message untouched", async () => {
-  const out = await withRailsDisabled(() => finalizeAssistant("Certainly. The rails fire on edit."));
-
-  assert.equal(out, undefined);
-});
-
 async function withRailsDisabled<T>(action: () => Promise<T>): Promise<T> {
   process.env.LIUBAI_RAILS_OFF = "1";
   try {
@@ -206,9 +198,18 @@ async function withRailsDisabled<T>(action: () => Promise<T>): Promise<T> {
   }
 }
 
+test("LIUBAI_RAILS_OFF leaves a finalized assistant message untouched", async () => {
+  const out = await withRailsDisabled(() => finalizeAssistant("Certainly. The rails fire on edit."));
+
+  assert.equal(out, undefined);
+});
+
 test("LIUBAI_RAILS_OFF lets a would-be-blocked edit through untouched", async () => {
+  const session = railsSession();
+  session.files.set(MODULE_FILE, "x = 1");
+
   const outcome = await withRailsDisabled(() =>
-    applyEdit("disabled", MODULE_FILE, "x = 1", "x = 1  # noise"),
+    session.apply("disabled", "edit", editInput(MODULE_FILE, "x = 1", "x = 1  # noise"), MODULE_FILE),
   );
 
   assert.equal(outcome.blocked, false);
