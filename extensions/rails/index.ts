@@ -31,6 +31,11 @@ import { withBashDedup, withEditDedup, type BashTool, type EditTool } from "./ov
 import { withoutDuplicateToolCalls } from "./duplicate-delivery.ts";
 import { cleanProse } from "./prose-gate.ts";
 import { injectWebSearch, loadWebSearchConfig, LIUBAI_CONFIG } from "./web-search.ts";
+import { analyze } from "../../engine/analyze.ts";
+import { pythonExtractor } from "../../engine/extract-python.ts";
+import { detectLang } from "../../engine/lang.ts";
+import { buildRules, DEFAULT_POLICY } from "../../engine/policy.ts";
+import type { Env, Lang, Nudge } from "../../engine/contract.ts";
 
 // Command-gate rules merge a personal global file under a project-local one;
 // either may be absent (no gating). LIUBAI_RAILS_RULES overrides the project path.
@@ -38,61 +43,91 @@ const GLOBAL_RULES = join(homedir(), ".pi/agent/command-rules.json");
 const PROJECT_RULES =
   process.env.LIUBAI_RAILS_RULES ?? join(import.meta.dirname, "../../command-rules.json");
 
-const HOOK_DIR = join(import.meta.dirname, "hooks");
-
-export const RAILS = [
-  "no_added_comments.py",
-  "long_test_nudge.py",
-  "cyclomatic_complexity_nudge.py",
-  "type_annotation_nudge.py",
-] as const;
-
-type ClaudePayload = { tool_name: "Edit" | "Write" | "MultiEdit"; tool_input: Record<string, unknown> };
 type TextPart = { type: "text"; text: string };
 
-function claudePayload(event: ToolCallEvent): ClaudePayload | null {
+const DISCOURAGE_COMMENTS_GUIDANCE =
+  "Comments and docstrings are both noise here — write expressive code. " +
+  "Remove docstrings too, not just '#' lines. " +
+  "If you truly think a WHY-comment is justified, propose it to the user before writing it.";
+
+const TOOLING_DIRECTIVES_FOOTER =
+  "Tooling directives are allowed and not blocked: '# ty: ignore[...]', '# type: ignore', '# noqa', '# pragma:', '# pyright:'.";
+
+// `before` is the file on disk and `after` is the disk content with the edit
+// applied — not the edit's own old/new strings, which carry no surrounding
+// context. Function rules need the full file; the comment rule's before/after
+// line-set diff then sees added lines correctly.
+function applyEdits(text: string, edits: { oldText: string; newText: string }[]): string {
+  let out = text;
+  for (const edit of edits) out = out.replace(edit.oldText, edit.newText);
+  return out;
+}
+
+async function safeRead(read: (path: string) => Promise<string>, path: string): Promise<string> {
+  try {
+    return await read(path);
+  } catch {
+    return "";
+  }
+}
+
+async function reconstructStates(
+  event: ToolCallEvent,
+  readTargetFile: (path: string) => Promise<string>,
+): Promise<{ path: string; before: string; after: string } | null> {
   if (event.toolName === "write") {
     const write = writeCall(event.input);
     if (!write) return null;
-    return {
-      tool_name: "Write",
-      tool_input: { file_path: write.path, content: write.content },
-    };
+    const before = await safeRead(readTargetFile, write.path);
+    return { path: write.path, before, after: write.content };
   }
   const edit = event.toolName === "edit" ? editCall(event.input) : null;
   if (!edit) return null;
-  return {
-    tool_name: "MultiEdit",
-    tool_input: {
-      file_path: edit.path,
-      edits: editList(edit).map((e) => ({ old_string: e.oldText, new_string: e.newText })),
-    },
-  };
+  const before = await safeRead(readTargetFile, edit.path);
+  return { path: edit.path, before, after: applyEdits(before, editList(edit)) };
 }
 
-type RailOutcome = { block: string } | { nudge: string } | { failed: string };
+// The discourage-comments nudge embeds the comment snippet in its msg as
+// `L{n}: "{snippet}" — …`; the block reason lists one line per added comment,
+// so the snippet is peeled back out rather than re-extracting.
+function snippetFromNudgeMsg(msg: string): string {
+  const marker = ': "';
+  const start = msg.indexOf(marker);
+  if (start === -1) return "";
+  const rest = msg.slice(start + marker.length);
+  const end = rest.indexOf('" —');
+  return end === -1 ? rest : rest.slice(0, end);
+}
 
-const lastLine = (text: string): string => text.trim().split("\n").at(-1)?.trim() ?? "";
+function formatBlockReason(path: string, blockNudges: Nudge[]): string {
+  const lines = blockNudges
+    .map((n) => `  L${n.line ?? "?"}: ${snippetFromNudgeMsg(n.msg) || "(comment)"}`)
+    .join("\n");
+  return `Blocked: new Python comments/docstrings detected in ${path}:\n${lines}\n\n${DISCOURAGE_COMMENTS_GUIDANCE}\n${TOOLING_DIRECTIVES_FOOTER}`;
+}
 
-// A rail exits 2 to hard-block (message on stderr), or exits 0 with an
-// `additionalContext` advisory to nudge without blocking. Any other exit — or a
-// failure to spawn at all — means the rail could not judge this call, which is
-// reported rather than mistaken for a clean verdict.
-function runRail(name: string, payload: ClaudePayload): RailOutcome | null {
-  const res = spawnSync("python3", [join(HOOK_DIR, name)], {
-    input: JSON.stringify(payload),
+// Mirrors the old long_test_nudge.py helper inventory: `assert_*` / `_*`
+// helpers in tests/, deduped, capped. Empty when there is no tests/ or grep is
+// unavailable. The engine's test-body rule only calls this when a long test is
+// flagged, so it never runs on a clean call.
+function helpersFor(lang: Lang): string[] {
+  if (lang !== "python") return [];
+  const res = spawnSync("grep", ["-rh", "-E", "^def (assert_|_)", "tests"], {
     encoding: "utf8",
+    timeout: 5000,
   });
-  if (res.error) return { failed: res.error.message };
-  if (res.status === 2) return { block: res.stderr.trim() };
-  if (res.status !== 0) return { failed: lastLine(res.stderr) || `exit ${res.status}` };
-  if (!res.stdout.trim()) return null;
-  try {
-    const advisory = JSON.parse(res.stdout)?.hookSpecificOutput?.additionalContext;
-    return typeof advisory === "string" && advisory ? { nudge: advisory } : null;
-  } catch {
-    return null;
+  if (res.error || res.status !== 0) return [];
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const line of res.stdout.split("\n")) {
+    const match = /^def (\w+)/.exec(line);
+    if (!match || match[1] === undefined) continue;
+    const name = match[1];
+    if (name === "_" || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
   }
+  return names.slice(0, 6);
 }
 
 // Rails steer by default; setting LIUBAI_RAILS_OFF yields the un-steered
@@ -152,6 +187,7 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
   const dedup = createSession();
   const logDedup = deps.logDedup ?? createFileLog();
   const cwd = process.cwd();
+  const readTargetFile = deps.readTargetFile ?? createTargetReader(cwd);
 
   pi.registerTool(
     withBashDedup(deps.bashTool ?? createBashToolDefinition(cwd), {
@@ -166,7 +202,7 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
   pi.registerTool(
     withEditDedup(deps.editTool ?? createEditToolDefinition(cwd), {
       session: dedup,
-      readTargetFile: deps.readTargetFile ?? createTargetReader(cwd),
+      readTargetFile,
       log: logDedup,
       enforced: dedupEnforced,
       disabled: railsDisabled,
@@ -219,9 +255,9 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
     return { skipAsk: false };
   }
 
-  // A rail that cannot run fails open: the log keeps every occurrence, while the
-  // operator hears once per session — four broken rails on every write would be
-  // noise, and the agent can do nothing with the news either way.
+  // An extractor that cannot run fails open: the log keeps every occurrence,
+  // while the operator hears once per session — a failure on every write would
+  // be noise, and the agent can do nothing with the news either way.
   let railFailureNotified = false;
   const reportRailFailure = (rail: string, tool: string, reason: string, ctx?: ExtensionContext) => {
     logDedup({ kind: "rail-error", tool, key: rail, action: reason });
@@ -251,21 +287,31 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
       if ("block" in outcome) return outcome;
     }
 
-    const payload = claudePayload(event);
-    if (!payload) return undefined;
+    const states = await reconstructStates(event, readTargetFile);
+    if (!states) return undefined;
 
-    const nudges: string[] = [];
-    for (const name of RAILS) {
-      const outcome = runRail(name, payload);
-      if (!outcome) continue;
-      if ("block" in outcome) return { block: true, reason: `[${name}] ${outcome.block}` };
-      if ("nudge" in outcome) {
-        nudges.push(`[${name}] ${outcome.nudge}`);
-        continue;
-      }
-      reportRailFailure(name, event.toolName, outcome.failed, ctx);
+    const lang = detectLang(states.path);
+    if (!lang) return undefined;
+
+    const env: Env = { extractors: { python: pythonExtractor }, helpers: helpersFor };
+    const analyzeRules = buildRules(DEFAULT_POLICY, lang);
+    const resp = await analyze(
+      { path: states.path, before: states.before, after: states.after, lang },
+      env,
+      analyzeRules,
+    );
+
+    for (const err of resp.errors) {
+      reportRailFailure("extract:python", event.toolName, err.msg, ctx);
     }
-    if (nudges.length) pendingNudges.set(event.toolCallId, nudges);
+
+    const blockNudges = resp.nudges.filter((n) => n.severity === "block");
+    if (blockNudges.length) {
+      return { block: true, reason: `[discourage-comments] ${formatBlockReason(states.path, blockNudges)}` };
+    }
+
+    const railNudges = resp.nudges.map((n) => `[${n.rule}] ${n.msg}`);
+    if (railNudges.length) pendingNudges.set(event.toolCallId, railNudges);
     return undefined;
   });
 
