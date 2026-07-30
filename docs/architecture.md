@@ -54,7 +54,7 @@ The pi rails bridge is one adapter; `engine/cc-hook.ts` is the second, for Claud
 
 CC's PreToolUse hook has two channels the adapter maps onto the block/nudge split: block-nudges exit 2 with the aggregated reason on stderr (edit denied); nudge-nudges exit 0 with a JSON `hookSpecificOutput` (`permissionDecision:"allow"` + `additionalContext`) so the edit runs and the model sees the nudge on its next request. One PreToolUse pass, feedforward like pi, before-state intact. Fails open on every error path — a malformed payload or extractor failure never bricks an edit.
 
-`bin/liubai cc-hook` runs the installed `~/.pi/agent/engine/cc-hook.ts` under mise. `setup.sh` idempotently merges a managed-hooks manifest (`config/claude-managed-hooks.json`) into `~/.claude/settings.json` via `bin/sync-claude-settings.mjs` — strip-then-re-add keyed on the leading binary token, so stale `liubai *` hooks fall out on manifest evolution and user hooks survive. Re-run `./setup.sh` to promote. The per-repo `.claude/hooks/*.py` duplicates retire with #35.
+`bin/liubai cc-hook` runs the installed `~/.pi/agent/engine/cc-hook.ts` under mise. `setup.sh` idempotently merges a managed-hooks manifest (`config/claude-managed-hooks.json`) into `~/.claude/settings.json` via `bin/sync-claude-settings.mjs` — strip-then-re-add keyed on the leading binary token, so stale `liubai *` hooks fall out on manifest evolution and user hooks survive. Re-run `./setup.sh` to promote. The global `liubai cc-hook` route is the sole Claude Code surface; no per-repo hooks.
 
 ### Command gate
 
