@@ -14,6 +14,14 @@ const collectingReader = () => {
   return { reader, lines, codes };
 };
 
+const orderTrackingReader = () => {
+  const base = collectingReader();
+  const order: string[] = [];
+  base.reader.onLine(() => order.push("line"));
+  base.reader.onClose(() => order.push("close"));
+  return { ...base, order };
+};
+
 class FakeStdin extends EventEmitter {
   written: string[] = [];
   write(chunk: string) {
@@ -54,11 +62,9 @@ test("a partial chunk yields no line until its newline arrives", () => {
   const { reader, lines } = collectingReader();
 
   reader.push("par");
-
   assert.deepEqual(lines, []);
 
   reader.push("tial\n");
-
   assert.deepEqual(lines, ["partial"]);
 });
 
@@ -71,10 +77,7 @@ test("a chunk carrying several newlines yields every complete line", () => {
 });
 
 test("a trailing partial line is delivered before the close is announced", () => {
-  const { reader, lines, codes } = collectingReader();
-  const order: string[] = [];
-  reader.onLine(() => order.push("line"));
-  reader.onClose(() => order.push("close"));
+  const { reader, lines, codes, order } = orderTrackingReader();
 
   reader.push("tail without newline");
   reader.close(0);

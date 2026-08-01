@@ -40,6 +40,22 @@ const depsWith = (configPath: string, profilePath: string, extra: Partial<Profil
   ...extra,
 });
 
+const writeCapturingDeps = (configPath: string, profilePath: string): { deps: ProfileDeps; writes: string[] } => {
+  const writes: string[] = [];
+  const deps = depsWith(configPath, profilePath, { writeActiveProfile: (name) => writes.push(name) });
+  return { deps, writes };
+};
+
+const assertRefusedUnwritten = (
+  outcome: ReturnType<typeof runProfileCommand>,
+  writes: string[],
+  ...mentions: RegExp[]
+): void => {
+  assert.equal(outcome.kind, "warning");
+  for (const mention of mentions) assert.match(outcome.message, mention);
+  assert.deepEqual(writes, []);
+};
+
 test("no arg names the active profile and lists the available ones", () => {
   const { configPath, profilePath } = setup(JSON.stringify({ profiles: PROFILES }), "heavy");
   const deps = depsWith(configPath, profilePath);
@@ -75,36 +91,21 @@ test("an unknown name is refused with the available profiles listed", () => {
 test("a structurally broken profile is refused and nothing is written", () => {
   const broken = { trivial: "gw/tiny", easy: "gw/small", medium: "gw/mid" };
   const { configPath, profilePath } = setup(JSON.stringify({ profiles: { broken } }));
-  let written: string | undefined;
-  const deps = depsWith(configPath, profilePath, {
-    writeActiveProfile: (name) => {
-      written = name;
-    },
-  });
+  const { deps, writes } = writeCapturingDeps(configPath, profilePath);
 
   const outcome = runProfileCommand("broken", catalog, deps);
 
-  assert.equal(outcome.kind, "warning");
-  assert.match(outcome.message, /broken/);
-  assert.match(outcome.message, /hard/);
-  assert.equal(written, undefined);
+  assertRefusedUnwritten(outcome, writes, /broken/, /hard/);
 });
 
 test("a tier that does not resolve is refused naming the tier and nothing is written", () => {
   const bareId = { ...GOOD_MAP, hard: "big" };
   const { configPath, profilePath } = setup(JSON.stringify({ profiles: { bareId } }));
-  let written: string | undefined;
-  const deps = depsWith(configPath, profilePath, {
-    writeActiveProfile: (name) => {
-      written = name;
-    },
-  });
+  const { deps, writes } = writeCapturingDeps(configPath, profilePath);
 
   const outcome = runProfileCommand("bareId", catalog, deps);
 
-  assert.equal(outcome.kind, "warning");
-  assert.match(outcome.message, /hard/);
-  assert.equal(written, undefined);
+  assertRefusedUnwritten(outcome, writes, /hard/);
 });
 
 test("a profile whose tiers all resolve is written and confirmed", () => {
