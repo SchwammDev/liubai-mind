@@ -144,16 +144,16 @@ test("the cc nudge names the language's own dispatch idiom", async () => {
   assert.match(await nudgeFor("cpp", extracted), /dispatch tables/);
 });
 
-test("the cc rule uses the per-lang threshold", async () => {
-  const env = envWith({ functions: [func({ cyclomaticComplexity: 9, body: "changed" })], comments: [] });
+test("the cc threshold is 8 for all langs", async () => {
+  const at = envWith({ functions: [func({ cyclomaticComplexity: 8, body: "changed" })], comments: [] });
+  const over = envWith({ functions: [func({ cyclomaticComplexity: 9, body: "changed" })], comments: [] });
 
-  const py = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
-  const ts = await analyze({ path: "app/foo.ts", after: "x" }, env, buildRules(DEFAULT_POLICY, "typescript"));
-  const cpp = await analyze({ path: "app/foo.cpp", after: "x" }, env, buildRules(DEFAULT_POLICY, "cpp"));
-
-  assert.equal(py.nudges.length, 1);
-  assert.equal(ts.nudges.length, 0, "ts threshold 10 lets CC=9 pass");
-  assert.equal(cpp.nudges.length, 0, "cpp threshold 12 lets CC=9 pass");
+  for (const lang of ["python", "typescript", "cpp"] as const) {
+    const silent = await analyze({ path: `app/foo.${lang === "cpp" ? "cpp" : lang === "typescript" ? "ts" : "py"}`, after: "x" }, at, buildRules(DEFAULT_POLICY, lang));
+    const flagged = await analyze({ path: `app/foo.${lang === "cpp" ? "cpp" : lang === "typescript" ? "ts" : "py"}`, after: "x" }, over, buildRules(DEFAULT_POLICY, lang));
+    assert.equal(silent.nudges.length, 0, `${lang} CC=8 should be silent`);
+    assert.equal(flagged.nudges.length, 1, `${lang} CC=9 should nudge`);
+  }
 });
 
 test("the test-body rule nudges a touched test function over the lang threshold", async () => {

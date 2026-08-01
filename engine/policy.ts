@@ -11,7 +11,7 @@ export const DEFAULT_POLICY: Policy = {
   [RULE.cc]: {
     enabled: ["python", "typescript", "cpp"],
     severity: "nudge",
-    threshold: { python: 8, typescript: 10, cpp: 12 },
+    threshold: { python: 8, typescript: 8, cpp: 8 },
   },
   [RULE.typeAnnotation]: {
     enabled: ["python"],
