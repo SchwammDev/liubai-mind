@@ -2,12 +2,20 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import io
 import json
 import re
 import sys
 import tokenize
 from pathlib import Path
+
+
+_LIZARD_CC_PATH = Path(__file__).parent / "lizard-cc.py"
+_lizard_cc_spec = importlib.util.spec_from_file_location("lizard_cc", _LIZARD_CC_PATH)
+_lizard_cc_module = importlib.util.module_from_spec(_lizard_cc_spec)
+_lizard_cc_spec.loader.exec_module(_lizard_cc_module)
+lizard_cc = _lizard_cc_module.lizard_cc
 
 
 DECISION_NODES = (
@@ -61,15 +69,8 @@ def cyclomatic_complexity(func_node: ast.AST) -> int:
     return cc
 
 
-def _lizard_cc(after: str) -> dict[tuple[str, int], int]:
-    try:
-        import lizard
-    except ImportError:
-        sys.stderr.write("extract-python: lizard not installed; run `uv pip install lizard` in engine/\n")
-        sys.exit(2)
-    analyzer = lizard.FileAnalyzer(lizard.get_extensions([]))
-    info = analyzer.analyze_source_code("<extract>", after)
-    return {(fi.name.rsplit(".", 1)[-1], fi.start_line): fi.cyclomatic_complexity for fi in info.function_list}
+def _lizard_map(after: str, path: str) -> dict[tuple[str, int], int]:
+    return {(entry["name"], entry["startLine"]): entry["cyclomaticComplexity"] for entry in lizard_cc(after, path)}
 
 
 def _missing_positional(args: ast.arguments) -> list[str]:
@@ -162,9 +163,9 @@ def _function_facts(tree: ast.AST, lines: list[str], path: str, before_funcs: di
             "signature": signature,
             "body": body,
         }
-        lizard_cc = lizard_map.get((node.name, node.lineno))
-        if lizard_cc is not None:
-            facts[node.name]["cyclomaticComplexity"] = lizard_cc
+        cc = lizard_map.get((node.name, node.lineno))
+        if cc is not None:
+            facts[node.name]["cyclomaticComplexity"] = cc
     return list(facts.values())
 
 
@@ -252,7 +253,7 @@ def _functions(after: str, before: str | None, path: str) -> list[dict]:
     except SyntaxError:
         return []
     lines = after.split("\n")
-    lizard_map = _lizard_cc(after)
+    lizard_map = _lizard_map(after, path)
     return _function_facts(tree, lines, path, before_funcs, lizard_map)
 
 

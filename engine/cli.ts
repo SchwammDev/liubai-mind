@@ -1,12 +1,13 @@
 import type { AnalyzeReq, Env, Rule } from "./contract.ts";
 import { analyze } from "./analyze.ts";
 import { pythonExtractor } from "./extract-python.ts";
+import { typescriptExtractor } from "./extract-typescript.ts";
 import { buildRules, DEFAULT_POLICY } from "./policy.ts";
 import { detectLang } from "./lang.ts";
 
 function backends(req: AnalyzeReq): { env: Env; rules: readonly Rule[] } {
   const lang = req.lang ?? detectLang(req.path);
-  const env: Env = lang ? { extractors: { python: pythonExtractor } } : {};
+  const env: Env = lang ? { extractors: { python: pythonExtractor, typescript: typescriptExtractor } } : {};
   const rules = lang ? buildRules(DEFAULT_POLICY, lang) : [];
   return { env, rules };
 }
