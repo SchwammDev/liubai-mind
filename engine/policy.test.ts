@@ -26,14 +26,15 @@ function envWith(extracted: Extracted, helpers?: (lang: Lang) => string[]): Env 
 
 function func(over: Partial<FunctionFacts>): FunctionFacts {
   return {
-    name: over.name ?? "f",
-    startLine: over.startLine ?? 1,
-    cyclomaticComplexity: over.cyclomaticComplexity ?? 1,
-    missingAnnotations: over.missingAnnotations ?? [],
-    isTest: over.isTest ?? false,
-    bodyLineCount: over.bodyLineCount ?? 2,
-    signature: over.signature ?? "same",
-    body: over.body ?? "same",
+    name: "f",
+    startLine: 1,
+    cyclomaticComplexity: 1,
+    missingAnnotations: [],
+    isTest: false,
+    bodyLineCount: 2,
+    signature: "same",
+    body: "same",
+    ...over,
   };
 }
 
@@ -283,10 +284,11 @@ function functionsOnly(fns: FunctionFacts[]): Extracted {
 
 function comment(over: Partial<CommentFacts>): CommentFacts {
   return {
-    line: over.line ?? 1,
-    text: over.text ?? "# noise",
-    kind: over.kind ?? "line",
-    added: over.added ?? true,
+    line: 1,
+    text: "# noise",
+    kind: "line",
+    added: true,
+    ...over,
   };
 }
 
