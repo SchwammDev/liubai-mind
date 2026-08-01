@@ -75,6 +75,16 @@ ensure_lizard_venv() {
   uv pip install --quiet --python "$py" lizard
 }
 
+# Project tests and --dev mode reuse the installed venv so we don't carry a
+# duplicate copy of lizard + its deps. install_engine strips .venv from the
+# copy, so this is the only path that ever materialises a project-side venv.
+link_project_venv() {
+  local installed_venv="${1:?installed venv path required}"
+  local project_venv="${2:?project venv path required}"
+  rm -rf "$project_venv"
+  ln -sfn "$installed_venv" "$project_venv"
+}
+
 main() {
   step "mise (node version manager)"
   if ! command -v mise >/dev/null 2>&1; then
@@ -103,8 +113,8 @@ main() {
 
   step "lizard venv"
   if command -v uv >/dev/null 2>&1; then
-    ensure_lizard_venv "$REPO/engine"
     ensure_lizard_venv "$AGENT_DIR/engine"
+    link_project_venv "$AGENT_DIR/engine/.venv" "$REPO/engine/.venv"
   else
     printf 'uv not found on PATH; install with: curl -LsSf https://astral.sh/uv/install.sh | sh\n' >&2
   fi

@@ -6,3 +6,4 @@ scratch-oh/
 .claude/skills/
 config/models.json
 .coverage
+.venv

@@ -97,3 +97,21 @@ test("installed engine resolves tree-sitter-typescript via createRequire", () =>
 
   rmSync(sb.home, { recursive: true, force: true });
 });
+
+test("link_project_venv replaces a real venv with a symlink to the installed one", () => {
+  const sb = newSandbox();
+  const installedVenv = join(sb.engineDest, ".venv");
+  const projectVenv = join(sb.home, "fake-project", "engine", ".venv");
+  mkdirSync(installedVenv, { recursive: true });
+  mkdirSync(dirname(projectVenv), { recursive: true });
+  mkdirSync(projectVenv, { recursive: true });
+
+  const res = runIn(sb, `link_project_venv "${installedVenv}" "${projectVenv}"`);
+  assert.equal(res.status, 0, res.stderr);
+
+  const lst = spawnSync("ls", ["-la", projectVenv], { encoding: "utf8" });
+  assert.match(lst.stdout, /\.venv -> .*\.venv/, "project venv is a symlink");
+  assert.ok(!existsSync(join(projectVenv, "bin")), "real venv contents are gone");
+
+  rmSync(sb.home, { recursive: true, force: true });
+});
