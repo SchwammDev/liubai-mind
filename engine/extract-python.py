@@ -61,6 +61,17 @@ def cyclomatic_complexity(func_node: ast.AST) -> int:
     return cc
 
 
+def _lizard_cc(after: str) -> dict[tuple[str, int], int]:
+    try:
+        import lizard
+    except ImportError:
+        sys.stderr.write("extract-python: lizard not installed; run `uv pip install lizard` in engine/\n")
+        sys.exit(2)
+    analyzer = lizard.FileAnalyzer(lizard.get_extensions([]))
+    info = analyzer.analyze_source_code("<extract>", after)
+    return {(fi.name.rsplit(".", 1)[-1], fi.start_line): fi.cyclomatic_complexity for fi in info.function_list}
+
+
 def _missing_positional(args: ast.arguments) -> list[str]:
     positional = list(args.posonlyargs) + list(args.args)
     skip_first = bool(positional) and positional[0].arg in SELF_LIKE_NAMES
@@ -121,7 +132,7 @@ def _function_regions(text: str) -> dict[str, tuple[str, str]]:
     return results
 
 
-def _function_facts(tree: ast.AST, lines: list[str], path: str, before_funcs: dict[str, tuple[str, str]]) -> list[dict]:
+def _function_facts(tree: ast.AST, lines: list[str], path: str, before_funcs: dict[str, tuple[str, str]], lizard_map: dict[tuple[str, int], int]) -> list[dict]:
     facts: dict[str, dict] = {}
     test_file = is_test_path(path)
     for node in ast.walk(tree):
@@ -151,6 +162,9 @@ def _function_facts(tree: ast.AST, lines: list[str], path: str, before_funcs: di
             "signature": signature,
             "body": body,
         }
+        lizard_cc = lizard_map.get((node.name, node.lineno))
+        if lizard_cc is not None:
+            facts[node.name]["cyclomaticComplexity"] = lizard_cc
     return list(facts.values())
 
 
@@ -238,7 +252,8 @@ def _functions(after: str, before: str | None, path: str) -> list[dict]:
     except SyntaxError:
         return []
     lines = after.split("\n")
-    return _function_facts(tree, lines, path, before_funcs)
+    lizard_map = _lizard_cc(after)
+    return _function_facts(tree, lines, path, before_funcs, lizard_map)
 
 
 def extract(path: str, before: str | None, after: str) -> dict:

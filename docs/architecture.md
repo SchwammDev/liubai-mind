@@ -39,9 +39,9 @@ Content rails run in-process: `index.ts` reconstructs the file's `before`/`after
 
 `engine/` is installed alongside `extensions/` (sibling, not child) so the rails' `../../engine/` import resolves in the installed copy. The engine carries its own tests (`*.test.ts`); the Python extractor script (`extract-python.py`) is exercised through its TS wrapper.
 
-An extractor that fails to run (no `python3`) fails open, but loudly: every occurrence lands in the dedup log as a `rail-error` keyed `extract:python`, and the operator is notified once per session. It never blocks and never enters the agent's context.
+An extractor that fails to run (no venv python, no lizard) fails open, but loudly: every occurrence lands in the dedup log as a `rail-error` keyed `extract:python`, and the operator is notified once per session. It never blocks and never enters the agent's context.
 
-Current rules (all deterministic, all on `write`/`edit`, all Python-scoped today — `DEFAULT_POLICY` enables TS/cpp but only the python extractor exists):
+Current rules (all deterministic, all on `write`/`edit`, all Python-scoped today — `DEFAULT_POLICY` enables TS/cpp but only the python extractor exists). CC for Python is computed by `lizard` (engine `.venv`, installed by `./setup.sh`); the rest of the Python facts (comments, annotations, test detection, body diff) are still derived from the Python `ast`. If lizard is missing, the extractor hard-fails with a one-line install hint rather than silently degrading.
 
 - `discourage-comments` — block added code comments/docstrings (pragma/`noqa`/shebang exempt).
 - `test-body` — nudge when a test body exceeds the line threshold.

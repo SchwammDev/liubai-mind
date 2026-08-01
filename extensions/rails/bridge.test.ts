@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, renameSync } from "node:fs";
+import { join } from "node:path";
 
 import { register } from "./index.ts";
 import type { DedupLog } from "./dedup.ts";
@@ -146,11 +148,18 @@ test("a write-named call carrying a foreign payload reaches no rail", async () =
 
 async function withoutPython<T>(action: () => Promise<T>): Promise<T> {
   const original = process.env.PATH;
+  // The python extractor now spawns an absolute venv path, so clearing PATH
+  // alone does not break it. Rename the venv out of the way to trigger the
+  // wrapper's missing-venv check.
+  const venvPath = join(import.meta.dirname, "..", "..", "engine", ".venv");
+  const venvBackup = `${venvPath}.bak`;
   process.env.PATH = "";
+  if (existsSync(venvPath)) renameSync(venvPath, venvBackup);
   try {
     return await action();
   } finally {
     process.env.PATH = original;
+    if (existsSync(venvBackup)) renameSync(venvBackup, venvPath);
   }
 }
 

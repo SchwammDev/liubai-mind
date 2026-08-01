@@ -1,9 +1,11 @@
+import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
 import type { CommentFacts, Extracted, Extractor, FunctionFacts } from "./contract.ts";
 
 const SCRIPT_PATH = join(import.meta.dirname, "extract-python.py");
+const PYTHON_BIN = join(import.meta.dirname, ".venv", "bin", "python");
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -80,7 +82,11 @@ export const pythonExtractor: Extractor = {
       after: input.after,
     });
 
-    const res = spawnSync("python3", [SCRIPT_PATH], { input: payload, encoding: "utf8" });
+    if (!existsSync(PYTHON_BIN)) {
+      throw new Error(`extract-python: venv missing at ${PYTHON_BIN}; run \`./setup.sh\` (requires uv on PATH)`);
+    }
+
+    const res = spawnSync(PYTHON_BIN, [SCRIPT_PATH], { input: payload, encoding: "utf8" });
 
     if (res.error !== undefined) {
       throw new Error(res.error.message);

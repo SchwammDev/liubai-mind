@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 
 import { analyze } from "./analyze.ts";
 import type { Extracted, FunctionFacts } from "./contract.ts";
@@ -114,4 +116,58 @@ test("analyze_fires_cc_nudge_from_real_python_source", async () => {
   );
 
   assert.ok(resp.nudges.some((n) => n.rule === RULE.cc));
+});
+
+test("lizard_cc_value_matches_hand_crafted_sample", async () => {
+  const src =
+    "def f(x):\n" +
+    "    if x and y:\n" +
+    "        return 1\n" +
+    "    elif x or w:\n" +
+    "        try:\n" +
+    "            return 2\n" +
+    "        except ValueError:\n" +
+    "            return 3\n" +
+    "    return 0\n";
+  const ext = await extractText("app/foo.py", src);
+
+  assert.equal(findFn(ext, "f").cyclomaticComplexity, 6);
+});
+
+test("lizard_cc_overrides_ast_value_for_typical_function", async () => {
+  const src =
+    "def f(x):\n" +
+    "    if x:\n" +
+    "        return 1\n" +
+    "    elif x:\n" +
+    "        return 2\n";
+  const ext = await extractText("app/foo.py", src);
+
+  assert.equal(findFn(ext, "f").cyclomaticComplexity, 3);
+});
+
+test("lizard_cc_handles_nested_function_namespace_strip", async () => {
+  const src =
+    "def outer(a):\n" +
+    "    def inner(b):\n" +
+    "        if b > 0:\n" +
+    "            return 1\n" +
+    "        return 0\n" +
+    "    return inner(a)\n";
+  const ext = await extractText("app/foo.py", src);
+
+  const fn = findFn(ext, "inner");
+  assert.equal(fn.cyclomaticComplexity, 2);
+});
+
+test("missing_lizard_hard_fails_with_install_message", async () => {
+  // Use system python3 which lacks lizard (vs the .venv which has it)
+  const res = spawnSync("/usr/bin/python3", [join(import.meta.dirname, "extract-python.py")], {
+    input: JSON.stringify({ path: "x.py", after: "def f(): pass" }),
+    encoding: "utf8",
+  });
+
+  assert.equal(res.status, 2);
+  assert.ok(res.stderr.includes("lizard not installed"));
+  assert.ok(res.stderr.includes("uv pip install lizard"));
 });
