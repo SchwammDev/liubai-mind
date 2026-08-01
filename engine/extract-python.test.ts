@@ -161,8 +161,8 @@ test("lizard_cc_handles_nested_function_namespace_strip", async () => {
 });
 
 test("missing_lizard_hard_fails_with_install_message", async () => {
-  // Use system python3 which lacks lizard (vs the .venv which has it)
-  const res = spawnSync("/usr/bin/python3", [join(import.meta.dirname, "extract-python.py")], {
+  const systemPythonWithoutLizard = "/usr/bin/python3";
+  const res = spawnSync(systemPythonWithoutLizard, [join(import.meta.dirname, "extract-python.py")], {
     input: JSON.stringify({ path: "x.py", after: "def f(): pass" }),
     encoding: "utf8",
   });

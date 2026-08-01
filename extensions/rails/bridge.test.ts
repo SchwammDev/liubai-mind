@@ -146,20 +146,24 @@ test("a write-named call carrying a foreign payload reaches no rail", async () =
   assert.deepEqual(railFailures(session.logs), []);
 });
 
-async function withoutPython<T>(action: () => Promise<T>): Promise<T> {
-  const original = process.env.PATH;
-  // The python extractor now spawns an absolute venv path, so clearing PATH
-  // alone does not break it. Rename the venv out of the way to trigger the
-  // wrapper's missing-venv check.
+function hideEngineVenv(): () => void {
   const venvPath = join(import.meta.dirname, "..", "..", "engine", ".venv");
   const venvBackup = `${venvPath}.bak`;
-  process.env.PATH = "";
   if (existsSync(venvPath)) renameSync(venvPath, venvBackup);
+  return () => {
+    if (existsSync(venvBackup)) renameSync(venvBackup, venvPath);
+  };
+}
+
+async function withoutPython<T>(action: () => Promise<T>): Promise<T> {
+  const originalPath = process.env.PATH;
+  process.env.PATH = "";
+  const restoreVenv = hideEngineVenv();
   try {
     return await action();
   } finally {
-    process.env.PATH = original;
-    if (existsSync(venvBackup)) renameSync(venvBackup, venvPath);
+    restoreVenv();
+    process.env.PATH = originalPath;
   }
 }
 
