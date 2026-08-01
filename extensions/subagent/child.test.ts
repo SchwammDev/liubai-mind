@@ -46,6 +46,18 @@ const childResult = (overrides: Partial<SingleResult>): SingleResult => ({
   ...overrides,
 });
 
+const BILLED_CHILDREN = [
+  childResult({ usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: 0.01, contextTokens: 0, turns: 2 } }),
+  childResult({ usage: { input: 50, output: 10, cacheRead: 0, cacheWrite: 0, cost: 0.02, contextTokens: 0, turns: 3 } }),
+];
+
+const CRASHED_BEFORE_TURN = childResult({
+  exitCode: 1,
+  settled: false,
+  errorMessage: "child exited (code 1) before completing its turn",
+  stderr: 'Error: Tool "bash" conflicts with /elsewhere/rails/index.ts\n',
+});
+
 test("a lone task with a complexity selects single mode", () => {
   const selection = selectMode({ task: "summarize the changelog", complexity: "easy" });
 
@@ -117,16 +129,26 @@ const FULL_TIER_MAP = { trivial: "t-model", easy: "e-model", medium: "m-model", 
 
 const PROFILES = { default: FULL_TIER_MAP, heavy: { ...FULL_TIER_MAP, hard: "h-heavy" } };
 
+const MIXED_PROFILES = {
+  good: FULL_TIER_MAP,
+  missingTier: { trivial: "t", easy: "e", medium: "m" },
+  emptyModel: { ...FULL_TIER_MAP, easy: "" },
+};
+
+const complexitySelectionFor = (config: string, active?: string) => {
+  const { configPath, profilePath } = profileConfigFiles(config, active);
+  return loadComplexitySelection(configPath, profilePath);
+};
+
+const assertSelects = (selection: { profile: string; map: unknown }, profile: string, map: unknown) => {
+  assert.equal(selection.profile, profile);
+  assert.deepEqual(selection.map, map);
+};
+
 test("a nested config returns the active profile's tier map", () => {
-  const { configPath, profilePath } = profileConfigFiles(
-    JSON.stringify({ profiles: PROFILES }),
-    JSON.stringify({ profile: "heavy" }),
-  );
+  const selection = complexitySelectionFor(JSON.stringify({ profiles: PROFILES }), JSON.stringify({ profile: "heavy" }));
 
-  const selection = loadComplexitySelection(configPath, profilePath);
-
-  assert.equal(selection.profile, "heavy");
-  assert.deepEqual(selection.map, PROFILES.heavy);
+  assertSelects(selection, "heavy", PROFILES.heavy);
 });
 
 test("a flat form config is rejected naming the profiles target shape", () => {
@@ -150,15 +172,9 @@ test("a profile with an empty model id is rejected", () => {
 });
 
 test("the active profile is selected by name", () => {
-  const { configPath, profilePath } = profileConfigFiles(
-    JSON.stringify({ profiles: PROFILES }),
-    JSON.stringify({ profile: "default" }),
-  );
+  const selection = complexitySelectionFor(JSON.stringify({ profiles: PROFILES }), JSON.stringify({ profile: "default" }));
 
-  const selection = loadComplexitySelection(configPath, profilePath);
-
-  assert.equal(selection.profile, "default");
-  assert.deepEqual(selection.map, PROFILES.default);
+  assertSelects(selection, "default", PROFILES.default);
 });
 
 test("the first profile in insertion order is used when active-profile.json is absent", () => {
@@ -187,12 +203,7 @@ test("validateProfilesConfig flags a flat form naming the profiles target shape"
 });
 
 test("validateProfilesConfig reports each bad profile among good ones", () => {
-  const profiles = {
-    good: FULL_TIER_MAP,
-    missingTier: { trivial: "t", easy: "e", medium: "m" },
-    emptyModel: { ...FULL_TIER_MAP, easy: "" },
-  };
-  const problems = validateProfilesConfig({ profiles });
+  const problems = validateProfilesConfig({ profiles: MIXED_PROFILES });
 
   assert.ok(problems.some((p) => /missingTier/.test(p) && /hard/.test(p)), "missing tier flagged for its profile");
   assert.ok(problems.some((p) => /emptyModel/.test(p) && /easy/.test(p)), "empty model flagged for its profile");
@@ -264,55 +275,64 @@ test("a report over the cap needs compress with its byte count", () => {
   assert.deepEqual(assessReport(over), { kind: "needs_compress", bytes: REPORT_CAP + 100 });
 });
 
-test("an accepted report passes through the gate without compressing", async () => {
-  let calls = 0;
-  const compress = async () => {
-    calls++;
-    return "should not be used";
-  };
+type CompressSpy = ((report: string) => Promise<string>) & { calls: number; lastReport?: string };
 
-  const { report, verdict } = await gateReport("fine as is", undefined, compress);
+const spyingCompress = (result: string): CompressSpy => {
+  const spy = (async (report: string) => {
+    spy.calls++;
+    spy.lastReport = report;
+    return result;
+  }) as CompressSpy;
+  spy.calls = 0;
+  return spy;
+};
 
-  assert.equal(report, "fine as is");
+const assertAcceptedAs = (report: string, verdict: unknown, expected: string) => {
+  assert.equal(report, expected);
   assert.deepEqual(verdict, { kind: "accepted" });
-  assert.equal(calls, 0);
-});
+};
 
-test("an oversized report whose compress lands under cap is returned accepted", async () => {
-  let calls = 0;
-  const original = "x".repeat(REPORT_CAP + 1);
-  const compressed = "fits now";
-  const compress = async (report: string) => {
-    calls++;
-    assert.equal(report, original);
-    return compressed;
-  };
+const assertCompressedOnce = (compress: CompressSpy, original: string) => {
+  assert.equal(compress.lastReport, original);
+  assert.equal(compress.calls, 1);
+};
 
-  const { report, verdict } = await gateReport(original, undefined, compress);
-
-  assert.equal(report, compressed);
-  assert.deepEqual(verdict, { kind: "accepted" });
-  assert.equal(calls, 1);
-});
-
-test("a report still over cap after compress is hard-truncated and flagged", async () => {
-  let calls = 0;
-  const original = "x".repeat(REPORT_CAP + 1);
-  const stillOver = "y".repeat(REPORT_CAP + 50);
-  const compress = async (report: string) => {
-    calls++;
-    assert.equal(report, original);
-    return stillOver;
-  };
-
-  const { report, verdict } = await gateReport(original, undefined, compress);
-
+const assertHardTruncated = (report: string, verdict: { kind: string; bytes?: number }, uncompressed: string) => {
   assert.ok(Buffer.byteLength(report, "utf8") <= REPORT_CAP);
   assert.equal(verdict.kind, "truncated");
   if (verdict.kind === "truncated") {
-    assert.equal(verdict.bytes, Buffer.byteLength(stillOver, "utf8") - Buffer.byteLength(report, "utf8"));
+    assert.equal(verdict.bytes, Buffer.byteLength(uncompressed, "utf8") - Buffer.byteLength(report, "utf8"));
   }
-  assert.equal(calls, 1);
+};
+
+test("an accepted report passes through the gate without compressing", async () => {
+  const compress = spyingCompress("should not be used");
+
+  const { report, verdict } = await gateReport("fine as is", undefined, compress);
+
+  assertAcceptedAs(report, verdict, "fine as is");
+  assert.equal(compress.calls, 0);
+});
+
+test("an oversized report whose compress lands under cap is returned accepted", async () => {
+  const original = "x".repeat(REPORT_CAP + 1);
+  const compress = spyingCompress("fits now");
+
+  const { report, verdict } = await gateReport(original, undefined, compress);
+
+  assertAcceptedAs(report, verdict, "fits now");
+  assertCompressedOnce(compress, original);
+});
+
+test("a report still over cap after compress is hard-truncated and flagged", async () => {
+  const original = "x".repeat(REPORT_CAP + 1);
+  const stillOver = "y".repeat(REPORT_CAP + 50);
+  const compress = spyingCompress(stillOver);
+
+  const { report, verdict } = await gateReport(original, undefined, compress);
+
+  assertHardTruncated(report, verdict, stillOver);
+  assertCompressedOnce(compress, original);
 });
 
 test("the truncation notice names the omitted byte count and the cap", () => {
@@ -331,12 +351,7 @@ test("the compress prompt states the 4 KB limit and output-only instruction", ()
 });
 
 test("usage is summed across every child", () => {
-  const results = [
-    childResult({ usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: 0.01, contextTokens: 0, turns: 2 } }),
-    childResult({ usage: { input: 50, output: 10, cacheRead: 0, cacheWrite: 0, cost: 0.02, contextTokens: 0, turns: 3 } }),
-  ];
-
-  const total = aggregateUsage(results);
+  const total = aggregateUsage(BILLED_CHILDREN);
 
   assert.equal(total.input, 150);
   assert.equal(total.output, 30);
@@ -370,14 +385,7 @@ test("a failed child surfaces its error message over its partial output", () => 
 });
 
 test("a child that dies before its first turn reports what its stderr said", () => {
-  const crashed = childResult({
-    exitCode: 1,
-    settled: false,
-    errorMessage: "child exited (code 1) before completing its turn",
-    stderr: 'Error: Tool "bash" conflicts with /elsewhere/rails/index.ts\n',
-  });
-
-  const output = getResultOutput(crashed);
+  const output = getResultOutput(CRASHED_BEFORE_TURN);
 
   assert.match(output, /before completing its turn/);
   assert.match(output, /conflicts with/);
@@ -406,24 +414,25 @@ test("a child sits one level below its parent", () => {
   assert.equal(childDepthOf(1), 2);
 });
 
-test("a missing or malformed depth falls back to the top", () => {
+const withSpawnDepth = <T,>(value: string | undefined, run: () => T): T => {
   const saved = process.env.LIUBAI_SPAWN_DEPTH;
   try {
-    delete process.env.LIUBAI_SPAWN_DEPTH;
-    assert.equal(currentDepth(), 0);
-
-    process.env.LIUBAI_SPAWN_DEPTH = "abc";
-    assert.equal(currentDepth(), 0);
-
-    process.env.LIUBAI_SPAWN_DEPTH = "2";
-    assert.equal(currentDepth(), 2);
-
-    process.env.LIUBAI_SPAWN_DEPTH = "-1";
-    assert.equal(currentDepth(), 0);
+    if (value === undefined) delete process.env.LIUBAI_SPAWN_DEPTH;
+    else process.env.LIUBAI_SPAWN_DEPTH = value;
+    return run();
   } finally {
     if (saved === undefined) delete process.env.LIUBAI_SPAWN_DEPTH;
     else process.env.LIUBAI_SPAWN_DEPTH = saved;
   }
+};
+
+const depthFor = (value: string | undefined) => withSpawnDepth(value, currentDepth);
+
+test("a missing or malformed depth falls back to the top", () => {
+  assert.equal(depthFor(undefined), 0);
+  assert.equal(depthFor("abc"), 0);
+  assert.equal(depthFor("2"), 2);
+  assert.equal(depthFor("-1"), 0);
 });
 
 test("a question under the byte cap is accepted", () => {
@@ -461,15 +470,6 @@ test("the clarify budget caps at two questions with a fifteen-minute timeout", (
 });
 
 test("at the capped depth a child may not spawn, but the top may", () => {
-  const saved = process.env.LIUBAI_SPAWN_DEPTH;
-  try {
-    process.env.LIUBAI_SPAWN_DEPTH = "1";
-    assert.equal(canSpawn(currentDepth()), false);
-
-    delete process.env.LIUBAI_SPAWN_DEPTH;
-    assert.equal(canSpawn(currentDepth()), true);
-  } finally {
-    if (saved === undefined) delete process.env.LIUBAI_SPAWN_DEPTH;
-    else process.env.LIUBAI_SPAWN_DEPTH = saved;
-  }
+  assert.equal(withSpawnDepth("1", () => canSpawn(currentDepth())), false);
+  assert.equal(withSpawnDepth(undefined, () => canSpawn(currentDepth())), true);
 });

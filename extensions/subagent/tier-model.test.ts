@@ -19,17 +19,19 @@ const errorFrom = (resolution: ReturnType<typeof resolveTier>): string => {
 
 const AMBIGUOUS_CATALOG = catalogOf(model("opencode", "kimi-k2.6"), model("opencode-go", "kimi-k2.6"));
 
+const resolvedTo = (tier: string, reference: string, model: CatalogModel) => ({
+  kind: "resolved",
+  tier,
+  reference,
+  model,
+});
+
 test("a provider-qualified id resolves to the catalog entry carrying its api", () => {
-  const catalog = catalogOf(model("aqueduct", "glm-5.2", "anthropic-messages"));
+  const glm = model("aqueduct", "glm-5.2", "anthropic-messages");
 
-  const resolution = resolveTier("hard", "aqueduct/glm-5.2", catalog);
+  const resolution = resolveTier("hard", "aqueduct/glm-5.2", catalogOf(glm));
 
-  assert.deepEqual(resolution, {
-    kind: "resolved",
-    tier: "hard",
-    reference: "aqueduct/glm-5.2",
-    model: model("aqueduct", "glm-5.2", "anthropic-messages"),
-  });
+  assert.deepEqual(resolution, resolvedTo("hard", "aqueduct/glm-5.2", glm));
 });
 
 test("only the first slash separates provider from id, so ids may contain slashes", () => {

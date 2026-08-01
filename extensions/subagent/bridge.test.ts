@@ -91,6 +91,233 @@ class FakeWriter {
   }
 }
 
+type ClarifyMode = "single" | "parallel";
+
+const makeBridge = () => {
+  const f = new FakeForwarder();
+  const w = new FakeWriter();
+  const bridge = new AskBridge(f, (l) => w.write(l));
+  return { f, w, bridge };
+};
+
+const makeClarifyBridge = (mode: ClarifyMode, delivered: number) => {
+  const f = new FakeForwarder();
+  const w = new FakeWriter();
+  const bridge = new AskBridge(f, (l) => w.write(l), undefined, undefined, mode, { delivered });
+  return { f, w, bridge };
+};
+
+const detachedBridge = () => new AskBridge(new FakeForwarder(), () => {});
+
+const uiRequest = (fields: Record<string, unknown>) =>
+  ({ type: "extension_ui_request", ...fields }) as any;
+
+const confirmRequest = (id: string, title = "T", message = "M", extra: Record<string, unknown> = {}) =>
+  uiRequest({ id, method: "confirm", title, message, ...extra });
+
+const clarifyInput = (id: string, question: string) =>
+  uiRequest({ id, method: "input", title: CLARIFY_TAG + question });
+
+const rpcLine = (message: object) => JSON.stringify(message);
+const messageEnd = (message: unknown) => JSON.stringify({ type: "message_end", message });
+const AGENT_END = JSON.stringify({ type: "agent_end", messages: [], willRetry: false });
+const AGENT_SETTLED = JSON.stringify({ type: "agent_settled" });
+
+const TOOL_RESULT_MSG = {
+  role: "toolResult",
+  content: [{ type: "toolResult", toolCallId: "t1", content: "ok" }],
+};
+
+const FIRE_AND_FORGET_REQUESTS = [
+  uiRequest({ id: "x", method: "setStatus", statusKey: "k", statusText: "s" }),
+  uiRequest({ id: "x", method: "setWidget", widgetKey: "k", widgetLines: ["l"] }),
+  uiRequest({ id: "x", method: "setTitle", title: "t" }),
+  uiRequest({ id: "x", method: "set_editor_text", text: "t" }),
+];
+
+const promptLine = (message: string) => ({ type: "prompt", message });
+const valueResponse = (id: string, value: string) => ({ type: "extension_ui_response", id, value });
+const cancelledResponse = (id: string) => ({ type: "extension_ui_response", id, cancelled: true });
+const confirmedResponse = (id: string, confirmed: boolean) => ({ type: "extension_ui_response", id, confirmed });
+const clarifyDeniedResponse = (id: string) => ({ type: "extension_ui_response", id, value: "proceed with best judgment" });
+const suspendedOutcome = (id: string, question: string) => ({ settled: false, suspended: { clarifyId: id, question } });
+
+const SETTLED = { settled: true, suspended: false, exitCode: 0, aborted: false };
+const unsettled = (exitCode: number, aborted: boolean) => ({ settled: false, suspended: false, exitCode, aborted });
+
+const makeSession = (t: FakeTransport, f: UiForwarder = new FakeForwarder()) =>
+  new ChildSession(t, f, makeAcc());
+
+const gatedSession = (t: FakeTransport, f: FakeForwarder, gate: DialogGate) =>
+  new ChildSession(t, f, makeAcc(), undefined, undefined, gate);
+
+const clarifySession = (t: FakeTransport) =>
+  new ChildSession(t, new FakeForwarder(), makeAcc(), undefined, undefined, undefined, "single", { delivered: 0 });
+
+const manualConfirmForwarder = () => {
+  const f = new FakeForwarder();
+  f.confirmManual = true;
+  return f;
+};
+
+const pendingConfirmForwarder = () => {
+  const f = new FakeForwarder();
+  f.confirmPending = true;
+  return f;
+};
+
+const answerSelect = async (bridge: AskBridge, f: FakeForwarder, id: string, result: string | undefined) => {
+  f.selectResult = result;
+  await bridge.handle(uiRequest({ id, method: "select", title: "T", options: ["a"] }));
+};
+
+const answerInput = async (bridge: AskBridge, f: FakeForwarder, id: string, result: string | undefined) => {
+  f.inputResult = result;
+  await bridge.handle(uiRequest({ id, method: "input", title: "T" }));
+};
+
+const settle = (t: FakeTransport) => t.emitLine(AGENT_SETTLED);
+
+const settleAnd = async (t: FakeTransport, p: Promise<unknown>) => {
+  settle(t);
+  await p;
+};
+
+const settleBoth = async (transports: FakeTransport[], promises: Promise<unknown>[]) => {
+  for (const t of transports) settle(t);
+  await Promise.all(promises);
+};
+
+const runPromptToSettle = async (session: ChildSession, t: FakeTransport, message: string) => {
+  const p = session.sendPrompt(message);
+  settle(t);
+  await p;
+};
+
+const emitConfirmAsk = (t: FakeTransport, id: string, title: string, message: string) =>
+  t.emitLine(rpcLine(confirmRequest(id, title, message)));
+
+const answerNextConfirm = async (f: FakeForwarder, confirmed: boolean) => {
+  f.pendingConfirms.shift()!(confirmed);
+  await flush();
+};
+
+const uiResponses = (t: FakeTransport) =>
+  t.writtenJson().filter((o) => o.type === "extension_ui_response");
+
+const promptsWritten = (t: FakeTransport) =>
+  t.writtenJson().filter((o) => o.type === "prompt");
+
+const abortOf = (f: FakeForwarder): AbortSignal | undefined => f.confirmCalls[0]?.opts?.signal;
+
+const waitForAbort = (signal: AbortSignal | undefined, defer = false) => {
+  if (!signal) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    signal.addEventListener("abort", () => (defer ? setImmediate(resolve) : resolve()), { once: true });
+  });
+};
+
+const openPendingConfirm = async (session: ChildSession, t: FakeTransport, f: FakeForwarder) => {
+  const p = session.sendPrompt("task");
+  emitConfirmAsk(t, "q1", "ok?", "proceed?");
+  await flush();
+  assert.equal(f.confirmCalls.length, 1);
+  return { p };
+};
+
+const dismissPendingConfirmVia = async (f: FakeForwarder, action: () => void, defer = false) => {
+  const dismissed = waitForAbort(abortOf(f), defer);
+  action();
+  await dismissed;
+  await flush();
+};
+
+const startTwoGatedConfirmAsks = (gate: DialogGate, f: FakeForwarder) => {
+  const t1 = new FakeTransport();
+  const t2 = new FakeTransport();
+  const p1 = gatedSession(t1, f, gate).sendPrompt("task1");
+  const p2 = gatedSession(t2, f, gate).sendPrompt("task2");
+  emitConfirmAsk(t1, "a1", "t1", "m1");
+  emitConfirmAsk(t2, "a2", "t2", "m2");
+  return { t1, t2, p1, p2 };
+};
+
+const openTwoAsksShowingFirst = async (f: FakeForwarder) => {
+  const started = startTwoGatedConfirmAsks(new DialogGate(), f);
+  await flush();
+  assertConfirmCount(f, 1);
+  return started;
+};
+
+const showOneDialogAtATime = async (f: FakeForwarder) => {
+  await flush();
+  assertConfirmCount(f, 1);
+  await answerNextConfirm(f, true);
+  assertConfirmCount(f, 2);
+  await answerNextConfirm(f, false);
+};
+
+const startConfirmingChild = (id: string, confirmResult: boolean) => {
+  const t = new FakeTransport();
+  const f = new FakeForwarder();
+  f.confirmResult = confirmResult;
+  const p = new ChildSession(t, f, makeAcc()).sendPrompt("task-" + id);
+  emitConfirmAsk(t, id, "title", "message");
+  return { t, p };
+};
+
+const suspendOnClarify = async (session: ChildSession, t: FakeTransport, id: string, question: string) => {
+  const p = session.sendPrompt("task");
+  t.emitLine(rpcLine(clarifyInput(id, question)));
+  const suspended = await p;
+  assert.equal(suspended.suspended, true);
+  return suspended;
+};
+
+const assertResponse = (w: FakeWriter, i: number, expected: unknown) => assert.deepEqual(w.json(i), expected);
+const assertWroteNothing = (w: FakeWriter) => assert.equal(w.lines.length, 0);
+const assertConfirmCount = (f: FakeForwarder, n: number) => assert.equal(f.confirmCalls.length, n);
+
+const assertNoDialogsShown = (f: FakeForwarder) => {
+  assert.equal(f.confirmCalls.length, 0);
+  assert.equal(f.selectCalls.length, 0);
+  assert.equal(f.inputCalls.length, 0);
+  assert.equal(f.editorCalls.length, 0);
+  assert.equal(f.notifyCalls.length, 0);
+};
+
+const assertAssistantAccumulated = (acc: ReturnType<typeof makeAcc>) => {
+  assert.equal(acc.usage.input, 10);
+  assert.equal(acc.usage.output, 5);
+  assert.equal(acc.usage.cost, 0.02);
+  assert.equal(acc.usage.contextTokens, 15);
+  assert.equal(acc.usage.turns, 1);
+  assert.equal(acc.model, "m");
+  assert.equal(acc.stopReason, "end");
+};
+
+const assertNotYetResolved = async (p: Promise<unknown>) => {
+  let resolved = false;
+  p.then(() => {
+    resolved = true;
+  });
+  await flush();
+  assert.equal(resolved, false);
+};
+
+const assertConfirmForwardedAndAnswered = (f: FakeForwarder, t: FakeTransport, id: string, confirmed: boolean) => {
+  assert.equal(f.confirmCalls.length, 1);
+  assert.deepEqual(uiResponses(t), [confirmedResponse(id, confirmed)]);
+};
+
+const assertConfirmedResponses = (t: FakeTransport, id: string, confirmed: boolean) =>
+  assert.deepEqual(uiResponses(t), [confirmedResponse(id, confirmed)]);
+
+const assertAutoDenied = (w: FakeWriter, id: string) => {
+  assert.equal(w.lines.length, 1);
+  assert.deepEqual(w.json(0), clarifyDeniedResponse(id));
+};
+
 test("AskBridge forwards a confirm request and writes {id, confirmed}", async () => {
   const f = new FakeForwarder();
   const w = new FakeWriter();
@@ -113,31 +340,23 @@ test("a child ask's timeout is forwarded to the parent dialog", async () => {
 });
 
 test("AskBridge select writes {id, value} for a string and {id, cancelled} for undefined", async () => {
-  const f = new FakeForwarder();
-  f.selectResult = "x";
-  const w = new FakeWriter();
-  const bridge = new AskBridge(f, (l) => w.write(l));
+  const { f, w, bridge } = makeBridge();
 
-  await bridge.handle({ type: "extension_ui_request", id: "s1", method: "select", title: "T", options: ["a", "b"] });
-  f.selectResult = undefined;
-  await bridge.handle({ type: "extension_ui_request", id: "s2", method: "select", title: "T", options: ["a"] });
+  await answerSelect(bridge, f, "s1", "x");
+  await answerSelect(bridge, f, "s2", undefined);
 
-  assert.deepEqual(w.json(0), { type: "extension_ui_response", id: "s1", value: "x" });
-  assert.deepEqual(w.json(1), { type: "extension_ui_response", id: "s2", cancelled: true });
+  assertResponse(w, 0, valueResponse("s1", "x"));
+  assertResponse(w, 1, cancelledResponse("s2"));
 });
 
 test("AskBridge input writes {id, value} for a string and {id, cancelled} for undefined", async () => {
-  const f = new FakeForwarder();
-  f.inputResult = "typed";
-  const w = new FakeWriter();
-  const bridge = new AskBridge(f, (l) => w.write(l));
+  const { f, w, bridge } = makeBridge();
 
-  await bridge.handle({ type: "extension_ui_request", id: "i1", method: "input", title: "T", placeholder: "p" });
-  f.inputResult = undefined;
-  await bridge.handle({ type: "extension_ui_request", id: "i2", method: "input", title: "T" });
+  await answerInput(bridge, f, "i1", "typed");
+  await answerInput(bridge, f, "i2", undefined);
 
-  assert.deepEqual(w.json(0), { type: "extension_ui_response", id: "i1", value: "typed" });
-  assert.deepEqual(w.json(1), { type: "extension_ui_response", id: "i2", cancelled: true });
+  assertResponse(w, 0, valueResponse("i1", "typed"));
+  assertResponse(w, 1, cancelledResponse("i2"));
 });
 
 test("AskBridge notify forwards to the forwarder and writes nothing", async () => {
@@ -152,33 +371,22 @@ test("AskBridge notify forwards to the forwarder and writes nothing", async () =
 });
 
 test("AskBridge fire-and-forget methods write nothing and do not call the forwarder", async () => {
-  const f = new FakeForwarder();
-  const w = new FakeWriter();
-  const bridge = new AskBridge(f, (l) => w.write(l));
+  const { f, w, bridge } = makeBridge();
 
-  await bridge.handle({ type: "extension_ui_request", id: "x", method: "setStatus", statusKey: "k", statusText: "s" });
-  await bridge.handle({ type: "extension_ui_request", id: "x", method: "setWidget", widgetKey: "k", widgetLines: ["l"] });
-  await bridge.handle({ type: "extension_ui_request", id: "x", method: "setTitle", title: "t" });
-  await bridge.handle({ type: "extension_ui_request", id: "x", method: "set_editor_text", text: "t" });
+  for (const req of FIRE_AND_FORGET_REQUESTS) await bridge.handle(req);
 
-  assert.equal(w.lines.length, 0);
-  assert.equal(f.confirmCalls.length, 0);
-  assert.equal(f.selectCalls.length, 0);
-  assert.equal(f.inputCalls.length, 0);
-  assert.equal(f.editorCalls.length, 0);
-  assert.equal(f.notifyCalls.length, 0);
+  assertWroteNothing(w);
+  assertNoDialogsShown(f);
 });
 
 test("AskBridge with hasUI false cancels a confirm immediately without calling the forwarder", async () => {
-  const f = new FakeForwarder();
+  const { f, w, bridge } = makeBridge();
   f.hasUI = false;
-  const w = new FakeWriter();
-  const bridge = new AskBridge(f, (l) => w.write(l));
 
-  await bridge.handle({ type: "extension_ui_request", id: "c1", method: "confirm", title: "T", message: "M" });
+  await bridge.handle(confirmRequest("c1"));
 
   assert.equal(f.confirmCalls.length, 0);
-  assert.deepEqual(w.json(0), { type: "extension_ui_response", id: "c1", cancelled: true });
+  assertResponse(w, 0, cancelledResponse("c1"));
 });
 
 test("AskBridge writes {id, cancelled} when the forwarder rejects", async () => {
@@ -194,27 +402,20 @@ test("AskBridge writes {id, cancelled} when the forwarder rejects", async () => 
 
 test("processRpcLine pushes a message_end assistant message, sums usage, and stays unsettled", () => {
   const acc = makeAcc();
-  const bridge = new AskBridge(new FakeForwarder(), () => {});
+  const bridge = detachedBridge();
 
-  const outcome = processRpcLine(JSON.stringify({ type: "message_end", message: assistantMsg() }), acc, bridge);
+  const outcome = processRpcLine(messageEnd(assistantMsg()), acc, bridge);
 
   assert.equal(outcome.settled, false);
   assert.equal(acc.messages.length, 1);
-  assert.equal(acc.usage.input, 10);
-  assert.equal(acc.usage.output, 5);
-  assert.equal(acc.usage.cost, 0.02);
-  assert.equal(acc.usage.contextTokens, 15);
-  assert.equal(acc.usage.turns, 1);
-  assert.equal(acc.model, "m");
-  assert.equal(acc.stopReason, "end");
+  assertAssistantAccumulated(acc);
 });
 
 test("processRpcLine accumulates a toolResult message arriving via message_end", () => {
   const acc = makeAcc();
-  const bridge = new AskBridge(new FakeForwarder(), () => {});
-  const msg = { role: "toolResult", content: [{ type: "toolResult", toolCallId: "t1", content: "ok" }] };
+  const bridge = detachedBridge();
 
-  const outcome = processRpcLine(JSON.stringify({ type: "message_end", message: msg }), acc, bridge);
+  const outcome = processRpcLine(messageEnd(TOOL_RESULT_MSG), acc, bridge);
 
   assert.equal(outcome.settled, false);
   assert.equal(acc.messages.length, 1);
@@ -244,11 +445,7 @@ test("processRpcLine routes an extension_ui_request to the bridge", async () => 
   const bridge = new AskBridge(f, () => {});
   const acc = makeAcc();
 
-  processRpcLine(
-    JSON.stringify({ type: "extension_ui_request", id: "q1", method: "confirm", title: "t", message: "m" }),
-    acc,
-    bridge,
-  );
+  processRpcLine(rpcLine(confirmRequest("q1", "t", "m")), acc, bridge);
   await flush();
 
   assert.equal(f.confirmCalls.length, 1);
@@ -256,41 +453,23 @@ test("processRpcLine routes an extension_ui_request to the bridge", async () => 
 
 test("ChildSession.sendPrompt writes the prompt and resolves only on agent_settled", async () => {
   const t = new FakeTransport();
-  const session = new ChildSession(t, new FakeForwarder(), makeAcc());
+  const p = makeSession(t).sendPrompt("do it");
+  assert.deepEqual(t.writtenJson()[0], promptLine("do it"));
 
-  const p = session.sendPrompt("do it");
-  assert.deepEqual(t.writtenJson()[0], { type: "prompt", message: "do it" });
-
-  t.emitLine(JSON.stringify({ type: "agent_end", messages: [], willRetry: false }));
-
-  let resolved = false;
-  p.then(() => {
-    resolved = true;
-  });
-  await flush();
-  assert.equal(resolved, false);
-
-  t.emitLine(JSON.stringify({ type: "agent_settled" }));
-  assert.deepEqual(await p, { settled: true, suspended: false, exitCode: 0, aborted: false });
+  t.emitLine(AGENT_END);
+  await assertNotYetResolved(p);
+  settle(t);
+  assert.deepEqual(await p, SETTLED);
 });
 
 test("ChildSession.sendPrompt reuses the same transport across turns", async () => {
   const t = new FakeTransport();
-  const session = new ChildSession(t, new FakeForwarder(), makeAcc());
+  const session = makeSession(t);
 
-  const p1 = session.sendPrompt("first");
-  t.emitLine(JSON.stringify({ type: "agent_settled" }));
-  await p1;
+  await runPromptToSettle(session, t, "first");
+  await runPromptToSettle(session, t, "second");
 
-  const p2 = session.sendPrompt("second");
-  t.emitLine(JSON.stringify({ type: "agent_settled" }));
-  await p2;
-
-  const prompts = t.writtenJson().filter((o) => o.type === "prompt");
-  assert.deepEqual(prompts, [
-    { type: "prompt", message: "first" },
-    { type: "prompt", message: "second" },
-  ]);
+  assert.deepEqual(promptsWritten(t), [promptLine("first"), promptLine("second")]);
 });
 
 test("ChildSession.sendPrompt resolves unsettled on premature close with the exit code", async () => {
@@ -306,180 +485,65 @@ test("ChildSession.sendPrompt resolves unsettled on premature close with the exi
 test("a confirm request mid-turn reaches the forwarder and writes the response back to the transport", async () => {
   const t = new FakeTransport();
   const f = new FakeForwarder();
-  f.confirmResult = true;
-  const session = new ChildSession(t, f, makeAcc());
-
-  const p = session.sendPrompt("task");
-  t.emitLine(
-    JSON.stringify({ type: "extension_ui_request", id: "q1", method: "confirm", title: "ok?", message: "proceed?" }),
-  );
+  const p = makeSession(t, f).sendPrompt("task");
+  emitConfirmAsk(t, "q1", "ok?", "proceed?");
   await flush();
-
-  assert.equal(f.confirmCalls.length, 1);
-  const responses = t.writtenJson().filter((o) => o.type === "extension_ui_response");
-  assert.deepEqual(responses, [{ type: "extension_ui_response", id: "q1", confirmed: true }]);
-
-  t.emitLine(JSON.stringify({ type: "agent_settled" }));
-  await p;
+  assertConfirmForwardedAndAnswered(f, t, "q1", true);
+  await settleAnd(t, p);
 });
 
 test("a pending parent confirm is dismissed when the child dies mid-ask", async () => {
   const t = new FakeTransport();
-  const f = new FakeForwarder();
-  f.confirmPending = true;
-  const session = new ChildSession(t, f, makeAcc());
+  const f = pendingConfirmForwarder();
 
-  const p = session.sendPrompt("task");
-  t.emitLine(
-    JSON.stringify({ type: "extension_ui_request", id: "q1", method: "confirm", title: "ok?", message: "proceed?" }),
-  );
-  await flush();
+  const { p } = await openPendingConfirm(makeSession(t, f), t, f);
+  await dismissPendingConfirmVia(f, () => t.emitClose(9));
 
-  assert.equal(f.confirmCalls.length, 1);
-
-  const pendingSignal: AbortSignal | undefined = f.confirmCalls[0]?.opts?.signal;
-  const confirmPromise = pendingSignal ? new Promise<void>((resolve) => {
-    pendingSignal.addEventListener("abort", () => resolve(), { once: true });
-  }) : Promise.resolve();
-
-  t.emitClose(9);
-  await confirmPromise;
-  await flush();
-
-  const result = await p;
-  assert.deepEqual(result, { settled: false, suspended: false, exitCode: 9, aborted: false });
+  assert.deepEqual(await p, unsettled(9, false));
 });
 
 test("a pending parent confirm is dismissed on parent abort", async () => {
   const t = new FakeTransport();
-  const f = new FakeForwarder();
-  f.confirmPending = true;
+  const f = pendingConfirmForwarder();
   const toolController = new AbortController();
   const session = new ChildSession(t, f, makeAcc(), undefined, toolController.signal);
+  const { p } = await openPendingConfirm(session, t, f);
 
-  const p = session.sendPrompt("task");
-  t.emitLine(
-    JSON.stringify({ type: "extension_ui_request", id: "q1", method: "confirm", title: "ok?", message: "proceed?" }),
-  );
-  await flush();
-
-  assert.equal(f.confirmCalls.length, 1);
-
-  const pendingSignal: AbortSignal | undefined = f.confirmCalls[0]?.opts?.signal;
-  const confirmPromise = pendingSignal ? new Promise<void>((resolve) => {
-    pendingSignal.addEventListener("abort", () => {
-      setImmediate(() => resolve());
-    });
-  }) : Promise.resolve();
-
-  toolController.abort();
-  t.emitClose(1);
-  await confirmPromise;
-  await flush();
-
-  const result = await p;
-  assert.deepEqual(result, { settled: false, suspended: false, exitCode: 1, aborted: true });
+  await dismissPendingConfirmVia(f, () => { toolController.abort(); t.emitClose(1); }, true);
+  assert.deepEqual(await p, unsettled(1, true));
 });
 
 test("concurrent asks from two children show one parent dialog at a time", async () => {
   const gate = new DialogGate();
-  const f = new FakeForwarder();
-  f.confirmManual = true;
-  const t1 = new FakeTransport();
-  const t2 = new FakeTransport();
-  const s1 = new ChildSession(t1, f, makeAcc(), undefined, undefined, gate);
-  const s2 = new ChildSession(t2, f, makeAcc(), undefined, undefined, gate);
+  const f = manualConfirmForwarder();
+  const { t1, t2, p1, p2 } = startTwoGatedConfirmAsks(gate, f);
+  await showOneDialogAtATime(f);
 
-  const p1 = s1.sendPrompt("task1");
-  const p2 = s2.sendPrompt("task2");
-  t1.emitLine(JSON.stringify({ type: "extension_ui_request", id: "a1", method: "confirm", title: "t1", message: "m1" }));
-  t2.emitLine(JSON.stringify({ type: "extension_ui_request", id: "a2", method: "confirm", title: "t2", message: "m2" }));
-  await flush();
-
-  assert.equal(f.confirmCalls.length, 1);
-
-  f.pendingConfirms.shift()!(true);
-  await flush();
-
-  assert.equal(f.confirmCalls.length, 2);
-
-  f.pendingConfirms.shift()!(false);
-  await flush();
-
-  const responses1 = t1.writtenJson().filter((o) => o.type === "extension_ui_response");
-  const responses2 = t2.writtenJson().filter((o) => o.type === "extension_ui_response");
-  assert.deepEqual(responses1, [{ type: "extension_ui_response", id: "a1", confirmed: true }]);
-  assert.deepEqual(responses2, [{ type: "extension_ui_response", id: "a2", confirmed: false }]);
-
-  t1.emitLine(JSON.stringify({ type: "agent_settled" }));
-  t2.emitLine(JSON.stringify({ type: "agent_settled" }));
-  await p1;
-  await p2;
+  assertConfirmedResponses(t1, "a1", true);
+  assertConfirmedResponses(t2, "a2", false);
+  await settleBoth([t1, t2], [p1, p2]);
 });
 
 test("an ask queued behind another dialog is skipped when its child dies while waiting", async () => {
-  const gate = new DialogGate();
-  const f = new FakeForwarder();
-  f.confirmManual = true;
-  const t1 = new FakeTransport();
-  const t2 = new FakeTransport();
-  const s1 = new ChildSession(t1, f, makeAcc(), undefined, undefined, gate);
-  const s2 = new ChildSession(t2, f, makeAcc(), undefined, undefined, gate);
-
-  const p1 = s1.sendPrompt("task1");
-  const p2 = s2.sendPrompt("task2");
-  t1.emitLine(JSON.stringify({ type: "extension_ui_request", id: "a1", method: "confirm", title: "t1", message: "m1" }));
-  t2.emitLine(JSON.stringify({ type: "extension_ui_request", id: "a2", method: "confirm", title: "t2", message: "m2" }));
-  await flush();
-
-  assert.equal(f.confirmCalls.length, 1);
+  const f = manualConfirmForwarder();
+  const { t1, t2, p1, p2 } = await openTwoAsksShowingFirst(f);
 
   t2.emitClose(3);
-  f.pendingConfirms.shift()!(true);
-  await flush();
-
-  assert.equal(f.confirmCalls.length, 1);
-  assert.deepEqual(await p2, { settled: false, suspended: false, exitCode: 3, aborted: false });
-
-  t1.emitLine(JSON.stringify({ type: "agent_settled" }));
-  await p1;
+  await answerNextConfirm(f, true);
+  assertConfirmCount(f, 1);
+  assert.deepEqual(await p2, unsettled(3, false));
+  await settleAnd(t1, p1);
 });
 
 test("parallel children resolve asks independently by id with no cross-talk", async () => {
-  const t1 = new FakeTransport();
-  const f1 = new FakeForwarder();
-  const session1 = new ChildSession(t1, f1, makeAcc());
-
-  const t2 = new FakeTransport();
-  const f2 = new FakeForwarder();
-  const session2 = new ChildSession(t2, f2, makeAcc());
-
-  const p1 = session1.sendPrompt("task1");
-  const p2 = session2.sendPrompt("task2");
-
-  f1.confirmResult = true;
-  f2.confirmResult = false;
-
-  t1.emitLine(
-    JSON.stringify({ type: "extension_ui_request", id: "a1", method: "confirm", title: "t1", message: "m1" }),
-  );
-  t2.emitLine(
-    JSON.stringify({ type: "extension_ui_request", id: "a2", method: "confirm", title: "t2", message: "m2" }),
-  );
+  const a = startConfirmingChild("a1", true);
+  const b = startConfirmingChild("a2", false);
+  await flush();
   await flush();
 
-  await flush();
-
-  const responses1 = t1.writtenJson().filter((o) => o.type === "extension_ui_response");
-  const responses2 = t2.writtenJson().filter((o) => o.type === "extension_ui_response");
-
-  assert.deepEqual(responses1, [{ type: "extension_ui_response", id: "a1", confirmed: true }]);
-  assert.deepEqual(responses2, [{ type: "extension_ui_response", id: "a2", confirmed: false }]);
-
-  t1.emitLine(JSON.stringify({ type: "agent_settled" }));
-  t2.emitLine(JSON.stringify({ type: "agent_settled" }));
-  await p1;
-  await p2;
+  assertConfirmedResponses(a.t, "a1", true);
+  assertConfirmedResponses(b.t, "a2", false);
+  await settleBoth([a.t, b.t], [a.p, b.p]);
 });
 
 test("interceptClarify returns the clarifyId and question for a tagged single-mode request under budget and writes no response", () => {
@@ -533,37 +597,24 @@ test("interceptClarify returns pass without writing for an untagged input reques
 });
 
 test("processRpcLine returns a suspended outcome for a tagged input line and does not reach the forwarder", () => {
-  const f = new FakeForwarder();
-  const bridge = new AskBridge(f, () => {}, undefined, undefined, "single", { delivered: 0 });
+  const { f, bridge } = makeClarifyBridge("single", 0);
   const acc = makeAcc();
 
-  const out = processRpcLine(
-    JSON.stringify({ type: "extension_ui_request", id: "q1", method: "input", title: CLARIFY_TAG + "which file?" }),
-    acc,
-    bridge,
-  );
+  const out = processRpcLine(rpcLine(clarifyInput("q1", "which file?")), acc, bridge);
 
-  assert.deepEqual(out, { settled: false, suspended: { clarifyId: "q1", question: "which file?" } });
+  assert.deepEqual(out, suspendedOutcome("q1", "which file?"));
   assert.equal(f.inputCalls.length, 0);
 });
 
 test("processRpcLine auto-denies a parallel-mode clarify without forwarding it to the parent UI", async () => {
-  const f = new FakeForwarder();
-  const w = new FakeWriter();
-  const bridge = new AskBridge(f, (l) => w.write(l), undefined, undefined, "parallel", { delivered: 0 });
+  const { f, w, bridge } = makeClarifyBridge("parallel", 0);
   const acc = makeAcc();
-
-  const out = processRpcLine(
-    JSON.stringify({ type: "extension_ui_request", id: "q1", method: "input", title: CLARIFY_TAG + "which?" }),
-    acc,
-    bridge,
-  );
+  const out = processRpcLine(rpcLine(clarifyInput("q1", "which?")), acc, bridge);
   await flush();
 
   assert.deepEqual(out, { settled: false });
   assert.equal(f.inputCalls.length, 0);
-  assert.equal(w.lines.length, 1);
-  assert.deepEqual(w.json(0), { type: "extension_ui_response", id: "q1", value: "proceed with best judgment" });
+  assertAutoDenied(w, "q1");
 });
 
 test("ChildSession.sendPrompt resolves suspended for a tagged input line in single mode", async () => {
@@ -578,33 +629,24 @@ test("ChildSession.sendPrompt resolves suspended for a tagged input line in sing
 
 test("a second clarify while one is suspended is auto-denied so the duplicate tool call can't hang the turn", async () => {
   const t = new FakeTransport();
-  const session = new ChildSession(t, new FakeForwarder(), makeAcc(), undefined, undefined, undefined, "single", { delivered: 0 });
+  const session = clarifySession(t);
+  await suspendOnClarify(session, t, "q1", "first?");
 
-  const p = session.sendPrompt("task");
-  t.emitLine(JSON.stringify({ type: "extension_ui_request", id: "q1", method: "input", title: CLARIFY_TAG + "first?" }));
-  const suspended = await p;
-  assert.equal(suspended.suspended, true);
-
-  t.emitLine(JSON.stringify({ type: "extension_ui_request", id: "q2", method: "input", title: CLARIFY_TAG + "dup?" }));
+  t.emitLine(rpcLine(clarifyInput("q2", "dup?")));
   await flush();
 
-  const responses = t.writtenJson().filter((o) => o.type === "extension_ui_response");
-  assert.deepEqual(responses, [{ type: "extension_ui_response", id: "q2", value: "proceed with best judgment" }]);
+  assert.deepEqual(uiResponses(t), [clarifyDeniedResponse("q2")]);
 });
 
 test("ChildSession.resume resolves settled after the suspended turn settles", async () => {
   const t = new FakeTransport();
-  const session = new ChildSession(t, new FakeForwarder(), makeAcc(), undefined, undefined, undefined, "single", { delivered: 0 });
-
-  const p = session.sendPrompt("task");
-  t.emitLine(JSON.stringify({ type: "extension_ui_request", id: "q1", method: "input", title: CLARIFY_TAG + "which file?" }));
-  const suspended = await p;
-  assert.equal(suspended.suspended, true);
+  const session = clarifySession(t);
+  await suspendOnClarify(session, t, "q1", "which file?");
 
   const resumeP = session.resume();
-  t.emitLine(JSON.stringify({ type: "agent_settled" }));
+  settle(t);
 
-  assert.deepEqual(await resumeP, { settled: true, suspended: false, exitCode: 0, aborted: false });
+  assert.deepEqual(await resumeP, SETTLED);
 });
 
 test("ChildSession defaults keep sendPrompt working without explicit mode and budget", async () => {
