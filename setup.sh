@@ -31,6 +31,7 @@ install_engine() {
   local dest="$AGENT_DIR/engine"
   rm -rf "$dest"
   cp -a "$REPO/engine" "$dest"
+  rm -rf "$dest/.venv"
 }
 
 installed_source() {
@@ -39,6 +40,16 @@ installed_source() {
   dirty=""
   [ -z "$(git -C "$REPO" status --porcelain 2>/dev/null)" ] || dirty=" (dirty)"
   printf '%s @ %s%s\n' "$REPO" "$commit" "$dirty"
+}
+
+ensure_lizard_venv() {
+  local eng_dir="$1"
+  local py="$eng_dir/.venv/bin/python"
+  if [ ! -x "$py" ]; then
+    rm -rf "$eng_dir/.venv"
+    uv venv "$eng_dir/.venv"
+  fi
+  uv pip install --quiet --python "$py" lizard
 }
 
 step "mise (node version manager)"
@@ -58,6 +69,14 @@ install_extension rails
 install_extension subagent
 installed_source > "$AGENT_DIR/extensions/.liubai-installed"
 printf 'installed from %s' "$(installed_source)"
+
+step "lizard venv"
+if command -v uv >/dev/null 2>&1; then
+  ensure_lizard_venv "$REPO/engine"
+  ensure_lizard_venv "$AGENT_DIR/engine"
+else
+  printf 'uv not found on PATH; install with: curl -LsSf https://astral.sh/uv/install.sh | sh\n' >&2
+fi
 
 step "liubai command"
 mkdir -p "$LOCAL_BIN"
