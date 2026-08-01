@@ -75,6 +75,45 @@ function resultText(result: any): string {
   return result.content.map((part: any) => part.text ?? "").join("");
 }
 
+function bashDedupOver(delegate: { name: string; execute: any }, over: Record<string, any> = {}) {
+  const logs: any[] = [];
+  const world = ghWorld();
+  const tool = withBashDedup(delegate, {
+    patterns: PATTERNS,
+    session: createSession(),
+    exec: world.exec,
+    log: (entry: any) => logs.push(entry),
+    enforced: () => true,
+    disabled: () => false,
+    ...over,
+  });
+  return { run: (command: string) => tool.execute("id", { command }), logs, world };
+}
+
+function throwOnceBashDelegate() {
+  let attempts = 0;
+  const delegate = {
+    name: "bash",
+    execute: async (): Promise<FakeResult> => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("network down");
+      return { content: [{ type: "text", text: "published" }], details: undefined };
+    },
+  };
+  return { delegate, attempts: () => attempts };
+}
+
+async function primeReplayCache(h: ReturnType<typeof bashHarness>, command: string): Promise<void> {
+  await h.run(command);
+  await h.run(command);
+}
+
+function assertReplayNotice(text: string, originalMatch: RegExp): void {
+  assert.match(text, /^\[dedup\]/);
+  assert.ok(text.startsWith(REPLAY_NOTICE));
+  assert.match(text, originalMatch);
+}
+
 test("a duplicate gh comment no-ops without executing and reports the existing URL", async () => {
   const world = ghWorld({ comments: [{ body: "Fix  confirmed, thanks!", url: COMMENT_URL }] });
   const h = bashHarness({ world });
@@ -102,36 +141,17 @@ test("a replayed duplicate returns the original result prefixed with the dedup n
   const replayed = await h.run("npm publish");
 
   assert.equal(h.calls.length, 1);
-  assert.match(resultText(replayed), new RegExp(`^\\[dedup\\]`));
-  assert.ok(resultText(replayed).startsWith(REPLAY_NOTICE));
-  assert.match(resultText(replayed), /ran#1: npm publish/);
+  assertReplayNotice(resultText(replayed), /ran#1: npm publish/);
 });
 
 test("a failed first run is not cached for replay", async () => {
-  const session = createSession();
-  let attempts = 0;
-  const delegate = {
-    name: "bash",
-    execute: async (_id: string, _params: unknown): Promise<FakeResult> => {
-      attempts += 1;
-      if (attempts === 1) throw new Error("network down");
-      return { content: [{ type: "text", text: "published" }], details: undefined };
-    },
-  };
-  const tool = withBashDedup(delegate, {
-    patterns: PATTERNS,
-    session,
-    exec: async () => ({ stdout: "", exitCode: 1 }),
-    log: () => {},
-    enforced: () => true,
-    disabled: () => false,
-  });
-  const run = () => tool.execute("id", { command: "npm publish" });
+  const flaky = throwOnceBashDelegate();
+  const { run } = bashDedupOver(flaky.delegate);
 
-  await assert.rejects(run);
-  const second = await run();
+  await assert.rejects(run("npm publish"));
+  const second = await run("npm publish");
 
-  assert.equal(attempts, 2);
+  assert.equal(flaky.attempts(), 2);
   assert.equal(resultText(second), "published");
 });
 
@@ -150,9 +170,7 @@ test("a result that cannot be cloned still returns and simply is not replayed", 
 
 test("an approved rerun executes fresh and refreshes the replay cache", async () => {
   const h = bashHarness();
-  await h.run("npm publish");
-  await h.run("npm publish");
-
+  await primeReplayCache(h, "npm publish");
   approveRerun(h.session, bashKey("npm publish"));
   await h.run("npm publish");
   const replayed = await h.run("npm publish");
@@ -182,22 +200,9 @@ test("an unparseable dedup-listed command logs a parse miss and executes", async
 
 test("rails off delegates byte-identically without checks or logging", async () => {
   const sentinel: FakeResult = { content: [{ type: "text", text: "raw" }], details: undefined };
-  const world = ghWorld();
-  const session = createSession();
-  const logs: any[] = [];
-  const tool = withBashDedup(
-    { name: "bash", execute: async (_id: string, _params: unknown) => sentinel },
-    {
-      patterns: PATTERNS,
-      session,
-      exec: world.exec,
-      log: (entry) => logs.push(entry),
-      enforced: () => true,
-      disabled: () => true,
-    },
-  );
+  const { run, logs, world } = bashDedupOver({ name: "bash", execute: async () => sentinel }, { disabled: () => true });
 
-  const result = await tool.execute("id", { command: "npm publish" });
+  const result = await run("npm publish");
 
   assert.equal(result, sentinel);
   assert.equal(world.execCalls, 0);

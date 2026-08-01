@@ -5,6 +5,12 @@ import { stripFiller, cleanProse } from "./prose-gate.ts";
 
 const assistantWith = (parts: any[]) => ({ role: "assistant", content: parts });
 
+const mixedPartMessage = () => assistantWith([
+  { type: "text", text: "Certainly. The flag defaults to off." },
+  { type: "thinking", thinking: "Great question! still thinking" },
+  { type: "toolCall", id: "1", name: "edit", arguments: {} },
+]);
+
 test("a sycophantic opener is dropped, its substance kept", () => {
   const cleaned = stripFiller("Great question! The cache lives in ~/.pi.");
 
@@ -42,11 +48,7 @@ test("a filler word inside a real word is left alone", () => {
 });
 
 test("only the text parts of an assistant message are rewritten", () => {
-  const message = assistantWith([
-    { type: "text", text: "Certainly. The flag defaults to off." },
-    { type: "thinking", thinking: "Great question! still thinking" },
-    { type: "toolCall", id: "1", name: "edit", arguments: {} },
-  ]);
+  const message = mixedPartMessage();
 
   const cleaned = cleanProse(message);
 
