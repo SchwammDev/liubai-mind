@@ -7,6 +7,22 @@ import type { AnalyzeResp } from "./contract.ts";
 
 const CLI_PATH = join(import.meta.dirname, "cli.ts");
 
+const HIGH_CC_PYTHON = [
+  "def flagged(x):",
+  "    if x == 1: return 'one'",
+  "    elif x == 2: return 'two'",
+  "    elif x == 3: return 'three'",
+  "    elif x == 4: return 'four'",
+  "    elif x == 5: return 'five'",
+  "    elif x == 6: return 'six'",
+  "    elif x == 7: return 'seven'",
+  "    elif x == 8: return 'eight'",
+  "    elif x == 9: return 'nine'",
+  "    elif x == 10: return 'ten'",
+  "    elif x == 11: return 'eleven'",
+  "    else: return 'other'",
+].join("\n");
+
 function runCli(input: string) {
   return spawnSync(process.execPath, ["--experimental-strip-types", CLI_PATH], {
     input,
@@ -25,23 +41,7 @@ test("a trivial supported-lang req exits 0 with an empty response", () => {
 });
 
 test("a complex python req surfaces a cyclomatic-complexity nudge over stdout", () => {
-  const after = [
-    "def flagged(x):",
-    "    if x == 1: return 'one'",
-    "    elif x == 2: return 'two'",
-    "    elif x == 3: return 'three'",
-    "    elif x == 4: return 'four'",
-    "    elif x == 5: return 'five'",
-    "    elif x == 6: return 'six'",
-    "    elif x == 7: return 'seven'",
-    "    elif x == 8: return 'eight'",
-    "    elif x == 9: return 'nine'",
-    "    elif x == 10: return 'ten'",
-    "    elif x == 11: return 'eleven'",
-    "    else: return 'other'",
-  ].join("\n");
-
-  const res = runCli(JSON.stringify({ path: "app/foo.py", after }));
+  const res = runCli(JSON.stringify({ path: "app/foo.py", after: HIGH_CC_PYTHON }));
 
   assert.equal(res.status, 0);
   assert.equal(res.stderr, "");

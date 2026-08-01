@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { analyze } from "./analyze.ts";
-import type { CommentFacts, Env, Extracted, FunctionFacts, Lang, RuleConfig } from "./contract.ts";
+import type { CommentFacts, Env, Extracted, FunctionFacts, Lang, Nudge, RuleConfig, RuleName } from "./contract.ts";
 import { RULE } from "./contract.ts";
 import { buildRules, DEFAULT_POLICY } from "./policy.ts";
 
@@ -49,6 +49,52 @@ async function nudgeFor(lang: Lang, extracted: Extracted): Promise<string> {
   return first.msg;
 }
 
+function firstNudge(resp: { nudges: Nudge[] }): Nudge {
+  return nthNudge(resp, 0);
+}
+
+function nthNudge(resp: { nudges: Nudge[] }, index: number): Nudge {
+  const n = resp.nudges[index];
+  if (n === undefined) assert.fail(`expected a nudge at index ${index}`);
+  return n;
+}
+
+function assertNudgeAt(resp: { nudges: Nudge[] }, index: number, expected: { line: number; msgMatch: RegExp }): void {
+  const n = nthNudge(resp, index);
+  assert.equal(n.line, expected.line);
+  assert.match(n.msg, expected.msgMatch);
+}
+
+function assertNudge(
+  n: Nudge,
+  expected: { rule: RuleName; severity: Nudge["severity"]; line: number; msgMatches: RegExp[] },
+): void {
+  assert.equal(n.rule, expected.rule);
+  assert.equal(n.severity, expected.severity);
+  assert.equal(n.line, expected.line);
+  for (const pattern of expected.msgMatches) assert.match(n.msg, pattern);
+}
+
+function assertSingleError(
+  resp: { nudges: Nudge[]; errors: { source: string; msg: string }[] },
+  source: string,
+  msgMatch: RegExp,
+): void {
+  assert.deepEqual(resp.nudges, []);
+  assert.equal(resp.errors.length, 1);
+  const err = resp.errors[0];
+  if (err === undefined) assert.fail("expected an error");
+  assert.equal(err.source, source);
+  assert.match(err.msg, msgMatch);
+}
+
+function assertSnippetTruncatedTo80(msg: string, fullText: string): void {
+  assert.ok(msg.includes("…"), "msg must contain ellipsis");
+  const snippet = msg.slice(msg.indexOf('"') + 1, msg.indexOf("…"));
+  assert.equal(snippet.length, 80, "snippet before ellipsis must be exactly 80 chars");
+  assert.equal(snippet, fullText.trimStart().slice(0, 80));
+}
+
 test("buildRules emits the cc rule only for langs in its enabled set", () => {
   const py = buildRules(DEFAULT_POLICY, "python");
   const ts = buildRules(DEFAULT_POLICY, "typescript");
@@ -79,13 +125,7 @@ test("the cc rule nudges a touched function over the lang threshold", async () =
   const resp = await analyze({ path: "app/foo.py", after: "def f():\n  pass" }, env, rules);
 
   assert.equal(resp.nudges.length, 1);
-  const n = resp.nudges[0];
-  if (n === undefined) { assert.fail("expected a nudge"); return; }
-  assert.equal(n.rule, RULE.cc);
-  assert.equal(n.severity, "nudge");
-  assert.equal(n.line, 4);
-  assert.match(n.msg, /f \(CC=9\)/);
-  assert.match(n.msg, /Threshold is 8/);
+  assertNudge(firstNudge(resp), { rule: RULE.cc, severity: "nudge", line: 4, msgMatches: [/f \(CC=9\)/, /Threshold is 8/] });
 });
 
 test("the cc rule stays silent when the touched function is under threshold", async () => {
@@ -121,20 +161,12 @@ test("the cc rule nudges a newly added complex function", async () => {
 });
 
 test("a threshold rule enabled for a lang it has no threshold for reports an error", async () => {
-  const policy = {
-    ...DEFAULT_POLICY,
-    [RULE.cc]: { enabled: ["python"] as Lang[], severity: "nudge" as const },
-  };
+  const policy = { ...DEFAULT_POLICY, [RULE.cc]: { enabled: ["python"] as Lang[], severity: "nudge" as const } };
   const env = envWith({ functions: [func({ cyclomaticComplexity: 99, body: "changed" })], comments: [] });
 
   const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(policy, "python"));
 
-  assert.deepEqual(resp.nudges, []);
-  assert.equal(resp.errors.length, 1);
-  const err = resp.errors[0];
-  if (err === undefined) { assert.fail("expected an error"); return; }
-  assert.equal(err.source, RULE.cc);
-  assert.match(err.msg, /no threshold/);
+  assertSingleError(resp, RULE.cc, /no threshold/);
 });
 
 test("the cc nudge names the language's own dispatch idiom", async () => {
@@ -145,15 +177,18 @@ test("the cc nudge names the language's own dispatch idiom", async () => {
   assert.match(await nudgeFor("cpp", extracted), /dispatch tables/);
 });
 
-test("the cc threshold is 8 for all langs", async () => {
-  const at = envWith({ functions: [func({ cyclomaticComplexity: 8, body: "changed" })], comments: [] });
-  const over = envWith({ functions: [func({ cyclomaticComplexity: 9, body: "changed" })], comments: [] });
+async function assertCcThresholdIsEight(lang: Lang): Promise<void> {
+  const req = { path: PATH_BY_LANG[lang], after: "x" };
+  const rules = buildRules(DEFAULT_POLICY, lang);
+  const at = envWith(functionsOnly([func({ cyclomaticComplexity: 8, body: "changed" })]));
+  const over = envWith(functionsOnly([func({ cyclomaticComplexity: 9, body: "changed" })]));
+  assert.equal((await analyze(req, at, rules)).nudges.length, 0, `${lang} CC=8 should be silent`);
+  assert.equal((await analyze(req, over, rules)).nudges.length, 1, `${lang} CC=9 should nudge`);
+}
 
+test("the cc threshold is 8 for all langs", async () => {
   for (const lang of ["python", "typescript", "cpp"] as const) {
-    const silent = await analyze({ path: `app/foo.${lang === "cpp" ? "cpp" : lang === "typescript" ? "ts" : "py"}`, after: "x" }, at, buildRules(DEFAULT_POLICY, lang));
-    const flagged = await analyze({ path: `app/foo.${lang === "cpp" ? "cpp" : lang === "typescript" ? "ts" : "py"}`, after: "x" }, over, buildRules(DEFAULT_POLICY, lang));
-    assert.equal(silent.nudges.length, 0, `${lang} CC=8 should be silent`);
-    assert.equal(flagged.nudges.length, 1, `${lang} CC=9 should nudge`);
+    await assertCcThresholdIsEight(lang);
   }
 });
 
@@ -163,13 +198,7 @@ test("the test-body rule nudges a touched test function over the lang threshold"
   const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
 
   assert.equal(resp.nudges.length, 1);
-  const n = resp.nudges[0];
-  if (n === undefined) { assert.fail("expected a nudge"); return; }
-  assert.equal(n.rule, RULE.testBody);
-  assert.equal(n.severity, "nudge");
-  assert.equal(n.line, 4);
-  assert.match(n.msg, /f \(9L\)/);
-  assert.match(n.msg, /Threshold is 8/);
+  assertNudge(firstNudge(resp), { rule: RULE.testBody, severity: "nudge", line: 4, msgMatches: [/f \(9L\)/, /Threshold is 8/] });
 });
 
 test("the test-body rule stays silent at the threshold", async () => {
@@ -197,14 +226,8 @@ test("the test-body rule ignores a non-test function", async () => {
 });
 
 test("the test-body rule uses the per-lang threshold", async () => {
-  const policy = {
-    ...DEFAULT_POLICY,
-    [RULE.testBody]: {
-      ...(DEFAULT_POLICY[RULE.testBody] as RuleConfig),
-      threshold: { python: 5, typescript: 12, cpp: 8 },
-    },
-  };
-  const env = envWith({ functions: [func({ isTest: true, body: "changed", bodyLineCount: 9 })], comments: [] });
+  const policy = { ...DEFAULT_POLICY, [RULE.testBody]: { ...(DEFAULT_POLICY[RULE.testBody] as RuleConfig), threshold: { python: 5, typescript: 12, cpp: 8 } } };
+  const env = envWith(functionsOnly([func({ isTest: true, body: "changed", bodyLineCount: 9 })]));
 
   const py = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(policy, "python"));
   const ts = await analyze({ path: "app/foo.ts", after: "x" }, env, buildRules(policy, "typescript"));
@@ -231,51 +254,36 @@ test("the missing-helper hint names the language's own helper convention", async
 
 test("the helper lookup is asked for the language under analysis", async () => {
   const asked: Lang[] = [];
-  const env = envWith(
-    { functions: [func({ isTest: true, body: "changed", bodyLineCount: 9 })], comments: [] },
-    (lang) => { asked.push(lang); return []; },
-  );
+  const env = envWith(functionsOnly([func({ isTest: true, body: "changed", bodyLineCount: 9 })]), (lang) => { asked.push(lang); return []; });
 
   await analyze({ path: "app/foo.ts", after: "x" }, env, buildRules(DEFAULT_POLICY, "typescript"));
 
   assert.deepEqual(asked, ["typescript"]);
 });
 
+const TWO_LONG_TESTS: FunctionFacts[] = [
+  func({ name: "test_a", isTest: true, body: "changed", bodyLineCount: 9, startLine: 4 }),
+  func({ name: "test_b", isTest: true, body: "changed", bodyLineCount: 10, startLine: 20 }),
+];
+
 test("the test-body rule appends helper hint only on the first nudge", async () => {
-  const env = envWith(
-    {
-      functions: [
-        func({ name: "test_a", isTest: true, body: "changed", bodyLineCount: 9, startLine: 4 }),
-        func({ name: "test_b", isTest: true, body: "changed", bodyLineCount: 10, startLine: 20 }),
-      ],
-      comments: [],
-    },
-    () => ["assert_eq", "assert_throws"],
-  );
+  const env = envWith(functionsOnly(TWO_LONG_TESTS), () => ["assert_eq", "assert_throws"]);
 
   const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
 
   assert.equal(resp.nudges.length, 2);
-  const first = resp.nudges[0];
-  const second = resp.nudges[1];
-  if (first === undefined || second === undefined) { assert.fail("expected two nudges"); return; }
-  assert.match(first.msg, /Existing helpers: assert_eq, assert_throws\./);
-  assert.doesNotMatch(second.msg, /Existing helpers/);
-  assert.doesNotMatch(second.msg, /No assert_\*\/_\* helpers/);
+  assert.match(nthNudge(resp, 0).msg, /Existing helpers: assert_eq, assert_throws\./);
+  assert.doesNotMatch(nthNudge(resp, 1).msg, /Existing helpers/);
+  assert.doesNotMatch(nthNudge(resp, 1).msg, /No assert_\*\/_\* helpers/);
 });
 
 test("the test-body rule suggests writing a helper when none exist", async () => {
-  const env = envWith(
-    { functions: [func({ name: "f", isTest: true, body: "changed", bodyLineCount: 9, startLine: 4 })], comments: [] },
-    () => [],
-  );
+  const env = envWith(functionsOnly([func({ name: "f", isTest: true, body: "changed", bodyLineCount: 9, startLine: 4 })]), () => []);
 
   const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
 
   assert.equal(resp.nudges.length, 1);
-  const n = resp.nudges[0];
-  if (n === undefined) { assert.fail("expected a nudge"); return; }
-  assert.match(n.msg, /No assert_\*\/_\* helpers in tests\/ yet — write one\./);
+  assert.match(firstNudge(resp).msg, /No assert_\*\/_\* helpers in tests\/ yet — write one\./);
 });
 
 function functionsOnly(fns: FunctionFacts[]): Extracted {
@@ -297,18 +305,12 @@ function commentsOnly(comments: CommentFacts[]): Extracted {
 }
 
 test("discourage-comments nudges an added line comment in python", async () => {
-  const cmnt = comment({ line: 7, text: "# fixme", kind: "line", added: true });
-  const env = envWith(commentsOnly([cmnt]));
+  const env = envWith(commentsOnly([comment({ line: 7, text: "# fixme", kind: "line", added: true })]));
 
   const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
 
   assert.equal(resp.nudges.length, 1);
-  const n = resp.nudges[0];
-  if (n === undefined) { assert.fail("expected a nudge"); return; }
-  assert.equal(n.rule, RULE.discourageComments);
-  assert.equal(n.severity, "block");
-  assert.equal(n.line, 7);
-  assert.match(n.msg, /comments are noise/);
+  assertNudge(firstNudge(resp), { rule: RULE.discourageComments, severity: "block", line: 7, msgMatches: [/comments are noise/] });
 });
 
 test("discourage-comments nudges an added doc comment in python (docs not exempt)", async () => {
@@ -360,15 +362,12 @@ test("discourage-comments exempts doc comments in cpp headers (*.hpp)", async ()
 });
 
 test("discourage-comments nudges line comments in cpp headers (exemption kinds=[doc] only)", async () => {
-  const cmnt = comment({ kind: "line", line: 3 });
-  const env = envWith(commentsOnly([cmnt]));
+  const env = envWith(commentsOnly([comment({ kind: "line", line: 3 })]));
 
   const resp = await analyze({ path: "inc/foo.h", after: "x" }, env, buildRules(DEFAULT_POLICY, "cpp"));
 
   assert.equal(resp.nudges.length, 1);
-  const n = resp.nudges[0];
-  if (n === undefined) { assert.fail("expected a nudge"); return; }
-  assert.equal(n.line, 3);
+  assert.equal(firstNudge(resp).line, 3);
 });
 
 test("discourage-comments nudges doc comments in cpp bodies (*.h patterns do not match .cpp)", async () => {
@@ -401,30 +400,16 @@ test("discourage-comments truncates long comment snippets to 80 chars plus ellip
 
   const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
 
-  assert.equal(resp.nudges.length, 1);
-  const n = resp.nudges[0];
-  if (n === undefined) { assert.fail("expected a nudge"); return; }
-  assert.ok(n.msg.includes("\u2026"), "msg must contain ellipsis");
-  const openQuote = n.msg.indexOf('"');
-  const ellipsis = n.msg.indexOf("\u2026");
-  const snippet = n.msg.slice(openQuote + 1, ellipsis);
-  assert.equal(snippet.length, 80, "snippet before ellipsis must be exactly 80 chars");
-  assert.equal(snippet, longText.trimStart().slice(0, 80));
+  assertSnippetTruncatedTo80(firstNudge(resp).msg, longText);
 });
 
 test("type-annotation fires when the signature changed and annotations are missing", async () => {
-  const env = envWith(functionsOnly([func({ name: "f", startLine: 5, signature: "changed", missingAnnotations: ["x", "-> return"] })])), rules = buildRules(DEFAULT_POLICY, "python");
+  const env = envWith(functionsOnly([func({ name: "f", startLine: 5, signature: "changed", missingAnnotations: ["x", "-> return"] })]));
 
-  const resp = await analyze({ path: "app/foo.py", after: "x" }, env, rules);
+  const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
 
   assert.equal(resp.nudges.length, 1);
-  const n = resp.nudges[0];
-  if (n === undefined) { assert.fail("expected a nudge"); return; }
-  assert.equal(n.rule, RULE.typeAnnotation);
-  assert.equal(n.severity, "nudge");
-  assert.equal(n.line, 5);
-  assert.match(n.msg, /f: missing x, -> return\./);
-  assert.match(n.msg, /Add hints for every parameter and the return type\./);
+  assertNudge(firstNudge(resp), { rule: RULE.typeAnnotation, severity: "nudge", line: 5, msgMatches: [/f: missing x, -> return\./, /Add hints for every parameter and the return type\./] });
 });
 
 test("type-annotation fires for a newly added unannotated function", async () => {
@@ -451,21 +436,19 @@ test("type-annotation stays silent for a body-only edit", async () => {
   assert.deepEqual(resp.nudges, []);
 });
 
-test("type-annotation emits one nudge per function", async () => {
-  const env = envWith(functionsOnly([
-    func({ name: "foo", startLine: 3, signature: "changed", missingAnnotations: ["a"] }),
-    func({ name: "bar", startLine: 9, signature: "changed", missingAnnotations: ["b"] }),
-  ])), rules = buildRules(DEFAULT_POLICY, "python");
+const TWO_UNANNOTATED: FunctionFacts[] = [
+  func({ name: "foo", startLine: 3, signature: "changed", missingAnnotations: ["a"] }),
+  func({ name: "bar", startLine: 9, signature: "changed", missingAnnotations: ["b"] }),
+];
 
-  const resp = await analyze({ path: "app/foo.py", after: "x" }, env, rules);
+test("type-annotation emits one nudge per function", async () => {
+  const env = envWith(functionsOnly(TWO_UNANNOTATED));
+
+  const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
 
   assert.equal(resp.nudges.length, 2);
-  const [n1, n2] = resp.nudges;
-  if (n1 === undefined || n2 === undefined) { assert.fail("expected two nudges"); return; }
-  assert.equal(n1.line, 3);
-  assert.match(n1.msg, /foo: missing a\./);
-  assert.equal(n2.line, 9);
-  assert.match(n2.msg, /bar: missing b\./);
+  assertNudgeAt(resp, 0, { line: 3, msgMatch: /foo: missing a\./ });
+  assertNudgeAt(resp, 1, { line: 9, msgMatch: /bar: missing b\./ });
 });
 
 test("type-annotation stays silent for typescript", async () => {
