@@ -95,6 +95,32 @@ async function runUntilFirstReplay(h: ReturnType<typeof harness>) {
   await h.run("npm publish");
 }
 
+async function withRailsOff(action: () => Promise<void>): Promise<void> {
+  process.env.LIUBAI_RAILS_OFF = "1";
+  try {
+    await action();
+  } finally {
+    delete process.env.LIUBAI_RAILS_OFF;
+  }
+}
+
+async function closeIssue(h: ReturnType<typeof harness>) {
+  await h.hook("gh issue close 5", h.confirmingCtx(true));
+  return h.run("gh issue close 5");
+}
+
+async function closeIssueThenReissue(h: ReturnType<typeof harness>) {
+  await closeIssue(h);
+  return closeIssue(h);
+}
+
+function assertDelegatedTwice(h: ReturnType<typeof harness>, first: any, second: any): void {
+  assert.equal(h.calls.length, 2);
+  assert.equal(first.content[0].text, "ran#1");
+  assert.equal(second.content[0].text, "ran#2");
+  assert.equal(h.logs.length, 0);
+}
+
 test("a re-issue after a no-op notice escalates to a confirm and a decline blocks", async () => {
   const h = harness();
   await runUntilFirstReplay(h);
@@ -130,10 +156,7 @@ test("a confirmed re-issue executes fresh instead of replaying", async () => {
 test("a duplicate of an ask-gated command is re-confirmed and still no-ops", async () => {
   const h = harness();
 
-  await h.hook("gh issue close 5", h.confirmingCtx(true));
-  await h.run("gh issue close 5");
-  await h.hook("gh issue close 5", h.confirmingCtx(true));
-  const second = await h.run("gh issue close 5");
+  const second = await closeIssueThenReissue(h);
 
   assert.equal(h.confirms.length, 2);
   assert.equal(h.calls.length, 1);
@@ -143,11 +166,9 @@ test("a duplicate of an ask-gated command is re-confirmed and still no-ops", asy
 test("an ask-gated command whose effect was undone externally is confirmed again before running", async () => {
   const h = harness();
 
-  await h.hook("gh issue close 5", h.confirmingCtx(true));
-  await h.run("gh issue close 5");
+  await closeIssue(h);
   h.world.state = "OPEN";
-  await h.hook("gh issue close 5", h.confirmingCtx(true));
-  await h.run("gh issue close 5");
+  await closeIssue(h);
 
   assert.equal(h.confirms.length, 2);
   assert.equal(h.calls.length, 2);
@@ -173,17 +194,14 @@ test("an edit-named tool call carrying a foreign payload is passed through untou
 });
 
 test("the duplicate-id detector stays active under LIUBAI_RAILS_OFF", async () => {
-  process.env.LIUBAI_RAILS_OFF = "1";
-  try {
+  await withRailsOff(async () => {
     const h = harness();
 
     await h.fire({ toolName: "spawn", toolCallId: "sp-2", input: {} }, h.headlessCtx);
     await h.fire({ toolName: "spawn", toolCallId: "sp-2", input: {} }, h.headlessCtx);
 
     assert.ok(h.logs.some((entry) => entry.kind === "duplicate-id" && entry.action === "observed"));
-  } finally {
-    delete process.env.LIUBAI_RAILS_OFF;
-  }
+  });
 });
 
 const duplicatedAssistantMessage = () => ({
@@ -205,16 +223,13 @@ test("a finalized assistant message loses duplicated tool call blocks before exe
 });
 
 test("message dedup stays active under LIUBAI_RAILS_OFF", async () => {
-  process.env.LIUBAI_RAILS_OFF = "1";
-  try {
+  await withRailsOff(async () => {
     const h = harness();
 
     const message = await h.finalizeMessage(duplicatedAssistantMessage());
 
     assert.equal(message.content.filter((part: any) => part.type === "toolCall").length, 1);
-  } finally {
-    delete process.env.LIUBAI_RAILS_OFF;
-  }
+  });
 });
 
 test("a user message passes message_end untouched", async () => {
@@ -226,17 +241,11 @@ test("a user message passes message_end untouched", async () => {
 });
 
 test("LIUBAI_RAILS_OFF delegates the overridden bash tool byte-identically", async () => {
-  process.env.LIUBAI_RAILS_OFF = "1";
-  try {
+  await withRailsOff(async () => {
     const h = harness();
     const first = await h.run("npm publish");
     const second = await h.run("npm publish");
 
-    assert.equal(h.calls.length, 2);
-    assert.equal(first.content[0].text, "ran#1");
-    assert.equal(second.content[0].text, "ran#2");
-    assert.equal(h.logs.length, 0);
-  } finally {
-    delete process.env.LIUBAI_RAILS_OFF;
-  }
+    assertDelegatedTwice(h, first, second);
+  });
 });

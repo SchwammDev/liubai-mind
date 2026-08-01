@@ -37,6 +37,13 @@ function gitExec(shaByRev: Record<string, string>): Exec {
 
 const failingExec: Exec = async () => ({ stdout: "", exitCode: 1 });
 
+function nooppedSession() {
+  const session = createSession();
+  const key = bashKey("npm publish");
+  recordNoop(session, key);
+  return { session, key };
+}
+
 test("bashKey is equal for commands differing only by surrounding whitespace", () => {
   assert.equal(bashKey("  gh issue comment 8  "), bashKey("gh issue comment 8"));
 });
@@ -203,18 +210,13 @@ test("an empty argv is reported as a failed exec instead of being spawned", asyn
 });
 
 test("a key noopped once counts as a repeated duplicate", () => {
-  const session = createSession();
-  const key = bashKey("npm publish");
-
-  recordNoop(session, key);
+  const { session, key } = nooppedSession();
 
   assert.equal(repeatedDuplicate(session, key), true);
 });
 
 test("an approval is consumed exactly once and clears the duplicate counter", () => {
-  const session = createSession();
-  const key = bashKey("npm publish");
-  recordNoop(session, key);
+  const { session, key } = nooppedSession();
   approveRerun(session, key);
 
   assert.equal(repeatedDuplicate(session, key), false);

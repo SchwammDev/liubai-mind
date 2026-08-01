@@ -88,31 +88,31 @@ async function applyWrite(callId: string, path: string, content: string): Promis
   return railsSession().write(callId, path, content);
 }
 
-test("a newly introduced comment is rejected before the edit runs", async () => {
+function sessionWithFile(path: string, content: string) {
   const session = railsSession();
-  session.files.set(MODULE_FILE, "x = 1");
+  session.files.set(path, content);
+  return session;
+}
+
+function assertBlockedFor(outcome: ToolOutcome, ...reasonPatterns: RegExp[]): void {
+  assert.equal(outcome.blocked, true);
+  for (const pattern of reasonPatterns) assert.match(outcome.reason ?? "", pattern);
+}
+
+test("a newly introduced comment is rejected before the edit runs", async () => {
+  const session = sessionWithFile(MODULE_FILE, "x = 1");
 
   const outcome = await session.apply("comment", "edit", editInput(MODULE_FILE, "x = 1", "x = 1  # noise"), MODULE_FILE);
 
-  assert.equal(outcome.blocked, true);
-  assert.match(outcome.reason ?? "", /discourage-comments/);
-  assert.match(outcome.reason ?? "", /docstrings are both noise/);
-  assert.match(outcome.reason ?? "", /Tooling directives are allowed/);
+  assertBlockedFor(outcome, /discourage-comments/, /docstrings are both noise/, /Tooling directives are allowed/);
 });
 
 test("a comment added through the legacy flat edit shape is still rejected", async () => {
-  const session = railsSession();
-  session.files.set(MODULE_FILE, "x = 1");
+  const session = sessionWithFile(MODULE_FILE, "x = 1");
 
-  const outcome = await session.apply(
-    "legacy",
-    "edit",
-    { path: MODULE_FILE, oldText: "x = 1", newText: "x = 1  # noise" },
-    MODULE_FILE,
-  );
+  const outcome = await session.apply("legacy", "edit", { path: MODULE_FILE, oldText: "x = 1", newText: "x = 1  # noise" }, MODULE_FILE);
 
-  assert.equal(outcome.blocked, true);
-  assert.match(outcome.reason ?? "", /discourage-comments/);
+  assertBlockedFor(outcome, /discourage-comments/);
 });
 
 test("a long test's nudge rides along on the tool result", async () => {
@@ -173,10 +173,7 @@ test("an extractor that cannot run is logged instead of silently passing the wri
   const outcome = await withoutPython(() => session.write("unrunnable", MODULE_FILE, "x = 1  # noise\n"));
 
   assert.equal(outcome.blocked, false);
-  assert.deepEqual(
-    railFailures(session.logs).map((entry) => entry.key),
-    ["extract:python"],
-  );
+  assert.deepEqual(railFailures(session.logs).map((entry) => entry.key), ["extract:python"]);
 });
 
 test("a broken extractor is reported to the operator once, however many calls fail", async () => {
@@ -218,12 +215,9 @@ test("LIUBAI_RAILS_OFF leaves a finalized assistant message untouched", async ()
 });
 
 test("LIUBAI_RAILS_OFF lets a would-be-blocked edit through untouched", async () => {
-  const session = railsSession();
-  session.files.set(MODULE_FILE, "x = 1");
+  const session = sessionWithFile(MODULE_FILE, "x = 1");
 
-  const outcome = await withRailsDisabled(() =>
-    session.apply("disabled", "edit", editInput(MODULE_FILE, "x = 1", "x = 1  # noise"), MODULE_FILE),
-  );
+  const outcome = await withRailsDisabled(() => session.apply("disabled", "edit", editInput(MODULE_FILE, "x = 1", "x = 1  # noise"), MODULE_FILE));
 
   assert.equal(outcome.blocked, false);
   assert.equal(outcome.text, TOOL_RESULT);

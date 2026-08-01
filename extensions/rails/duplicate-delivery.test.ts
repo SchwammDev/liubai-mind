@@ -10,25 +10,27 @@ const toolCall = (id: string, marker: string): MessagePart => ({
   arguments: { marker },
 });
 
+const MESSAGE_WITH_DUPLICATE_IDS: MessageLike = {
+  role: "assistant",
+  content: [
+    toolCall("call-A", "early"),
+    toolCall("call-B", "early"),
+    { type: "thinking", thinking: "t" },
+    toolCall("call-A", "late"),
+    toolCall("call-B", "late"),
+  ],
+};
+
+function partMarkers(message: MessageLike | null): Array<[string, unknown]> | undefined {
+  return message?.content.map((part: any) => [part.type, part.arguments?.marker]);
+}
+
 test("a message carrying the same tool call id twice keeps only the last copy", () => {
   const logs: any[] = [];
-  const message: MessageLike = {
-    role: "assistant",
-    content: [
-      toolCall("call-A", "early"),
-      toolCall("call-B", "early"),
-      { type: "thinking", thinking: "t" },
-      toolCall("call-A", "late"),
-      toolCall("call-B", "late"),
-    ],
-  };
 
-  const deduped = withoutDuplicateToolCalls(message, (entry) => logs.push(entry));
+  const deduped = withoutDuplicateToolCalls(MESSAGE_WITH_DUPLICATE_IDS, (entry) => logs.push(entry));
 
-  assert.deepEqual(
-    deduped?.content.map((part: any) => [part.type, part.arguments?.marker]),
-    [["thinking", undefined], ["toolCall", "late"], ["toolCall", "late"]],
-  );
+  assert.deepEqual(partMarkers(deduped), [["thinking", undefined], ["toolCall", "late"], ["toolCall", "late"]]);
   assert.equal(logs.filter((entry) => entry.kind === "duplicate-id").length, 2);
 });
 
