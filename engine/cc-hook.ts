@@ -1,7 +1,3 @@
-// Claude Code PreToolUse adapter. stdin → analyze → block (exit 2 + stderr) or
-// nudge (exit 0 + stdout JSON) or pass (exit 0 silent). Fails open on every
-// error path: a guardrail must never brick edits on a malformed payload.
-
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -27,8 +23,6 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-// Maps a CC PreToolUse payload to a FileChange, or null for anything the rails
-// don't cover (non-edit tools, missing fields, non-string values).
 export function mapChange(payload: CcPayload): FileChange | null {
   const tool = asString(payload.tool_name);
   const input = isObject(payload.tool_input) ? payload.tool_input : undefined;

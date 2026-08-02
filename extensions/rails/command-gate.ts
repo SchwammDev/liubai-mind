@@ -1,6 +1,3 @@
-// User-configurable gate over bash commands. Rules are regex strings matched
-// against the command line; see command-rules.example.json for the file format.
-
 export type CommandRules = { deny: string[]; ask: string[]; allow: string[]; dedup: string[] };
 export type Decision = "deny" | "ask" | "allow";
 
