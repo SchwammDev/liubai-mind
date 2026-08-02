@@ -33,6 +33,9 @@ const CC_LOGICAL_OPERATORS = new Set([
   "&&",
   "||",
   "??",
+  "&&=",
+  "||=",
+  "??=",
 ]);
 
 function operatorOf(node: TSNode): TSNode | null {
@@ -42,7 +45,7 @@ function operatorOf(node: TSNode): TSNode | null {
 function isDecisionNode(node: TSNode): boolean {
   if (CC_DECISION_NODE_TYPES.has(node.type)) return true;
   if (node.type === "ternary_expression") return true;
-  if (node.type === "binary_expression") {
+  if (node.type === "binary_expression" || node.type === "augmented_assignment_expression") {
     const op = operatorOf(node);
     if (op !== null && CC_LOGICAL_OPERATORS.has(op.text)) return true;
   }

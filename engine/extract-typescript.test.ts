@@ -268,6 +268,21 @@ test("nullish coalescing adds one to cyclomatic complexity", async () => {
   assert.equal(await ccOf(src, "f"), 2);
 });
 
+test("logical and assignment adds one to cyclomatic complexity", async () => {
+  const src = "function f() {\n  x &&= y;\n}\n";
+  assert.equal(await ccOf(src, "f"), 2);
+});
+
+test("logical or assignment adds one to cyclomatic complexity", async () => {
+  const src = "function f() {\n  x ||= y;\n}\n";
+  assert.equal(await ccOf(src, "f"), 2);
+});
+
+test("nullish coalescing assignment adds one to cyclomatic complexity", async () => {
+  const src = "function f() {\n  x ??= y;\n}\n";
+  assert.equal(await ccOf(src, "f"), 2);
+});
+
 test("a nullish coalescing chain adds one per occurrence", async () => {
   const src = "function f(a, b, c) {\n  return a ?? b ?? c;\n}\n";
   assert.equal(await ccOf(src, "f"), 3);
