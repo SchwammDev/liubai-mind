@@ -5,6 +5,8 @@ import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+import { mapChange } from "./cc-hook.ts";
+
 const HOOK_PATH = join(import.meta.dirname, "cc-hook.ts");
 
 const HIGH_CC_PYTHON = [
@@ -119,4 +121,58 @@ test("malformed json passes silently (fail open)", () => {
   const res = runHook("{ not json");
 
   assertPassedSilently(res);
+});
+
+function mapTool(toolName: unknown, toolInput: unknown): ReturnType<typeof mapChange> {
+  return mapChange({ tool_name: toolName, tool_input: toolInput });
+}
+
+test("an edit tool payload with a non-object tool input is ignored", () => {
+  assert.equal(mapTool("Write", null), null);
+});
+
+test("a Write payload maps to a write change carrying its path and content", () => {
+  const change = mapTool("Write", { file_path: "a.py", content: "x = 1" });
+
+  assert.deepEqual(change, { kind: "write", path: "a.py", content: "x = 1" });
+});
+
+test("a Write payload missing its path or its content is ignored", () => {
+  assert.equal(mapTool("Write", { file_path: "a.py" }), null);
+  assert.equal(mapTool("Write", { content: "x = 1" }), null);
+});
+
+test("an Edit payload maps to a single-edit change", () => {
+  const change = mapTool("Edit", { file_path: "a.py", old_string: "a", new_string: "b" });
+
+  assert.deepEqual(change, { kind: "edit", path: "a.py", edits: [{ oldText: "a", newText: "b" }] });
+});
+
+test("an Edit payload missing its path, old string, or new string is ignored", () => {
+  assert.equal(mapTool("Edit", { old_string: "a", new_string: "b" }), null);
+  assert.equal(mapTool("Edit", { file_path: "a.py", new_string: "b" }), null);
+  assert.equal(mapTool("Edit", { file_path: "a.py", old_string: "a" }), null);
+});
+
+test("a MultiEdit payload maps to an edit change preserving every edit in order", () => {
+  const edits = [{ old_string: "a", new_string: "b" }, { old_string: "c", new_string: "d" }];
+
+  const change = mapTool("MultiEdit", { file_path: "a.py", edits });
+
+  assert.deepEqual(change, { kind: "edit", path: "a.py", edits: [{ oldText: "a", newText: "b" }, { oldText: "c", newText: "d" }] });
+});
+
+test("a MultiEdit payload missing its path or with a non-array edits field is ignored", () => {
+  assert.equal(mapTool("MultiEdit", { edits: [] }), null);
+  assert.equal(mapTool("MultiEdit", { file_path: "a.py", edits: {} }), null);
+});
+
+test("a MultiEdit payload with a non-object or incomplete edit entry is ignored", () => {
+  assert.equal(mapTool("MultiEdit", { file_path: "a.py", edits: [null] }), null);
+  assert.equal(mapTool("MultiEdit", { file_path: "a.py", edits: [{ new_string: "b" }] }), null);
+  assert.equal(mapTool("MultiEdit", { file_path: "a.py", edits: [{ old_string: "a" }] }), null);
+});
+
+test("an unrecognized tool is ignored", () => {
+  assert.equal(mapTool("Bash", { command: "ls" }), null);
 });

@@ -140,6 +140,15 @@ test("a load error is surfaced as a warning carrying the message", () => {
   assert.match(outcome.message, /not found/);
 });
 
+test("a non-Error thrown by the loader is still surfaced as a warning carrying its string form", () => {
+  const deps = depsWith("c", "p", { loadProfilesRaw: () => { throw "boom"; } });
+
+  const outcome = runProfileCommand("default", catalog, deps);
+
+  assert.equal(outcome.kind, "warning");
+  assert.equal(outcome.message, "boom");
+});
+
 test("a config with no profiles is refused for any command", () => {
   const { configPath, profilePath } = setup(JSON.stringify({ profiles: {} }));
   const deps = depsWith(configPath, profilePath);

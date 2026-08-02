@@ -7,7 +7,7 @@ import { analyze } from "./analyze.ts";
 import type { Extracted, FunctionFacts } from "./contract.ts";
 import { RULE } from "./contract.ts";
 import { buildRules, DEFAULT_POLICY } from "./policy.ts";
-import { pythonExtractor } from "./extract-python.ts";
+import { pythonExtractor, validateFunction, validateComment } from "./extract-python.ts";
 
 const BRANCHING_THEN_FLAT =
   "def f(x):\n    if x:\n        return 1\n    elif x:\n        return 2\n    elif x:\n        return 3\ndef g(x):\n    return 1\n";
@@ -165,4 +165,43 @@ test("missing_lizard_hard_fails_with_install_message", async () => {
   assert.equal(res.status, 2);
   assert.ok(res.stderr.includes("lizard not installed"));
   assert.ok(res.stderr.includes("uv pip install lizard"));
+});
+
+const WELL_FORMED_FUNCTION = {
+  name: "f", startLine: 1, cyclomaticComplexity: 1, missingAnnotations: [],
+  isTest: false, bodyLineCount: 1, signature: "new", body: "new",
+};
+
+const WELL_FORMED_COMMENT = { line: 1, text: "# x", kind: "line", added: true };
+
+function rejectsFunctionWith(override: Record<string, unknown>): void {
+  assert.throws(() => validateFunction({ ...WELL_FORMED_FUNCTION, ...override }));
+}
+
+function rejectsCommentWith(override: Record<string, unknown>): void {
+  assert.throws(() => validateComment({ ...WELL_FORMED_COMMENT, ...override }));
+}
+
+test("validateFunction rejects a non-object or a mistyped scalar field", () => {
+  assert.throws(() => validateFunction(null));
+  rejectsFunctionWith({ name: 1 });
+  rejectsFunctionWith({ startLine: "1" });
+  rejectsFunctionWith({ cyclomaticComplexity: "1" });
+  rejectsFunctionWith({ isTest: "no" });
+  rejectsFunctionWith({ bodyLineCount: "1" });
+});
+
+test("validateFunction rejects a malformed annotations list or change field", () => {
+  rejectsFunctionWith({ missingAnnotations: "x" });
+  rejectsFunctionWith({ missingAnnotations: [1] });
+  rejectsFunctionWith({ signature: "maybe" });
+  rejectsFunctionWith({ body: "maybe" });
+});
+
+test("validateComment rejects a non-object or a mistyped field", () => {
+  assert.throws(() => validateComment(null));
+  rejectsCommentWith({ line: "1" });
+  rejectsCommentWith({ text: 1 });
+  rejectsCommentWith({ kind: "weird" });
+  rejectsCommentWith({ added: "yes" });
 });

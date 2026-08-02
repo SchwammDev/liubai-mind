@@ -153,6 +153,15 @@ test("a confirmed re-issue executes fresh instead of replaying", async () => {
   assert.equal(h.calls.length, 2);
 });
 
+test("an ask-gated command with no UI is blocked as unconfirmable", async () => {
+  const h = harness();
+
+  const verdict = await h.hook("gh issue close 5", h.headlessCtx);
+
+  assert.equal(verdict?.block, true);
+  assert.match(verdict?.reason ?? "", /no UI available/);
+});
+
 test("a duplicate of an ask-gated command is re-confirmed and still no-ops", async () => {
   const h = harness();
 
@@ -183,6 +192,45 @@ test("a duplicated call id reaching tool_call is logged but never blocked", asyn
   assert.equal(first, undefined);
   assert.equal(second, undefined);
   assert.ok(h.logs.some((entry) => entry.kind === "duplicate-id" && entry.action === "observed"));
+});
+
+const DUP_DOC = ["# Setup", "", "step one", "step two", "step three"].join("\n");
+const DUP_EDIT = {
+  path: "notes.md",
+  edits: [{ oldText: "# Setup", newText: "# Setup\nstep one\nstep two\nstep three" }],
+};
+
+function editEscalationHarness(file: string) {
+  const { pi, handlers, tools } = fakePi();
+  const logs: any[] = [];
+  const editDelegate = {
+    name: "edit",
+    execute: async () => ({ content: [{ type: "text", text: "edited" }], details: undefined }),
+  };
+  register(pi, {
+    editTool: editDelegate as any,
+    readTargetFile: async () => file,
+    exec: async () => ({ stdout: "", exitCode: 1 }),
+    logDedup: (entry: any) => logs.push(entry),
+  });
+  const fireEdit = async (ctx: any) => {
+    for (const handler of handlers.get("tool_call") ?? []) {
+      const outcome = await handler({ toolName: "edit", toolCallId: "e", input: DUP_EDIT }, ctx);
+      if (outcome) return outcome;
+    }
+    return undefined;
+  };
+  return { editTool: tools.get("edit"), fireEdit, logs };
+}
+
+test("a re-issued duplicate edit with no UI is blocked before it runs again", async () => {
+  const h = editEscalationHarness(DUP_DOC);
+
+  await h.editTool.execute("e", DUP_EDIT, undefined, undefined, undefined);
+  const verdict = await h.fireEdit({ hasUI: false });
+
+  assert.equal(verdict?.block, true);
+  assert.match(verdict?.reason ?? "", /\[dedup\]/);
 });
 
 test("an edit-named tool call carrying a foreign payload is passed through untouched", async () => {

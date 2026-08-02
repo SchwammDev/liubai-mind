@@ -7,6 +7,7 @@ import {
   approveRerun,
   bashKey,
   createSession,
+  editKey,
   REPLAY_NOTICE,
   type BashResult,
   type Exec,
@@ -198,6 +199,15 @@ test("an unparseable dedup-listed command logs a parse miss and executes", async
   assert.ok(h.logs.some((entry) => entry.kind === "parse-miss"));
 });
 
+test("a command outside the dedup set runs fresh on every call", async () => {
+  const h = bashHarness();
+
+  await h.run("echo hello");
+  await h.run("echo hello");
+
+  assert.equal(h.calls.length, 2);
+});
+
 test("rails off delegates byte-identically without checks or logging", async () => {
   const sentinel: FakeResult = { content: [{ type: "text", text: "raw" }], details: undefined };
   const { run, logs, world } = bashDedupOver({ name: "bash", execute: async () => sentinel }, { disabled: () => true });
@@ -209,7 +219,9 @@ test("rails off delegates byte-identically without checks or logging", async () 
   assert.equal(logs.length, 0);
 });
 
-function editHarness(opts: { file?: string; readFails?: boolean; enforced?: boolean } = {}) {
+function editHarness(
+  opts: { file?: string; readFails?: boolean; enforced?: boolean; disabled?: boolean } = {},
+) {
   const session = createSession();
   const logs: any[] = [];
   const calls: any[] = [];
@@ -228,11 +240,11 @@ function editHarness(opts: { file?: string; readFails?: boolean; enforced?: bool
     },
     log: (entry) => logs.push(entry),
     enforced: () => opts.enforced ?? true,
-    disabled: () => false,
+    disabled: () => opts.disabled ?? false,
   });
   const run = (path: string, edits: Array<{ oldText: string; newText: string }>) =>
     tool.execute("id", { path, edits });
-  return { logs, calls, run };
+  return { session, logs, calls, run };
 }
 
 const DOC = ["# Setup", "", "step one", "step two", "step three"].join("\n");
@@ -270,4 +282,21 @@ test("log-only mode lets a duplicate edit through and logs it", async () => {
 
   assert.equal(h.calls.length, 1);
   assert.ok(h.logs.some((entry) => entry.kind === "would-dedup"));
+});
+
+test("rails off delegates a duplicate edit without deduping", async () => {
+  const h = editHarness({ file: DOC, disabled: true });
+
+  await h.run("notes.md", REINSERT);
+
+  assert.equal(h.calls.length, 1);
+});
+
+test("an approved edit rerun executes fresh instead of no-oping", async () => {
+  const h = editHarness({ file: DOC });
+  approveRerun(h.session, editKey("notes.md", REINSERT));
+
+  await h.run("notes.md", REINSERT);
+
+  assert.equal(h.calls.length, 1);
 });

@@ -39,7 +39,7 @@ function isChange(value: unknown): value is Change {
   return value === "new" || value === "changed" || value === "same";
 }
 
-function validateFunction(raw: unknown): FunctionFacts {
+export function validateFunction(raw: unknown): FunctionFacts {
   if (!isObject(raw)) throw new Error("extract-typescript: function fact is not an object");
   const name = raw.name;
   const startLine = raw.startLine;
@@ -71,7 +71,7 @@ function validateFunction(raw: unknown): FunctionFacts {
   };
 }
 
-function validateComment(raw: unknown): CommentFacts {
+export function validateComment(raw: unknown): CommentFacts {
   if (!isObject(raw)) throw new Error("extract-typescript: comment fact is not an object");
   const line = raw.line;
   const text = raw.text;

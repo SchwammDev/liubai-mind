@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { typescriptExtractor } from "./extract-typescript.ts";
+import { typescriptExtractor, validateFunction, validateComment } from "./extract-typescript.ts";
 import type { Extracted, FunctionFacts } from "./contract.ts";
 
 async function extractText(path: string, after: string, before?: string): Promise<Extracted> {
@@ -199,4 +199,49 @@ test("parse_error_returns_empty_facts", async () => {
   const src = "\"unterminated string\n";
   const ext = await extractText("app/foo.ts", src);
   assert.deepEqual(ext, { functions: [], comments: [] });
+});
+
+test("a non-test call's trailing callback in a test file stays anonymous and non-test", async () => {
+  const src = "outer('desc', () => {\n  return 1;\n});\n";
+  const ext = await extractText("app/foo.test.ts", src);
+  const fn = ext.functions[0];
+  assert.ok(fn !== undefined);
+  assert.equal(fn.name, "anonymous");
+  assert.equal(fn.isTest, false);
+});
+
+const WELL_FORMED_FUNCTION = {
+  name: "f", startLine: 1, cyclomaticComplexity: 1, missingAnnotations: [],
+  isTest: false, bodyLineCount: 1, signature: "new", body: "new",
+};
+const WELL_FORMED_COMMENT = { line: 1, text: "// x", kind: "line", added: true };
+function rejectsFunctionWith(override: Record<string, unknown>): void {
+  assert.throws(() => validateFunction({ ...WELL_FORMED_FUNCTION, ...override }));
+}
+function rejectsCommentWith(override: Record<string, unknown>): void {
+  assert.throws(() => validateComment({ ...WELL_FORMED_COMMENT, ...override }));
+}
+
+test("validateFunction rejects a non-object or a mistyped scalar field", () => {
+  assert.throws(() => validateFunction(null));
+  rejectsFunctionWith({ name: 1 });
+  rejectsFunctionWith({ startLine: "1" });
+  rejectsFunctionWith({ cyclomaticComplexity: "1" });
+  rejectsFunctionWith({ isTest: "no" });
+  rejectsFunctionWith({ bodyLineCount: "1" });
+});
+
+test("validateFunction rejects a malformed annotations list or change field", () => {
+  rejectsFunctionWith({ missingAnnotations: "x" });
+  rejectsFunctionWith({ missingAnnotations: [1] });
+  rejectsFunctionWith({ signature: "maybe" });
+  rejectsFunctionWith({ body: "maybe" });
+});
+
+test("validateComment rejects a non-object or a mistyped field", () => {
+  assert.throws(() => validateComment(null));
+  rejectsCommentWith({ line: "1" });
+  rejectsCommentWith({ text: 1 });
+  rejectsCommentWith({ kind: "weird" });
+  rejectsCommentWith({ added: "yes" });
 });

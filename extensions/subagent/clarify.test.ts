@@ -171,6 +171,14 @@ const assertNone = (outcome: any, text: string) => {
   if (outcome.kind === "none") assert.equal(outcome.text, text);
 };
 
+const assertDoneFailed = (outcome: any, report: RegExp) => {
+  assert.equal(outcome.kind, "done");
+  if (outcome.kind === "done") {
+    assert.equal(outcome.failed, true);
+    assert.match(outcome.report, report);
+  }
+};
+
 test("completeClarify writes the response and returns done after the child settles", async () => {
   const { t, state } = suspended();
   const outcomeP = completeClarify(state, "use file A");
@@ -249,6 +257,25 @@ test("answerClarify writes the response and returns the child's final report", a
   const outcome = await answerP;
   assertAnsweredReport(outcome, "done: file A");
   assertDeliveredAndClosed(store, t, state);
+});
+
+test("answerClarify returns an already-finished child's final report and clears the slot", async () => {
+  const store = new ClarifyStore();
+  store.setSuspended(makeState({ finished: true, finalReport: "already done" }));
+
+  const outcome = await answerClarify(store, "anything");
+
+  assertNone(outcome, "already done");
+  assertSlotCleared(store);
+});
+
+test("answerClarify surfaces a failed resume as a failed done with the failure output", async () => {
+  const { store, t } = suspended();
+  const answerP = answerClarify(store, "use file A");
+  t.emitClose(1);
+
+  const outcome = await answerP;
+  assertDoneFailed(outcome, /before completing its turn/);
 });
 
 test("answerClarify returns ask when the child asks again and keeps the slot suspended", async () => {

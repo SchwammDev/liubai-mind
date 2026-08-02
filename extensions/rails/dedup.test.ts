@@ -203,6 +203,15 @@ test("an insertion of content absent from the file is no duplicate", () => {
   assert.equal(duplicateEditInsertion(FILE, edits), null);
 });
 
+test("a malformed edit missing its texts is no duplicate rather than a crash", () => {
+  const malformed = [{ oldText: undefined, newText: undefined }] as unknown as Array<{
+    oldText: string;
+    newText: string;
+  }>;
+
+  assert.equal(duplicateEditInsertion(FILE, malformed), null);
+});
+
 test("an empty argv is reported as a failed exec instead of being spawned", async () => {
   const exec = createExec(process.cwd());
 

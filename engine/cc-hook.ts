@@ -29,7 +29,7 @@ function asString(value: unknown): string | undefined {
 
 // Maps a CC PreToolUse payload to a FileChange, or null for anything the rails
 // don't cover (non-edit tools, missing fields, non-string values).
-function mapChange(payload: CcPayload): FileChange | null {
+export function mapChange(payload: CcPayload): FileChange | null {
   const tool = asString(payload.tool_name);
   const input = isObject(payload.tool_input) ? payload.tool_input : undefined;
   if (tool === undefined || input === undefined) return null;
@@ -125,9 +125,7 @@ function readStdin(): Promise<string> {
   });
 }
 
-try {
-  await main();
-} catch {
+if (import.meta.main) {
   // fail open — no log channel in a CC hook
-  process.exit(0);
+  await main().catch(() => process.exit(0));
 }

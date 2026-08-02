@@ -74,6 +74,37 @@ test("a collapsed single child clips each item to its first three lines", () => 
   assert.doesNotMatch(shown(nodes), /four/);
 });
 
+test("an expanded failed child shows its stop reason and error", () => {
+  const failed = child({ exitCode: 1, stopReason: "error", errorMessage: "model refused" });
+
+  const nodes = describeResult(spawnResult(single(failed)), true, plainTheme);
+
+  assert.match(shown(nodes), /✗ do the thing \[error\]/);
+  assert.match(shown(nodes), /Error: model refused/);
+});
+
+test("an expanded single child with nothing to show says so", () => {
+  const nodes = describeResult(spawnResult(single(child())), true, plainTheme);
+
+  assert.match(shown(nodes), /─── Output ───\n\(no output\)/);
+});
+
+test("an expanded single child's usage line shows the profile next to the model", () => {
+  const billed = child({ model: "some-model", profile: "default", usage: { ...child().usage, input: 1200, turns: 2 } });
+
+  const nodes = describeResult(spawnResult(single(billed)), true, plainTheme);
+
+  assert.match(shown(nodes), /2 turns ↑1\.2k some-model · default/);
+});
+
+test("an expanded single child that lost a capability shows the warning", () => {
+  const limited = child({ model: "gw/big", notes: ["no web search"] });
+
+  const nodes = describeResult(spawnResult(single(limited)), true, plainTheme);
+
+  assert.match(shown(nodes), /⚠ no web search/);
+});
+
 test("an expanded single child shows the task it was given and its report", () => {
   const done = child({ messages: [said("the report")], finalReport: "the report" });
 
