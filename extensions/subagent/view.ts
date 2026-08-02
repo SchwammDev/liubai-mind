@@ -68,25 +68,34 @@ const capabilityLine = (result: SingleResult): string | undefined =>
 const withProfile = (usage: string, profile: string | undefined): string =>
   profile ? `${usage} · ${profile}` : usage;
 
-function singleExpanded(result: SingleResult, theme: ViewTheme): ViewNode[] {
+function expandedHeaderNodes(result: SingleResult, theme: ViewTheme): ViewNode[] {
   const failed = isFailedResult(result);
-  const items = getDisplayItems(result.messages);
-  const report = finalReportOf(result);
 
   let header = `${outcomeIcon(result, theme)} ${theme.fg("toolTitle", theme.bold(taskPreview(result.task)))}`;
-  if (failed && result.stopReason) header += ` ${theme.fg("error", `[${result.stopReason}]`)}`;
+  if (failed && result.stopReason) header += ` ${theme.fg("error", "[" + result.stopReason + "]")}`;
 
   const nodes = [text(header)];
   if (failed && result.errorMessage) nodes.push(text(theme.fg("error", `Error: ${result.errorMessage}`)));
+  return nodes;
+}
+
+function expandedOutputNodes(items: DisplayItem[], report: string, theme: ViewTheme): ViewNode[] {
+  if (items.length === 0 && !report) return [text(theme.fg("muted", "(no output)"))];
+
+  const nodes: ViewNode[] = [];
+  for (const item of items) if (item.type === "toolCall") nodes.push(text(toolCallLine(item, theme)));
+  if (report) nodes.push(spacer(), markdown(report.trim()));
+  return nodes;
+}
+
+function singleExpanded(result: SingleResult, theme: ViewTheme): ViewNode[] {
+  const items = getDisplayItems(result.messages);
+  const report = finalReportOf(result);
+
+  const nodes = expandedHeaderNodes(result, theme);
   nodes.push(spacer(), text(theme.fg("muted", "─── Task ───")), text(theme.fg("dim", result.task)));
   nodes.push(spacer(), text(theme.fg("muted", "─── Output ───")));
-
-  if (items.length === 0 && !report) {
-    nodes.push(text(theme.fg("muted", "(no output)")));
-  } else {
-    for (const item of items) if (item.type === "toolCall") nodes.push(text(toolCallLine(item, theme)));
-    if (report) nodes.push(spacer(), markdown(report.trim()));
-  }
+  nodes.push(...expandedOutputNodes(items, report, theme));
 
   const usage = formatUsageStats(result.usage, result.model);
   if (usage) nodes.push(spacer(), text(theme.fg("dim", withProfile(usage, result.profile))));
@@ -96,18 +105,22 @@ function singleExpanded(result: SingleResult, theme: ViewTheme): ViewNode[] {
   return nodes;
 }
 
+function collapsedBody(result: SingleResult, failed: boolean, items: DisplayItem[], theme: ViewTheme): string {
+  if (failed && result.errorMessage) return `\n${theme.fg("error", "Error: " + result.errorMessage)}`;
+  if (items.length === 0) return `\n${theme.fg("muted", "(no output)")}`;
+
+  let body = `\n${displayItemLines(items, COLLAPSED_ITEM_COUNT, false, theme)}`;
+  if (items.length > COLLAPSED_ITEM_COUNT) body += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
+  return body;
+}
+
 function singleCollapsed(result: SingleResult, theme: ViewTheme): ViewNode[] {
   const failed = isFailedResult(result);
   const items = getDisplayItems(result.messages);
 
   let out = `${outcomeIcon(result, theme)} ${theme.fg("toolTitle", theme.bold(taskPreview(result.task)))}`;
-  if (failed && result.stopReason) out += ` ${theme.fg("error", `[${result.stopReason}]`)}`;
-  if (failed && result.errorMessage) out += `\n${theme.fg("error", `Error: ${result.errorMessage}`)}`;
-  else if (items.length === 0) out += `\n${theme.fg("muted", "(no output)")}`;
-  else {
-    out += `\n${displayItemLines(items, COLLAPSED_ITEM_COUNT, false, theme)}`;
-    if (items.length > COLLAPSED_ITEM_COUNT) out += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
-  }
+  if (failed && result.stopReason) out += ` ${theme.fg("error", "[" + result.stopReason + "]")}`;
+  out += collapsedBody(result, failed, items, theme);
 
   const usage = formatUsageStats(result.usage, result.model);
   if (usage) out += `\n${theme.fg("dim", withProfile(usage, result.profile))}`;
@@ -196,13 +209,12 @@ function parallelCollapsed(results: SingleResult[], expanded: boolean, theme: Vi
   return nodes;
 }
 
-export function describeResult(result: RenderedResult, expanded: boolean, theme: ViewTheme): ViewNode[] {
-  const details = result.details as SubagentDetails | undefined;
-  if (!details || details.results.length === 0) {
-    const part = result.content[0];
-    return [text(part?.type === "text" ? (part.text ?? "") : "(no output)")];
-  }
+function emptyDetailsNode(result: RenderedResult): ViewNode {
+  const part = result.content[0];
+  return text(part?.type === "text" ? (part.text ?? "") : "(no output)");
+}
 
+function describeDetails(details: SubagentDetails, expanded: boolean, theme: ViewTheme): ViewNode[] {
   const [first] = details.results;
   if (first && details.mode === "single" && details.results.length === 1) {
     return expanded ? singleExpanded(first, theme) : singleCollapsed(first, theme);
@@ -214,11 +226,17 @@ export function describeResult(result: RenderedResult, expanded: boolean, theme:
     : parallelCollapsed(details.results, expanded, theme);
 }
 
+export function describeResult(result: RenderedResult, expanded: boolean, theme: ViewTheme): ViewNode[] {
+  const details = result.details as SubagentDetails | undefined;
+  if (!details || details.results.length === 0) return [emptyDetailsNode(result)];
+  return describeDetails(details, expanded, theme);
+}
+
 export function describeCall(args: CallArgs, theme: ViewTheme): ViewNode[] {
   if (args.tasks && args.tasks.length > 0) {
     let out = theme.fg("toolTitle", theme.bold("spawn ")) + theme.fg("accent", `parallel (${args.tasks.length} tasks)`);
     for (const t of args.tasks.slice(0, 3)) out += `\n  ${theme.fg("dim", taskPreview(t.task, 40))}`;
-    if (args.tasks.length > 3) out += `\n  ${theme.fg("muted", `... +${args.tasks.length - 3} more`)}`;
+    if (args.tasks.length > 3) out += `\n  ${theme.fg("muted", "... +" + (args.tasks.length - 3) + " more")}`;
     return [text(out)];
   }
 

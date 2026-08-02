@@ -237,31 +237,25 @@ export async function onClarifyTimeout(store: ClarifyStore, state: SuspendedStat
   store.suspended = null;
 }
 
-export async function answerClarify(store: ClarifyStore, text: string, signal?: AbortSignal): Promise<AnswerOutcome> {
-  const state = store.suspended;
-
+function resolveInactiveClarify(store: ClarifyStore, state: SuspendedState | null): AnswerOutcome {
   if (!state) {
     const out = store.lateReport ?? "No child is asking a question.";
     store.lateReport = null;
     return { kind: "none", text: out };
   }
 
-  if (state.finished) {
-    const out = state.finalReport ?? store.lateReport ?? "The child has already finished.";
-    store.suspended = null;
-    store.lateReport = null;
-    return { kind: "none", text: out };
-  }
+  const out = state.finalReport ?? store.lateReport ?? "The child has already finished.";
+  store.suspended = null;
+  store.lateReport = null;
+  return { kind: "none", text: out };
+}
 
-  if (state.timer) {
-    clearTimeout(state.timer);
-    state.timer = null;
-  }
-  removeAbortListener(state);
-  state.budget.delivered++;
-
-  const outcome = await completeClarify(state, text);
-
+function resumeAfterAnswer(
+  store: ClarifyStore,
+  state: SuspendedState,
+  outcome: RunChildOutcome,
+  signal?: AbortSignal,
+): AnswerOutcome {
   if (outcome.kind === "suspended") {
     state.clarifyId = outcome.clarify.id;
     state.question = outcome.clarify.question;
@@ -276,4 +270,20 @@ export async function answerClarify(store: ClarifyStore, text: string, signal?: 
   store.suspended = null;
   store.lateReport = null;
   return { kind: "done", report, result: outcome.result, failed };
+}
+
+export async function answerClarify(store: ClarifyStore, text: string, signal?: AbortSignal): Promise<AnswerOutcome> {
+  const state = store.suspended;
+
+  if (!state || state.finished) return resolveInactiveClarify(store, state);
+
+  if (state.timer) {
+    clearTimeout(state.timer);
+    state.timer = null;
+  }
+  removeAbortListener(state);
+  state.budget.delivered++;
+
+  const outcome = await completeClarify(state, text);
+  return resumeAfterAnswer(store, state, outcome, signal);
 }

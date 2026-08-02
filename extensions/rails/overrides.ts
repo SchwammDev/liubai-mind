@@ -18,6 +18,7 @@ import {
   type BashResult,
   type DedupLog,
   type DedupSession,
+  type EffectCheck,
   type Exec,
   type ReplayEntry,
 } from "./dedup.ts";
@@ -69,41 +70,62 @@ export function withBashDedup<T extends Pick<BashTool, "name" | "execute">>(
       if (consumeApproval(deps.session, key)) return runFresh(effectFamily(command) === null);
 
       const check = await checkBashEffect(command, deps.exec);
-      const enforced = deps.enforced();
-      if (check.effect === "present") {
-        deps.log({
-          kind: enforced ? "noop" : "would-dedup",
-          tool: "bash",
-          command,
-          action: enforced ? "noop" : "executed",
-        });
-        if (enforced) {
-          recordNoop(deps.session, key);
-          return noopResult(check.notice);
-        }
-      }
-      if (check.effect === "unqueryable") {
-        const cached = deps.session.replayCache.get(key);
-        if (cached) {
-          deps.log({
-            kind: enforced ? "replay" : "would-dedup",
-            tool: "bash",
-            command,
-            action: enforced ? "replayed" : "executed",
-          });
-          if (enforced) {
-            recordNoop(deps.session, key);
-            return replayedResult(cached);
-          }
-        }
-        return runFresh(true);
-      }
-      if (check.effect === "unparseable") {
-        deps.log({ kind: "parse-miss", tool: "bash", command, action: "executed" });
-      }
-      return runFresh(false);
+      const deduped = dedupedBashResult(deps, command, key, check);
+      return deduped ?? runFresh(check.effect === "unqueryable");
     },
   };
+}
+
+function dedupedBashResult(
+  deps: BashDedupDeps,
+  command: string,
+  key: string,
+  check: EffectCheck,
+): BashResult | null {
+  const enforced = deps.enforced();
+  if (check.effect === "present") return presentEffectResult(deps, command, key, check.notice, enforced);
+  if (check.effect === "unqueryable") return unqueryableEffectResult(deps, command, key, enforced);
+  if (check.effect === "unparseable") {
+    deps.log({ kind: "parse-miss", tool: "bash", command, action: "executed" });
+  }
+  return null;
+}
+
+function presentEffectResult(
+  deps: BashDedupDeps,
+  command: string,
+  key: string,
+  notice: string,
+  enforced: boolean,
+): BashResult | null {
+  deps.log({
+    kind: enforced ? "noop" : "would-dedup",
+    tool: "bash",
+    command,
+    action: enforced ? "noop" : "executed",
+  });
+  if (!enforced) return null;
+  recordNoop(deps.session, key);
+  return noopResult(notice);
+}
+
+function unqueryableEffectResult(
+  deps: BashDedupDeps,
+  command: string,
+  key: string,
+  enforced: boolean,
+): BashResult | null {
+  const cached = deps.session.replayCache.get(key);
+  if (!cached) return null;
+  deps.log({
+    kind: enforced ? "replay" : "would-dedup",
+    tool: "bash",
+    command,
+    action: enforced ? "replayed" : "executed",
+  });
+  if (!enforced) return null;
+  recordNoop(deps.session, key);
+  return replayedResult(cached);
 }
 
 export function withEditDedup<T extends Pick<EditTool, "name" | "execute">>(
@@ -123,21 +145,30 @@ export function withEditDedup<T extends Pick<EditTool, "name" | "execute">>(
       const content = await deps.readTargetFile(params.path).catch(() => null);
       const duplicate = content === null ? null : duplicateEditInsertion(content, edits);
       if (duplicate) {
-        const enforced = deps.enforced();
-        deps.log({
-          kind: enforced ? "noop" : "would-dedup",
-          tool: "edit",
-          key,
-          action: enforced ? "noop" : "executed",
-        });
-        if (enforced) {
-          recordNoop(deps.session, key);
-          return noopResult(`content already present at ${params.path}:${duplicate.line}`);
-        }
+        const result = duplicateEditResult(deps, key, params.path, duplicate.line);
+        if (result) return result;
       }
       return passthrough();
     },
   };
+}
+
+function duplicateEditResult(
+  deps: EditDedupDeps,
+  key: string,
+  path: string,
+  line: number,
+): BashResult | null {
+  const enforced = deps.enforced();
+  deps.log({
+    kind: enforced ? "noop" : "would-dedup",
+    tool: "edit",
+    key,
+    action: enforced ? "noop" : "executed",
+  });
+  if (!enforced) return null;
+  recordNoop(deps.session, key);
+  return noopResult(`content already present at ${path}:${line}`);
 }
 
 function noopResult(notice: string): AgentToolResult<undefined> {

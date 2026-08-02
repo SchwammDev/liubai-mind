@@ -107,18 +107,17 @@ export function extractProfiles(parsed: unknown): Record<string, unknown> | null
   return profiles as Record<string, unknown>;
 }
 
-export function validateProfile(name: string, raw: unknown): string | undefined {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return `Profile "${name}" must be an object.`;
-  }
-  const obj = raw as Record<string, unknown>;
-  const keys = Object.keys(obj);
+function unknownProfileKey(name: string, keys: string[]): string | undefined {
   const expected = new Set<string>(COMPLEXITY_LEVELS);
   for (const key of keys) {
     if (!expected.has(key)) {
       return `Profile "${name}" has unknown key "${key}". Allowed keys: ${COMPLEXITY_LEVELS.join(", ")}.`;
     }
   }
+  return undefined;
+}
+
+function missingLevelModelId(name: string, obj: Record<string, unknown>): string | undefined {
   for (const level of COMPLEXITY_LEVELS) {
     const value = obj[level];
     if (typeof value !== "string" || value.trim() === "") {
@@ -126,6 +125,14 @@ export function validateProfile(name: string, raw: unknown): string | undefined 
     }
   }
   return undefined;
+}
+
+export function validateProfile(name: string, raw: unknown): string | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return `Profile "${name}" must be an object.`;
+  }
+  const obj = raw as Record<string, unknown>;
+  return unknownProfileKey(name, Object.keys(obj)) ?? missingLevelModelId(name, obj);
 }
 
 const TARGET_SHAPE = `Expected shape: { "profiles": { "<name>": { ${COMPLEXITY_LEVELS.join(", ")} } } }. Copy ${COMPLEXITY_EXAMPLE} from the repo as a starting point.`;
@@ -205,24 +212,20 @@ export function loadComplexitySelection(
 
 export type ModeSelection = { kind: "single" } | { kind: "parallel" } | { kind: "error"; message: string };
 
-export function selectMode(params: {
-  task?: string;
-  complexity?: string;
-  tasks?: { task: string; complexity?: string }[];
-}): ModeSelection {
-  const hasSingle = Boolean(params.task && params.task.trim());
-  const hasParallel = (params.tasks?.length ?? 0) > 0;
+function modeShapeError(hasSingle: boolean, hasParallel: boolean, taskCount: number): string | undefined {
+  if (hasSingle && hasParallel) return "Provide exactly one of task or tasks, not both.";
+  if (!hasSingle && !hasParallel) return "Provide either a task or a tasks array.";
+  if (hasParallel && taskCount > MAX_PARALLEL_TASKS) {
+    return `Too many parallel tasks (${taskCount}). Max is ${MAX_PARALLEL_TASKS}.`;
+  }
+  return undefined;
+}
 
-  if (hasSingle && hasParallel) {
-    return { kind: "error", message: "Provide exactly one of task or tasks, not both." };
-  }
-  if (!hasSingle && !hasParallel) {
-    return { kind: "error", message: "Provide either a task or a tasks array." };
-  }
-  if (hasParallel && params.tasks!.length > MAX_PARALLEL_TASKS) {
-    return { kind: "error", message: `Too many parallel tasks (${params.tasks!.length}). Max is ${MAX_PARALLEL_TASKS}.` };
-  }
-
+function firstComplexityError(
+  params: { complexity?: string; tasks?: { task: string; complexity?: string }[] },
+  hasSingle: boolean,
+  hasParallel: boolean,
+): ModeSelection | undefined {
   const complexityError = (value: unknown) =>
     ({
       kind: "error",
@@ -235,6 +238,24 @@ export function selectMode(params: {
       if (!isComplexity(t.complexity)) return complexityError(t.complexity);
     }
   }
+  return undefined;
+}
+
+export function selectMode(params: {
+  task?: string;
+  complexity?: string;
+  tasks?: { task: string; complexity?: string }[];
+}): ModeSelection {
+  const hasSingle = Boolean(params.task && params.task.trim());
+  const taskCount = params.tasks?.length ?? 0;
+  const hasParallel = taskCount > 0;
+
+  const shapeError = modeShapeError(hasSingle, hasParallel, taskCount);
+  if (shapeError) return { kind: "error", message: shapeError };
+
+  const complexityProblem = firstComplexityError(params, hasSingle, hasParallel);
+  if (complexityProblem) return complexityProblem;
+
   return hasParallel ? { kind: "parallel" } : { kind: "single" };
 }
 
@@ -243,6 +264,22 @@ export function formatTokens(count: number): string {
   if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
   if (count < 1000000) return `${Math.round(count / 1000)}k`;
   return `${(count / 1000000).toFixed(1)}M`;
+}
+
+function tokenUsageParts(usage: {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  turns?: number;
+}): string[] {
+  const parts: string[] = [];
+  if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? "s" : ""}`);
+  if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
+  if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
+  if (usage.cacheRead) parts.push(`R${formatTokens(usage.cacheRead)}`);
+  if (usage.cacheWrite) parts.push(`W${formatTokens(usage.cacheWrite)}`);
+  return parts;
 }
 
 export function formatUsageStats(
@@ -257,12 +294,7 @@ export function formatUsageStats(
   },
   model?: string,
 ): string {
-  const parts: string[] = [];
-  if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? "s" : ""}`);
-  if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
-  if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
-  if (usage.cacheRead) parts.push(`R${formatTokens(usage.cacheRead)}`);
-  if (usage.cacheWrite) parts.push(`W${formatTokens(usage.cacheWrite)}`);
+  const parts = tokenUsageParts(usage);
   if (usage.cost) parts.push(`$${usage.cost.toFixed(4)}`);
   if (usage.contextTokens && usage.contextTokens > 0) {
     parts.push(`ctx:${formatTokens(usage.contextTokens)}`);

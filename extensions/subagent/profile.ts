@@ -44,18 +44,53 @@ export function availableProfileNames(configPath?: string): string[] {
   return profiles === null ? [] : Object.keys(profiles);
 }
 
+interface ResolvedProfileDeps {
+  configPath: string;
+  profilePath: string;
+  loadRaw: (path?: string) => unknown;
+  loadActive: (path?: string) => string | undefined;
+  write: (name: string, path?: string) => void;
+}
+
+function resolveProfileDeps(deps: ProfileDeps = {}): ResolvedProfileDeps {
+  const {
+    configPath = defaultComplexityConfigPath(),
+    profilePath = defaultActiveProfilePath(),
+    loadProfilesRaw: loadRaw = loadProfilesRaw,
+    loadActiveProfileName: loadActive = loadActiveProfileName,
+    writeActiveProfile: write = writeActiveProfile,
+  } = deps;
+  return { configPath, profilePath, loadRaw, loadActive, write };
+}
+
+function messageOf(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+function describeActiveProfile(
+  loadActive: (path?: string) => string | undefined,
+  profilePath: string,
+  profiles: Record<string, unknown>,
+  names: string[],
+): ProfileOutcome {
+  let active: string | undefined;
+  try {
+    active = loadActive(profilePath);
+  } catch (e) {
+    return { kind: "warning", message: messageOf(e) };
+  }
+  active = active ?? firstProfileName(profiles);
+  return { kind: "info", message: `Active profile: ${active}. Available: ${names.join(", ")}.` };
+}
+
 export function runProfileCommand(args: string, catalog: ModelCatalog, deps?: ProfileDeps): ProfileOutcome {
-  const configPath = deps?.configPath ?? defaultComplexityConfigPath();
-  const profilePath = deps?.profilePath ?? defaultActiveProfilePath();
-  const loadRaw = deps?.loadProfilesRaw ?? loadProfilesRaw;
-  const loadActive = deps?.loadActiveProfileName ?? loadActiveProfileName;
-  const write = deps?.writeActiveProfile ?? writeActiveProfile;
+  const { configPath, profilePath, loadRaw, loadActive, write } = resolveProfileDeps(deps);
 
   let parsed: unknown;
   try {
     parsed = loadRaw(configPath);
   } catch (e) {
-    return { kind: "warning", message: e instanceof Error ? e.message : String(e) };
+    return { kind: "warning", message: messageOf(e) };
   }
 
   const profiles = extractProfiles(parsed);
@@ -71,14 +106,7 @@ export function runProfileCommand(args: string, catalog: ModelCatalog, deps?: Pr
   const trimmed = args.trim();
 
   if (trimmed === "") {
-    let active: string | undefined;
-    try {
-      active = loadActive(profilePath);
-    } catch (e) {
-      return { kind: "warning", message: e instanceof Error ? e.message : String(e) };
-    }
-    active = active ?? firstProfileName(profiles);
-    return { kind: "info", message: `Active profile: ${active}. Available: ${names.join(", ")}.` };
+    return describeActiveProfile(loadActive, profilePath, profiles, names);
   }
 
   if (!(trimmed in profiles)) {
