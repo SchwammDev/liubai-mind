@@ -6,6 +6,7 @@ import * as path from "node:path";
 
 import {
   selectMode,
+  formatUsageStats,
   loadProfilesRaw,
   extractProfiles,
   validateProfile,
@@ -114,6 +115,22 @@ test("a parallel task item without a complexity is rejected", () => {
   const selection = selectMode({ tasks: [{ task: "lint", complexity: "easy" }, { task: "typecheck" }] });
 
   assert.equal(selection.kind, "error");
+});
+
+test("exactly the max number of parallel tasks is accepted", () => {
+  const maxed = Array.from({ length: MAX_PARALLEL_TASKS }, (_, i) => ({ task: `task ${i}`, complexity: "easy" }));
+
+  const selection = selectMode({ tasks: maxed });
+
+  assert.deepEqual(selection, { kind: "parallel" });
+});
+
+test("validateProfile rejects a non-object profile as needing to be an object", () => {
+  const assertObjectRequired = (raw: unknown) => assert.match(validateProfile("p", raw)!, /must be an object/);
+
+  assertObjectRequired(null);
+  assertObjectRequired([]);
+  assertObjectRequired(42);
 });
 
 const profileConfigFiles = (complexity: string, active?: string): { configPath: string; profilePath: string } => {
@@ -348,6 +365,24 @@ test("the compress prompt states the 4 KB limit and output-only instruction", ()
   assert.match(prompt, /4 ?KB/);
   assert.match(prompt, /4096/);
   assert.match(prompt, /only/i);
+});
+
+test("formatUsageStats renders every present metric in order", () => {
+  const full = { input: 1200, output: 3400, cacheRead: 5000, cacheWrite: 60, cost: 0.1234, contextTokens: 15000, turns: 3 };
+
+  assert.equal(formatUsageStats(full, "some-model"), "3 turns ↑1.2k ↓3.4k R5.0k W60 $0.1234 ctx:15k some-model");
+});
+
+test("formatUsageStats says one turn in the singular", () => {
+  const oneTurn = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 1 };
+
+  assert.equal(formatUsageStats(oneTurn), "1 turn");
+});
+
+test("formatUsageStats returns an empty string when nothing was billed", () => {
+  const nothing = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 };
+
+  assert.equal(formatUsageStats(nothing), "");
 });
 
 test("usage is summed across every child", () => {

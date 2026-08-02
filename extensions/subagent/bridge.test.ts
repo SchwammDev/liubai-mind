@@ -440,6 +440,52 @@ test("processRpcLine resolves only on agent_settled", () => {
   assert.equal(outcome.settled, true);
 });
 
+test("processRpcLine treats a malformed JSON line as unsettled without accumulating", () => {
+  const acc = makeAcc();
+
+  const outcome = processRpcLine("{ not json", acc, detachedBridge());
+
+  assert.equal(outcome.settled, false);
+  assert.equal(acc.messages.length, 0);
+});
+
+test("processRpcLine counts an assistant turn even when the message carries no usage", () => {
+  const acc = makeAcc();
+
+  processRpcLine(messageEnd(assistantMsg({ usage: undefined })), acc, detachedBridge());
+
+  assert.equal(acc.usage.turns, 1);
+  assert.equal(acc.usage.input, 0);
+});
+
+test("processRpcLine defaults missing usage token fields to zero", () => {
+  const acc = makeAcc();
+
+  processRpcLine(messageEnd(assistantMsg({ usage: { output: 5 } })), acc, detachedBridge());
+
+  assert.equal(acc.usage.input, 0);
+  assert.equal(acc.usage.output, 5);
+  assert.equal(acc.usage.contextTokens, 0);
+});
+
+test("processRpcLine latches the first assistant model and does not let later turns override it", () => {
+  const acc = makeAcc();
+  const bridge = detachedBridge();
+
+  processRpcLine(messageEnd(assistantMsg({ model: "first" })), acc, bridge);
+  processRpcLine(messageEnd(assistantMsg({ model: "second" })), acc, bridge);
+
+  assert.equal(acc.model, "first");
+});
+
+test("processRpcLine records an assistant error message", () => {
+  const acc = makeAcc();
+
+  processRpcLine(messageEnd(assistantMsg({ errorMessage: "provider exploded" })), acc, detachedBridge());
+
+  assert.equal(acc.errorMessage, "provider exploded");
+});
+
 test("processRpcLine routes an extension_ui_request to the bridge", async () => {
   const f = new FakeForwarder();
   const bridge = new AskBridge(f, () => {});
