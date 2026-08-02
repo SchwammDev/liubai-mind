@@ -81,6 +81,34 @@ function validateExtracted(raw: unknown): Extracted {
   };
 }
 
+function runExtractorScript(payload: string): string {
+  if (!existsSync(PYTHON_BIN)) {
+    throw new Error(`extract-python: venv missing at ${PYTHON_BIN}; run \`./setup.sh\` (requires uv on PATH)`);
+  }
+
+  const res = spawnSync(PYTHON_BIN, [SCRIPT_PATH], { input: payload, encoding: "utf8" });
+
+  if (res.error !== undefined) {
+    throw new Error(res.error.message);
+  }
+
+  if (res.status !== 0) {
+    const stderrLines = (res.stderr ?? "").split("\n").filter((s) => s.length > 0);
+    const last = stderrLines[stderrLines.length - 1];
+    throw new Error(last ?? `exit ${res.status}`);
+  }
+
+  return res.stdout;
+}
+
+function parseExtractorOutput(stdout: string): unknown {
+  try {
+    return JSON.parse(stdout);
+  } catch (err) {
+    throw new Error(`extract-python: stdout is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 export const pythonExtractor: Extractor = {
   extract(input): Extracted {
     const payload = JSON.stringify({
@@ -89,29 +117,6 @@ export const pythonExtractor: Extractor = {
       after: input.after,
     });
 
-    if (!existsSync(PYTHON_BIN)) {
-      throw new Error(`extract-python: venv missing at ${PYTHON_BIN}; run \`./setup.sh\` (requires uv on PATH)`);
-    }
-
-    const res = spawnSync(PYTHON_BIN, [SCRIPT_PATH], { input: payload, encoding: "utf8" });
-
-    if (res.error !== undefined) {
-      throw new Error(res.error.message);
-    }
-
-    if (res.status !== 0) {
-      const stderrLines = (res.stderr ?? "").split("\n").filter((s) => s.length > 0);
-      const last = stderrLines[stderrLines.length - 1];
-      throw new Error(last ?? `exit ${res.status}`);
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(res.stdout);
-    } catch (err) {
-      throw new Error(`extract-python: stdout is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    return validateExtracted(parsed);
+    return validateExtracted(parseExtractorOutput(runExtractorScript(payload)));
   },
 };

@@ -194,49 +194,38 @@ export class AskBridge {
     };
 
     try {
-      if (req.method === "confirm") {
-        const confirmed = await this.gate.enqueue(false, this.signal, () =>
-          this.forwarder.confirm(req.title, req.message, opts),
-        );
-        this.writeResponse({ type: "extension_ui_response", id: req.id, confirmed });
-        return;
-      }
-      if (req.method === "select") {
-        const value = await this.gate.enqueue<string | undefined>(undefined, this.signal, () =>
-          this.forwarder.select(req.title, req.options, opts),
-        );
-        this.writeResponse(
-          value === undefined
-            ? { type: "extension_ui_response", id: req.id, cancelled: true }
-            : { type: "extension_ui_response", id: req.id, value },
-        );
-        return;
-      }
-      if (req.method === "input") {
-        const value = await this.gate.enqueue<string | undefined>(undefined, this.signal, () =>
-          this.forwarder.input(req.title, req.placeholder, opts),
-        );
-        this.writeResponse(
-          value === undefined
-            ? { type: "extension_ui_response", id: req.id, cancelled: true }
-            : { type: "extension_ui_response", id: req.id, value },
-        );
-        return;
-      }
-      if (req.method === "editor") {
-        const value = await this.gate.enqueue<string | undefined>(undefined, this.signal, () =>
-          this.forwarder.editor(req.title, req.prefill),
-        );
-        this.writeResponse(
-          value === undefined
-            ? { type: "extension_ui_response", id: req.id, cancelled: true }
-            : { type: "extension_ui_response", id: req.id, value },
-        );
-        return;
-      }
+      await this.showDialog(req, opts);
     } catch {
       this.writeResponse({ type: "extension_ui_response", id: req.id, cancelled: true });
     }
+  }
+
+  private async showDialog(req: RpcExtensionUIRequest, opts: DialogOptions): Promise<void> {
+    if (req.method === "confirm") {
+      const confirmed = await this.gate.enqueue(false, this.signal, () =>
+        this.forwarder.confirm(req.title, req.message, opts),
+      );
+      this.writeResponse({ type: "extension_ui_response", id: req.id, confirmed });
+      return;
+    }
+    if (req.method === "select") {
+      return this.respondValue(req.id, () => this.forwarder.select(req.title, req.options, opts));
+    }
+    if (req.method === "input") {
+      return this.respondValue(req.id, () => this.forwarder.input(req.title, req.placeholder, opts));
+    }
+    if (req.method === "editor") {
+      return this.respondValue(req.id, () => this.forwarder.editor(req.title, req.prefill));
+    }
+  }
+
+  private async respondValue(id: string, show: () => Promise<string | undefined>): Promise<void> {
+    const value = await this.gate.enqueue<string | undefined>(undefined, this.signal, show);
+    this.writeResponse(
+      value === undefined
+        ? { type: "extension_ui_response", id, cancelled: true }
+        : { type: "extension_ui_response", id, value },
+    );
   }
 
   private writeResponse(response: RpcExtensionUIResponse): void {

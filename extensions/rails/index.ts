@@ -192,27 +192,34 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
     ctx.ui.notify(`[${rail}] rail failed: ${reason}`, "error");
   };
 
-  pi.on("tool_call", async (event, ctx) => {
-    if (railsDisabled()) return undefined;
-
-    if (event.toolName === "bash") {
-      const command = typeof event.input.command === "string" ? event.input.command : "";
-      let skipAsk = false;
-      if (dedupEnforced() && bashMatchesDedup(command, rules.dedup)) {
-        const outcome = await resolveRepeat(bashKey(command), command, "bash", ctx);
-        if ("block" in outcome) return outcome;
-        skipAsk = outcome.skipAsk;
-      }
-      return gateCommand(command, rules, ctx, skipAsk);
-    }
-
-    const edit = event.toolName === "edit" ? editCall(event.input) : null;
-    if (edit && dedupEnforced()) {
-      const key = editKey(edit.path, editList(edit));
-      const outcome = await resolveRepeat(key, `edit ${edit.path}`, "edit", ctx);
+  async function handleBashCall(
+    command: string,
+    ctx: ExtensionContext,
+  ): Promise<{ block: true; reason: string } | undefined> {
+    let skipAsk = false;
+    if (dedupEnforced() && bashMatchesDedup(command, rules.dedup)) {
+      const outcome = await resolveRepeat(bashKey(command), command, "bash", ctx);
       if ("block" in outcome) return outcome;
+      skipAsk = outcome.skipAsk;
     }
+    return gateCommand(command, rules, ctx, skipAsk);
+  }
 
+  async function handleEditDedup(
+    event: ToolCallEvent,
+    ctx: ExtensionContext,
+  ): Promise<{ block: true; reason: string } | undefined> {
+    const edit = event.toolName === "edit" ? editCall(event.input) : null;
+    if (!edit || !dedupEnforced()) return undefined;
+    const key = editKey(edit.path, editList(edit));
+    const outcome = await resolveRepeat(key, `edit ${edit.path}`, "edit", ctx);
+    return "block" in outcome ? outcome : undefined;
+  }
+
+  async function runAnalyzeRail(
+    event: ToolCallEvent,
+    ctx: ExtensionContext,
+  ): Promise<{ block: true; reason: string } | undefined> {
     const change = eventToChange(event);
     if (!change) return undefined;
     const states = await reconstruct(change, readTargetFile);
@@ -220,11 +227,10 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
     const lang = detectLang(states.path);
     if (!lang) return undefined;
 
-    const env = defaultEnv();
     const analyzeRules = buildRules(DEFAULT_POLICY, lang);
     const resp = await analyze(
       { path: states.path, before: states.before, after: states.after, lang },
-      env,
+      defaultEnv(),
       analyzeRules,
     );
 
@@ -240,6 +246,20 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
     const railNudges = resp.nudges.map((n) => `[${n.rule}] ${n.msg}`);
     if (railNudges.length) pendingNudges.set(event.toolCallId, railNudges);
     return undefined;
+  }
+
+  pi.on("tool_call", async (event, ctx) => {
+    if (railsDisabled()) return undefined;
+
+    if (event.toolName === "bash") {
+      const command = typeof event.input.command === "string" ? event.input.command : "";
+      return handleBashCall(command, ctx);
+    }
+
+    const editBlock = await handleEditDedup(event, ctx);
+    if (editBlock) return editBlock;
+
+    return runAnalyzeRail(event, ctx);
   });
 
   pi.on("tool_result", (event) => {
