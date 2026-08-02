@@ -15,51 +15,58 @@ function isChange(value: unknown): value is "new" | "changed" | "same" {
   return value === "new" || value === "changed" || value === "same";
 }
 
+function requireString(value: unknown, message: string): string {
+  if (typeof value !== "string") throw new Error(message);
+  return value;
+}
+
+function requireNumber(value: unknown, message: string): number {
+  if (typeof value !== "number") throw new Error(message);
+  return value;
+}
+
+function requireBoolean(value: unknown, message: string): boolean {
+  if (typeof value !== "boolean") throw new Error(message);
+  return value;
+}
+
+function requireStringArray(value: unknown, message: string): string[] {
+  if (!Array.isArray(value) || value.some((m) => typeof m !== "string")) throw new Error(message);
+  return value as string[];
+}
+
+function requireChange(value: unknown, message: string): "new" | "changed" | "same" {
+  if (!isChange(value)) throw new Error(message);
+  return value;
+}
+
+function requireCommentKind(value: unknown, message: string): CommentFacts["kind"] {
+  if (value !== "line" && value !== "doc" && value !== "block" && value !== "tooling") throw new Error(message);
+  return value;
+}
+
 export function validateFunction(raw: unknown): FunctionFacts {
   if (!isObject(raw)) throw new Error("extract-python: function fact is not an object");
-  const name = raw.name;
-  const startLine = raw.startLine;
-  const cyclomaticComplexity = raw.cyclomaticComplexity;
-  const missingAnnotations = raw.missingAnnotations;
-  const isTest = raw.isTest;
-  const bodyLineCount = raw.bodyLineCount;
-  const signature = raw.signature;
-  const body = raw.body;
-  if (typeof name !== "string") throw new Error("extract-python: function name is not a string");
-  if (typeof startLine !== "number") throw new Error("extract-python: function startLine is not a number");
-  if (typeof cyclomaticComplexity !== "number") throw new Error("extract-python: function cyclomaticComplexity is not a number");
-  if (!Array.isArray(missingAnnotations) || missingAnnotations.some((m) => typeof m !== "string")) {
-    throw new Error("extract-python: function missingAnnotations is not a string array");
-  }
-  if (typeof isTest !== "boolean") throw new Error("extract-python: function isTest is not a boolean");
-  if (typeof bodyLineCount !== "number") throw new Error("extract-python: function bodyLineCount is not a number");
-  if (!isChange(signature)) throw new Error("extract-python: function signature is not a Change");
-  if (!isChange(body)) throw new Error("extract-python: function body is not a Change");
   return {
-    name,
-    startLine,
-    cyclomaticComplexity,
-    missingAnnotations: missingAnnotations as string[],
-    isTest,
-    bodyLineCount,
-    signature,
-    body,
+    name: requireString(raw.name, "extract-python: function name is not a string"),
+    startLine: requireNumber(raw.startLine, "extract-python: function startLine is not a number"),
+    cyclomaticComplexity: requireNumber(raw.cyclomaticComplexity, "extract-python: function cyclomaticComplexity is not a number"),
+    missingAnnotations: requireStringArray(raw.missingAnnotations, "extract-python: function missingAnnotations is not a string array"),
+    isTest: requireBoolean(raw.isTest, "extract-python: function isTest is not a boolean"),
+    bodyLineCount: requireNumber(raw.bodyLineCount, "extract-python: function bodyLineCount is not a number"),
+    signature: requireChange(raw.signature, "extract-python: function signature is not a Change"),
+    body: requireChange(raw.body, "extract-python: function body is not a Change"),
   };
 }
 
 export function validateComment(raw: unknown): CommentFacts {
   if (!isObject(raw)) throw new Error("extract-python: comment fact is not an object");
-  const line = raw.line;
-  const text = raw.text;
-  const kind = raw.kind;
-  const added = raw.added;
-  if (typeof line !== "number") throw new Error("extract-python: comment line is not a number");
-  if (typeof text !== "string") throw new Error("extract-python: comment text is not a string");
-  if (kind !== "line" && kind !== "doc" && kind !== "block" && kind !== "tooling") {
-    throw new Error("extract-python: comment kind is not a CommentFacts kind");
-  }
-  if (typeof added !== "boolean") throw new Error("extract-python: comment added is not a boolean");
-  return { line, text, kind, added };
+  return {
+    line: requireNumber(raw.line, "extract-python: comment line is not a number"),
+    text: requireString(raw.text, "extract-python: comment text is not a string"),
+    kind: requireCommentKind(raw.kind, "extract-python: comment kind is not a CommentFacts kind"),
+    added: requireBoolean(raw.added, "extract-python: comment added is not a boolean"),
+  };
 }
 
 function validateExtracted(raw: unknown): Extracted {

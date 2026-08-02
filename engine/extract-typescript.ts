@@ -39,51 +39,58 @@ function isChange(value: unknown): value is Change {
   return value === "new" || value === "changed" || value === "same";
 }
 
+function requireString(value: unknown, message: string): string {
+  if (typeof value !== "string") throw new Error(message);
+  return value;
+}
+
+function requireNumber(value: unknown, message: string): number {
+  if (typeof value !== "number") throw new Error(message);
+  return value;
+}
+
+function requireBoolean(value: unknown, message: string): boolean {
+  if (typeof value !== "boolean") throw new Error(message);
+  return value;
+}
+
+function requireStringArray(value: unknown, message: string): string[] {
+  if (!Array.isArray(value) || value.some((m) => typeof m !== "string")) throw new Error(message);
+  return value as string[];
+}
+
+function requireChange(value: unknown, message: string): Change {
+  if (!isChange(value)) throw new Error(message);
+  return value;
+}
+
+function requireCommentKind(value: unknown, message: string): CommentFacts["kind"] {
+  if (value !== "line" && value !== "doc" && value !== "block" && value !== "tooling") throw new Error(message);
+  return value;
+}
+
 export function validateFunction(raw: unknown): FunctionFacts {
   if (!isObject(raw)) throw new Error("extract-typescript: function fact is not an object");
-  const name = raw.name;
-  const startLine = raw.startLine;
-  const cyclomaticComplexity = raw.cyclomaticComplexity;
-  const missingAnnotations = raw.missingAnnotations;
-  const isTest = raw.isTest;
-  const bodyLineCount = raw.bodyLineCount;
-  const signature = raw.signature;
-  const body = raw.body;
-  if (typeof name !== "string") throw new Error("extract-typescript: function name is not a string");
-  if (typeof startLine !== "number") throw new Error("extract-typescript: function startLine is not a number");
-  if (typeof cyclomaticComplexity !== "number") throw new Error("extract-typescript: function cyclomaticComplexity is not a number");
-  if (!Array.isArray(missingAnnotations) || missingAnnotations.some((m) => typeof m !== "string")) {
-    throw new Error("extract-typescript: function missingAnnotations is not a string array");
-  }
-  if (typeof isTest !== "boolean") throw new Error("extract-typescript: function isTest is not a boolean");
-  if (typeof bodyLineCount !== "number") throw new Error("extract-typescript: function bodyLineCount is not a number");
-  if (!isChange(signature)) throw new Error("extract-typescript: function signature is not a Change");
-  if (!isChange(body)) throw new Error("extract-typescript: function body is not a Change");
   return {
-    name,
-    startLine,
-    cyclomaticComplexity,
-    missingAnnotations: missingAnnotations as string[],
-    isTest,
-    bodyLineCount,
-    signature,
-    body,
+    name: requireString(raw.name, "extract-typescript: function name is not a string"),
+    startLine: requireNumber(raw.startLine, "extract-typescript: function startLine is not a number"),
+    cyclomaticComplexity: requireNumber(raw.cyclomaticComplexity, "extract-typescript: function cyclomaticComplexity is not a number"),
+    missingAnnotations: requireStringArray(raw.missingAnnotations, "extract-typescript: function missingAnnotations is not a string array"),
+    isTest: requireBoolean(raw.isTest, "extract-typescript: function isTest is not a boolean"),
+    bodyLineCount: requireNumber(raw.bodyLineCount, "extract-typescript: function bodyLineCount is not a number"),
+    signature: requireChange(raw.signature, "extract-typescript: function signature is not a Change"),
+    body: requireChange(raw.body, "extract-typescript: function body is not a Change"),
   };
 }
 
 export function validateComment(raw: unknown): CommentFacts {
   if (!isObject(raw)) throw new Error("extract-typescript: comment fact is not an object");
-  const line = raw.line;
-  const text = raw.text;
-  const kind = raw.kind;
-  const added = raw.added;
-  if (typeof line !== "number") throw new Error("extract-typescript: comment line is not a number");
-  if (typeof text !== "string") throw new Error("extract-typescript: comment text is not a string");
-  if (kind !== "line" && kind !== "doc" && kind !== "block" && kind !== "tooling") {
-    throw new Error("extract-typescript: comment kind is not a CommentFacts kind");
-  }
-  if (typeof added !== "boolean") throw new Error("extract-typescript: comment added is not a boolean");
-  return { line, text, kind, added };
+  return {
+    line: requireNumber(raw.line, "extract-typescript: comment line is not a number"),
+    text: requireString(raw.text, "extract-typescript: comment text is not a string"),
+    kind: requireCommentKind(raw.kind, "extract-typescript: comment kind is not a CommentFacts kind"),
+    added: requireBoolean(raw.added, "extract-typescript: comment added is not a boolean"),
+  };
 }
 
 function validateExtracted(raw: Extracted): Extracted {
@@ -237,7 +244,7 @@ function beforeFunctionRegions(language: unknown, before: string | undefined): B
   return out;
 }
 
-function lizardCcMap(path: string, after: string): Map<string, number> {
+function runLizard(path: string, after: string): string {
   if (!existsSync(PYTHON_BIN)) {
     throw new Error(`extract-typescript: venv missing at ${PYTHON_BIN}; run \`./setup.sh\` (requires uv on PATH)`);
   }
@@ -251,20 +258,54 @@ function lizardCcMap(path: string, after: string): Map<string, number> {
     const last = stderrLines[stderrLines.length - 1];
     throw new Error(last ?? `extract-typescript: lizard exit ${res.status}`);
   }
+  return res.stdout;
+}
+
+function isLizardFunction(value: unknown): value is { name: string; startLine: number; cyclomaticComplexity: number } {
+  return isObject(value)
+    && typeof value.name === "string"
+    && typeof value.startLine === "number"
+    && typeof value.cyclomaticComplexity === "number";
+}
+
+function parseLizardFunctions(stdout: string): Map<string, number> {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(res.stdout);
+    parsed = JSON.parse(stdout);
   } catch (err) {
     throw new Error(`extract-typescript: lizard stdout is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (!isObject(parsed) || !Array.isArray(parsed.functions)) return new Map();
   const out = new Map<string, number>();
   for (const f of parsed.functions) {
-    if (isObject(f) && typeof f.name === "string" && typeof f.startLine === "number" && typeof f.cyclomaticComplexity === "number") {
+    if (isLizardFunction(f)) {
       out.set(`${f.name}:${f.startLine}`, f.cyclomaticComplexity);
     }
   }
   return out;
+}
+
+function lizardCcMap(path: string, after: string): Map<string, number> {
+  return parseLizardFunctions(runLizard(path, after));
+}
+
+function classifyCommentKind(text: string, isBlock: boolean, isDoc: boolean): CommentFacts["kind"] {
+  if (TOOLING_RE.test(text)) return "tooling";
+  if (!isBlock) return "line";
+  return isDoc ? "doc" : "block";
+}
+
+function commentNodeFacts(node: TSNode, afterLines: string[], beforeLines: Set<string>): CommentFacts[] {
+  const isBlock = node.text.startsWith("/*");
+  const isDoc = isBlock && node.text.startsWith("/**");
+  const startRow = node.startPosition.row + 1;
+  const endRow = node.endPosition.row + 1;
+  const facts: CommentFacts[] = [];
+  for (let line = startRow; line <= endRow; line++) {
+    const text = afterLines[line - 1] ?? "";
+    facts.push({ line, text, kind: classifyCommentKind(text, isBlock, isDoc), added: !beforeLines.has(text) });
+  }
+  return facts;
 }
 
 function commentFacts(after: string, before: string | undefined, root: TSNode, language: unknown): CommentFacts[] {
@@ -275,23 +316,36 @@ function commentFacts(after: string, before: string | undefined, root: TSNode, l
   for (const cap of q.captures(root)) {
     if (cap.name !== "comment") continue;
     if (cap.node.type !== "comment") continue;
-    const isBlock = cap.node.text.startsWith("/*");
-    const isDoc = isBlock && cap.node.text.startsWith("/**");
-    const startRow = cap.node.startPosition.row + 1;
-    const endRow = cap.node.endPosition.row + 1;
-    for (let line = startRow; line <= endRow; line++) {
-      const text = afterLines[line - 1] ?? "";
-      const kind: CommentFacts["kind"] = TOOLING_RE.test(text)
-        ? "tooling"
-        : isBlock
-          ? isDoc
-            ? "doc"
-            : "block"
-          : "line";
-      facts.push({ line, text, kind, added: !beforeLines.has(text) });
-    }
+    facts.push(...commentNodeFacts(cap.node, afterLines, beforeLines));
   }
   return facts;
+}
+
+function testCallbackNodes(root: TSNode, q: QueryLike): Set<number> {
+  const testNodes = new Set<number>();
+  for (const cap of q.captures(root)) {
+    if (cap.name !== "testFunction") continue;
+    if (!FUNCTION_NODE_TYPES.has(cap.node.type)) continue;
+    const parent = cap.node.parent;
+    if (parent === null || parent.type !== "arguments") continue;
+    if (!isLastNamedChild(parent, cap.node)) continue;
+    testNodes.add(cap.node.startIndex);
+  }
+  return testNodes;
+}
+
+function uniqueFunctionNodes(root: TSNode, q: QueryLike): TSNode[] {
+  const seen = new Set<number>();
+  const functions: TSNode[] = [];
+  for (const cap of q.captures(root)) {
+    if (cap.name !== "function") continue;
+    if (!FUNCTION_NODE_TYPES.has(cap.node.type)) continue;
+    const idx = cap.node.startIndex;
+    if (seen.has(idx)) continue;
+    seen.add(idx);
+    functions.push(cap.node);
+  }
+  return functions;
 }
 
 function functionFacts(
@@ -304,28 +358,10 @@ function functionFacts(
 ): FunctionFacts[] {
   const beforeFuncs = beforeFunctionRegions(language, before);
   const testPath = isTestPath(path);
-  const seen = new Set<number>();
-  const functions: TSNode[] = [];
 
   const q = newQuery(language);
-  const testNodes = new Set<number>();
-  for (const cap of q.captures(root)) {
-    if (cap.name !== "testFunction") continue;
-    if (!FUNCTION_NODE_TYPES.has(cap.node.type)) continue;
-    const parent = cap.node.parent;
-    if (parent === null || parent.type !== "arguments") continue;
-    if (!isLastNamedChild(parent, cap.node)) continue;
-    testNodes.add(cap.node.startIndex);
-  }
-
-  for (const cap of q.captures(root)) {
-    if (cap.name !== "function") continue;
-    if (!FUNCTION_NODE_TYPES.has(cap.node.type)) continue;
-    const idx = cap.node.startIndex;
-    if (seen.has(idx)) continue;
-    seen.add(idx);
-    functions.push(cap.node);
-  }
+  const testNodes = testCallbackNodes(root, q);
+  const functions = uniqueFunctionNodes(root, q);
 
   return functions.map((node) => {
     const body = bodyNodeOf(node);

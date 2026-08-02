@@ -63,6 +63,33 @@ function isUiRequest(value: unknown): value is RpcExtensionUIRequest {
   return FIRE_AND_FORGET_METHODS.has(value.method);
 }
 
+function accumulateUsage(acc: Accumulator, usage: Extract<Message, { role: "assistant" }>["usage"]): void {
+  acc.usage.input += usage.input || 0;
+  acc.usage.output += usage.output || 0;
+  acc.usage.cacheRead += usage.cacheRead || 0;
+  acc.usage.cacheWrite += usage.cacheWrite || 0;
+  acc.usage.cost += usage.cost?.total || 0;
+  acc.usage.contextTokens = usage.totalTokens || 0;
+}
+
+function applyMessageEnd(msg: Message, acc: Accumulator): void {
+  acc.messages.push(msg);
+  if (msg.role !== "assistant") return;
+  acc.usage.turns++;
+  if (msg.usage) accumulateUsage(acc, msg.usage);
+  if (!acc.model && msg.model) acc.model = msg.model;
+  if (msg.stopReason) acc.stopReason = msg.stopReason;
+  if (msg.errorMessage) acc.errorMessage = msg.errorMessage;
+}
+
+function dispatchUiRequest(event: RpcExtensionUIRequest, bridge: AskBridge): LineOutcome {
+  const intercept = bridge.interceptClarify(event);
+  if (intercept.kind === "suspend") return { settled: false, suspended: { clarifyId: intercept.clarifyId, question: intercept.question } };
+  if (intercept.kind === "denied") return { settled: false };
+  bridge.handle(event).catch(() => {});
+  return { settled: false };
+}
+
 export function processRpcLine(line: string, acc: Accumulator, bridge: AskBridge): LineOutcome {
   if (!line.trim()) return { settled: false };
   let event: unknown;
@@ -74,33 +101,11 @@ export function processRpcLine(line: string, acc: Accumulator, bridge: AskBridge
   if (!isRecord(event)) return { settled: false };
 
   if (event.type === "message_end" && isMessage(event.message)) {
-    const msg = event.message;
-    acc.messages.push(msg);
-    if (msg.role === "assistant") {
-      acc.usage.turns++;
-      const usage = msg.usage;
-      if (usage) {
-        acc.usage.input += usage.input || 0;
-        acc.usage.output += usage.output || 0;
-        acc.usage.cacheRead += usage.cacheRead || 0;
-        acc.usage.cacheWrite += usage.cacheWrite || 0;
-        acc.usage.cost += usage.cost?.total || 0;
-        acc.usage.contextTokens = usage.totalTokens || 0;
-      }
-      if (!acc.model && msg.model) acc.model = msg.model;
-      if (msg.stopReason) acc.stopReason = msg.stopReason;
-      if (msg.errorMessage) acc.errorMessage = msg.errorMessage;
-    }
+    applyMessageEnd(event.message, acc);
     return { settled: false };
   }
 
-  if (isUiRequest(event)) {
-    const intercept = bridge.interceptClarify(event);
-    if (intercept.kind === "suspend") return { settled: false, suspended: { clarifyId: intercept.clarifyId, question: intercept.question } };
-    if (intercept.kind === "denied") return { settled: false };
-    bridge.handle(event).catch(() => {});
-    return { settled: false };
-  }
+  if (isUiRequest(event)) return dispatchUiRequest(event, bridge);
 
   if (event.type === "agent_settled") return { settled: true };
 

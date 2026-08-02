@@ -333,11 +333,20 @@ export function duplicateEditInsertion(
 ): { line: number } | null {
   const fileLines = fileContent.split("\n").map((line) => line.trim());
   for (const edit of edits) {
-    for (const run of addedRuns(edit.oldText ?? "", edit.newText ?? "")) {
-      if (run.filter((line) => line).length < DUPLICATE_RUN_MIN_LINES) continue;
-      const line = findConsecutive(fileLines, run);
-      if (line !== null) return { line };
-    }
+    const line = duplicatedRunLine(fileLines, edit);
+    if (line !== null) return { line };
+  }
+  return null;
+}
+
+function duplicatedRunLine(
+  fileLines: string[],
+  edit: { oldText: string; newText: string },
+): number | null {
+  for (const run of addedRuns(edit.oldText ?? "", edit.newText ?? "")) {
+    if (run.filter((line) => line).length < DUPLICATE_RUN_MIN_LINES) continue;
+    const line = findConsecutive(fileLines, run);
+    if (line !== null) return line;
   }
   return null;
 }
