@@ -37,8 +37,6 @@ import { formatBlockReason } from "../../engine/messages.ts";
 import { buildRules, DEFAULT_POLICY } from "../../engine/policy.ts";
 import { reconstruct, type FileChange } from "../../engine/reconstruct.ts";
 
-// Command-gate rules merge a personal global file under a project-local one;
-// either may be absent (no gating). LIUBAI_RAILS_RULES overrides the project path.
 const GLOBAL_RULES = join(homedir(), ".pi/agent/command-rules.json");
 const PROJECT_RULES =
   process.env.LIUBAI_RAILS_RULES ?? join(import.meta.dirname, "../../command-rules.json");

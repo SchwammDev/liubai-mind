@@ -13,7 +13,6 @@ export type MessageLike = { role: string; content: MessagePart[] };
 // the double execution and the doubled context, since pi extracts tool calls
 // and persists from the replaced message. Keep the LAST copy — it comes from
 // the terminal output_item.done event, whose arguments are authoritative.
-// Returns null when the message is already clean.
 export function withoutDuplicateToolCalls<T extends MessageLike>(
   message: T,
   log: DedupLog,

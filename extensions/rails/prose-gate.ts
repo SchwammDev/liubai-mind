@@ -43,8 +43,6 @@ type Message = { role: string; content: MessagePart[] };
 
 const isText = (part: MessagePart): part is TextPart => part.type === "text";
 
-// The gate touches assistant prose only — thinking and tool-call parts are the
-// agent's private reasoning and machine payloads, off-limits to the lever.
 export function cleanProse<T extends Message>(message: T): T {
   if (message.role !== "assistant") return message;
   const content = message.content.map((part) =>

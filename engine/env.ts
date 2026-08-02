@@ -79,11 +79,6 @@ function typescriptHelpers(): string[] {
   return collectNames(sources);
 }
 
-// Mirrors the old long_test_nudge.py helper inventory: `assert_*` / `_*`
-// helpers in tests/ for python, `assert*` / `expect*` helpers across test
-// locations for typescript. Deduped, capped. Empty when there is no tests/ or
-// grep is unavailable. The engine's test-body rule only calls this when a
-// long test is flagged, so it never runs on a clean call.
 export function helpersFor(lang: Lang): string[] {
   if (lang === "python") return pythonHelpers();
   if (lang === "typescript") return typescriptHelpers();
