@@ -1,6 +1,8 @@
 ; Function-like nodes.
 (function_declaration) @function
+(generator_function_declaration) @function
 (function_expression) @function
+(generator_function) @function
 (arrow_function) @function
 (method_definition) @function
 
