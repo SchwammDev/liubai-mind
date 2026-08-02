@@ -1,5 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 
@@ -8,8 +7,6 @@ import type { Change, CommentFacts, Extracted, Extractor, FunctionFacts } from "
 const require_ = createRequire(import.meta.url);
 
 const QUERIES_PATH = join(import.meta.dirname, "queries", "typescript.scm");
-const LIZARD_SCRIPT = join(import.meta.dirname, "lizard-cc.py");
-const PYTHON_BIN = join(import.meta.dirname, ".venv", "bin", "python");
 
 const QUERY_TEXT = readFileSync(QUERIES_PATH, "utf8");
 
@@ -18,7 +15,50 @@ const FUNCTION_NODE_TYPES = new Set([
   "function_expression",
   "arrow_function",
   "method_definition",
+  "generator_function_declaration",
+  "generator_function",
 ]);
+
+const CC_DECISION_NODE_TYPES = new Set([
+  "if_statement",
+  "for_statement",
+  "for_in_statement",
+  "while_statement",
+  "do_statement",
+  "catch_clause",
+  "switch_case",
+]);
+
+const CC_LOGICAL_OPERATORS = new Set([
+  "&&",
+  "||",
+  "??",
+]);
+
+function operatorOf(node: TSNode): TSNode | null {
+  return node.childForFieldName("operator");
+}
+
+function isDecisionNode(node: TSNode): boolean {
+  if (CC_DECISION_NODE_TYPES.has(node.type)) return true;
+  if (node.type === "ternary_expression") return true;
+  if (node.type === "binary_expression") {
+    const op = operatorOf(node);
+    if (op !== null && CC_LOGICAL_OPERATORS.has(op.text)) return true;
+  }
+  return false;
+}
+
+function cyclomaticComplexityWithin(functionNode: TSNode): number {
+  let count = 1;
+  const visit = (node: TSNode, isRoot: boolean): void => {
+    if (!isRoot && FUNCTION_NODE_TYPES.has(node.type)) return;
+    if (isDecisionNode(node)) count += 1;
+    for (const child of node.namedChildren) visit(child, false);
+  };
+  visit(functionNode, true);
+  return count;
+}
 
 const TOOLING_RE =
   /@ts-(?:ignore|expect-error)|eslint-(?:disable|enable)(?:-next-line)?|istanbul ignore next|c8 ignore next|prettier-ignore|stylelint-disable|tslint:disable|jshint|jscs|jslint/i;
@@ -244,51 +284,6 @@ function beforeFunctionRegions(language: unknown, before: string | undefined): B
   return out;
 }
 
-function runLizard(path: string, after: string): string {
-  if (!existsSync(PYTHON_BIN)) {
-    throw new Error(`extract-typescript: venv missing at ${PYTHON_BIN}; run \`./setup.sh\` (requires uv on PATH)`);
-  }
-  const res = spawnSync(PYTHON_BIN, [LIZARD_SCRIPT], {
-    input: JSON.stringify({ path, after }),
-    encoding: "utf8",
-  });
-  if (res.error !== undefined) throw new Error(res.error.message);
-  if (res.status !== 0) {
-    const stderrLines = (res.stderr ?? "").split("\n").filter((s) => s.length > 0);
-    const last = stderrLines[stderrLines.length - 1];
-    throw new Error(last ?? `extract-typescript: lizard exit ${res.status}`);
-  }
-  return res.stdout;
-}
-
-function isLizardFunction(value: unknown): value is { name: string; startLine: number; cyclomaticComplexity: number } {
-  return isObject(value)
-    && typeof value.name === "string"
-    && typeof value.startLine === "number"
-    && typeof value.cyclomaticComplexity === "number";
-}
-
-function parseLizardFunctions(stdout: string): Map<string, number> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stdout);
-  } catch (err) {
-    throw new Error(`extract-typescript: lizard stdout is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  if (!isObject(parsed) || !Array.isArray(parsed.functions)) return new Map();
-  const out = new Map<string, number>();
-  for (const f of parsed.functions) {
-    if (isLizardFunction(f)) {
-      out.set(`${f.name}:${f.startLine}`, f.cyclomaticComplexity);
-    }
-  }
-  return out;
-}
-
-function lizardCcMap(path: string, after: string): Map<string, number> {
-  return parseLizardFunctions(runLizard(path, after));
-}
-
 function classifyCommentKind(text: string, isBlock: boolean, isDoc: boolean): CommentFacts["kind"] {
   if (TOOLING_RE.test(text)) return "tooling";
   if (!isBlock) return "line";
@@ -354,7 +349,6 @@ function functionFacts(
   path: string,
   after: string,
   before: string | undefined,
-  lizardMap: Map<string, number>,
 ): FunctionFacts[] {
   const beforeFuncs = beforeFunctionRegions(language, before);
   const testPath = isTestPath(path);
@@ -376,7 +370,7 @@ function functionFacts(
     }
 
     const startLine = node.startPosition.row + 1;
-    const cc = lizardMap.get(`${name}:${startLine}`) ?? 1;
+    const cc = cyclomaticComplexityWithin(node);
 
     const bodyLineCount = bodyLineCountOf(body);
 
@@ -411,8 +405,7 @@ function extractRaw(input: { path: string; before?: string; after: string }): Ex
   const language = loadLanguageForPath(input.path);
   const root = parseSource(language, input.after);
   if (root === null) return { functions: [], comments: [] };
-  const lizardMap = lizardCcMap(input.path, input.after);
-  const functions = functionFacts(root.rootNode, language, input.path, input.after, input.before, lizardMap);
+  const functions = functionFacts(root.rootNode, language, input.path, input.after, input.before);
   const comments = commentFacts(input.after, input.before, root.rootNode, language);
   return { functions, comments };
 }
