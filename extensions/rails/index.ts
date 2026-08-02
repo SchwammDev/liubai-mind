@@ -103,35 +103,17 @@ export type RailsDeps = {
   logDedup?: DedupLog;
 };
 
-function resolveToolDefinitions(
-  deps: RailsDeps,
-  cwd: string,
-): { bashTool: BashTool; editTool: EditTool } {
-  return {
-    bashTool: deps.bashTool ?? createBashToolDefinition(cwd),
-    editTool: deps.editTool ?? createEditToolDefinition(cwd),
-  };
-}
-
-function resolveRuntimeSeams(
-  deps: RailsDeps,
-  cwd: string,
-): { exec: Exec; readTargetFile: (path: string) => Promise<string>; logDedup: DedupLog } {
-  return {
-    exec: deps.exec ?? createExec(cwd),
-    readTargetFile: deps.readTargetFile ?? createTargetReader(cwd),
-    logDedup: deps.logDedup ?? createFileLog(),
-  };
-}
-
 export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
   const pendingNudges = new Map<string, string[]>();
   const rules = mergeRules(loadRules(GLOBAL_RULES), loadRules(PROJECT_RULES));
   const webSearch = loadWebSearchConfig(LIUBAI_CONFIG);
   const dedup = createSession();
   const cwd = process.cwd();
-  const { bashTool, editTool } = resolveToolDefinitions(deps, cwd);
-  const { exec, readTargetFile, logDedup } = resolveRuntimeSeams(deps, cwd);
+  const bashTool = deps?.bashTool ?? createBashToolDefinition(cwd);
+  const editTool = deps?.editTool ?? createEditToolDefinition(cwd);
+  const exec = deps?.exec ?? createExec(cwd);
+  const readTargetFile = deps?.readTargetFile ?? createTargetReader(cwd);
+  const logDedup = deps?.logDedup ?? createFileLog();
 
   pi.registerTool(
     withBashDedup(bashTool, {

@@ -53,14 +53,14 @@ interface ResolvedProfileDeps {
 }
 
 function resolveProfileDeps(deps: ProfileDeps = {}): ResolvedProfileDeps {
-  const {
-    configPath = defaultComplexityConfigPath(),
-    profilePath = defaultActiveProfilePath(),
-    loadProfilesRaw: loadRaw = loadProfilesRaw,
-    loadActiveProfileName: loadActive = loadActiveProfileName,
-    writeActiveProfile: write = writeActiveProfile,
-  } = deps;
-  return { configPath, profilePath, loadRaw, loadActive, write };
+  const d = deps ?? {};
+  return {
+    configPath: d.configPath ?? defaultComplexityConfigPath(),
+    profilePath: d.profilePath ?? defaultActiveProfilePath(),
+    loadRaw: d.loadProfilesRaw ?? loadProfilesRaw,
+    loadActive: d.loadActiveProfileName ?? loadActiveProfileName,
+    write: d.writeActiveProfile ?? writeActiveProfile,
+  };
 }
 
 function messageOf(e: unknown): string {
