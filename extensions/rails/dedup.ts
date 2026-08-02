@@ -149,25 +149,30 @@ export async function checkBashEffect(command: string, exec: Exec): Promise<Effe
 // Conservative shell tokenizer: any construct whose expansion we cannot predict
 // (pipes, substitution, globs, heredocs) bails to null, which callers treat as
 // a parse miss that executes normally rather than guessing at semantics.
+function isQuote(ch: string): boolean {
+  return ch === "'" || ch === '"';
+}
+
+function readQuotedSegment(command: string, open: number): { segment: string; end: number } | null {
+  const quote = command.charAt(open);
+  const end = command.indexOf(quote, open + 1);
+  if (end < 0) return null;
+  const segment = command.slice(open + 1, end);
+  if (quote === '"' && /[$`\\]/.test(segment)) return null;
+  return { segment, end };
+}
+
 function shellWords(command: string): string[] | null {
   const words: string[] = [];
   let current = "";
   let inWord = false;
   for (let i = 0; i < command.length; i++) {
     const ch = command.charAt(i);
-    if (ch === "'") {
-      const end = command.indexOf("'", i + 1);
-      if (end < 0) return null;
-      current += command.slice(i + 1, end);
-      i = end;
-      inWord = true;
-    } else if (ch === '"') {
-      const end = command.indexOf('"', i + 1);
-      if (end < 0) return null;
-      const segment = command.slice(i + 1, end);
-      if (/[$`\\]/.test(segment)) return null;
-      current += segment;
-      i = end;
+    if (isQuote(ch)) {
+      const quoted = readQuotedSegment(command, i);
+      if (!quoted) return null;
+      current += quoted.segment;
+      i = quoted.end;
       inWord = true;
     } else if (/\s/.test(ch)) {
       if (inWord) words.push(current);
@@ -186,6 +191,49 @@ function shellWords(command: string): string[] | null {
 
 type GhArgs = { target?: string; repo?: string; values: Map<string, string> };
 
+type GhSlot = { kind: "repo" } | { kind: "value"; name: string };
+
+function ghSlotOf(flag: string, valueFlags: Record<string, string>): GhSlot | null {
+  if (flag === "--repo" || flag === "-R") return { kind: "repo" };
+  const name = valueFlags[flag];
+  return name === undefined ? null : { kind: "value", name };
+}
+
+function ghFlagValue(
+  inline: string | undefined,
+  next: string | undefined,
+): { value: string; consumed: number } | null {
+  const value = inline ?? next;
+  if (value === undefined) return null;
+  return { value, consumed: inline === undefined ? 1 : 0 };
+}
+
+type GhWordResult =
+  | { kind: "reject" }
+  | { kind: "target"; value: string }
+  | { kind: "repo"; value: string; consumed: number }
+  | { kind: "value"; name: string; value: string; consumed: number };
+
+function classifyGhWord(
+  word: string,
+  next: string | undefined,
+  valueFlags: Record<string, string>,
+  rejectFlags: string[],
+): GhWordResult {
+  const [flag, inline] = word.startsWith("--") ? splitInline(word) : [word, undefined];
+  if (rejectFlags.includes(flag)) return { kind: "reject" };
+  const slot = ghSlotOf(flag, valueFlags);
+  if (slot) {
+    const taken = ghFlagValue(inline, next);
+    if (!taken) return { kind: "reject" };
+    return slot.kind === "repo"
+      ? { kind: "repo", value: taken.value, consumed: taken.consumed }
+      : { kind: "value", name: slot.name, value: taken.value, consumed: taken.consumed };
+  }
+  if (flag.startsWith("-")) return { kind: "reject" };
+  return { kind: "target", value: word };
+}
+
 function parseGhArgs(
   rest: string[],
   valueFlags: Record<string, string>,
@@ -195,23 +243,17 @@ function parseGhArgs(
   for (let i = 0; i < rest.length; i++) {
     const word = rest[i];
     if (word === undefined) return null;
-    const [flag, inline] = word.startsWith("--") ? splitInline(word) : [word, undefined];
-    if (rejectFlags.includes(flag)) return null;
-    if (flag === "--repo" || flag === "-R") {
-      const value = inline ?? rest[++i];
-      if (value === undefined) return null;
-      args.repo = value;
-    } else if (flag in valueFlags) {
-      const name = valueFlags[flag];
-      const value = inline ?? rest[++i];
-      if (name === undefined || value === undefined) return null;
-      args.values.set(name, value);
-    } else if (flag.startsWith("-")) {
-      return null;
-    } else if (args.target === undefined) {
-      args.target = word;
+    const res = classifyGhWord(word, rest[i + 1], valueFlags, rejectFlags);
+    if (res.kind === "reject") return null;
+    if (res.kind === "target") {
+      if (args.target !== undefined) return null;
+      args.target = res.value;
+    } else if (res.kind === "repo") {
+      args.repo = res.value;
+      i += res.consumed;
     } else {
-      return null;
+      args.values.set(res.name, res.value);
+      i += res.consumed;
     }
   }
   return args;
@@ -234,9 +276,32 @@ function ghViewArgv(kind: string, args: GhArgs, field: string): string[] {
   ];
 }
 
-async function ghCommentEffect(words: string[], exec: Exec): Promise<EffectCheck> {
+type GhHeader = { kind: string; sub: string; rest: string[] };
+
+function ghHeader(words: string[]): GhHeader | null {
   const [gh, kind, sub, ...rest] = words;
-  if (gh !== "gh" || kind === undefined || sub !== "comment") return { effect: "unparseable" };
+  if (gh !== "gh" || kind === undefined || sub === undefined) return null;
+  return { kind, sub, rest };
+}
+
+async function findPostedComment(
+  kind: string,
+  args: GhArgs,
+  body: string,
+  exec: Exec,
+): Promise<GhComment | null> {
+  const res = await exec(ghViewArgv(kind, args, "comments"));
+  if (res.exitCode !== 0) return null;
+  return (
+    parseComments(res.stdout).find((comment) => normalizeBody(comment.body) === normalizeBody(body)) ??
+    null
+  );
+}
+
+async function ghCommentEffect(words: string[], exec: Exec): Promise<EffectCheck> {
+  const header = ghHeader(words);
+  if (!header || header.sub !== "comment") return { effect: "unparseable" };
+  const { kind, rest } = header;
   const args = parseGhArgs(
     rest,
     { "--body": "body", "-b": "body" },
@@ -246,61 +311,73 @@ async function ghCommentEffect(words: string[], exec: Exec): Promise<EffectCheck
   if (!args || body === undefined) return { effect: "unparseable" };
   if (kind === "issue" && !args.target) return { effect: "unparseable" };
 
-  const res = await exec(ghViewArgv(kind, args, "comments"));
-  if (res.exitCode !== 0) return { effect: "absent" };
-  const existing = parseComments(res.stdout).find(
-    (comment) => normalizeBody(comment.body) === normalizeBody(body),
-  );
-  if (!existing) return { effect: "absent" };
-  return { effect: "present", notice: `comment already posted: ${existing.url}` };
+  const existing = await findPostedComment(kind, args, body, exec);
+  return existing
+    ? { effect: "present", notice: `comment already posted: ${existing.url}` }
+    : { effect: "absent" };
+}
+
+async function stateMatches(kind: string, args: GhArgs, sub: string, exec: Exec): Promise<boolean> {
+  const res = await exec(ghViewArgv(kind, args, "state"));
+  if (res.exitCode !== 0) return false;
+  const parsed = parseJson(res.stdout);
+  const state = isRecord(parsed) ? parsed.state : undefined;
+  return state === (sub === "close" ? "CLOSED" : "OPEN");
+}
+
+function statePresentNotice(kind: string, target: string | undefined, sub: string): EffectCheck {
+  const verb = sub === "close" ? "closed" : "open";
+  return { effect: "present", notice: `${kind} ${target ?? ""} already ${verb}`.replace("  ", " ") };
 }
 
 async function ghStateEffect(words: string[], exec: Exec): Promise<EffectCheck> {
-  const [gh, kind, sub, ...rest] = words;
-  if (gh !== "gh" || kind === undefined || (sub !== "close" && sub !== "reopen")) {
-    return { effect: "unparseable" };
-  }
+  const header = ghHeader(words);
+  if (!header || (header.sub !== "close" && header.sub !== "reopen")) return { effect: "unparseable" };
+  const { kind, sub, rest } = header;
   const args = parseGhArgs(rest, { "--comment": "comment", "-c": "comment", "--reason": "reason", "-r": "reason" }, []);
   if (!args) return { effect: "unparseable" };
   if (kind === "issue" && !args.target) return { effect: "unparseable" };
 
-  const res = await exec(ghViewArgv(kind, args, "state"));
-  if (res.exitCode !== 0) return { effect: "absent" };
-  const parsed = parseJson(res.stdout);
-  const state = isRecord(parsed) ? parsed.state : undefined;
-  const wanted = sub === "close" ? "CLOSED" : "OPEN";
-  if (state !== wanted) return { effect: "absent" };
-  return {
-    effect: "present",
-    notice: `${kind} ${args.target ?? ""} already ${sub === "close" ? "closed" : "open"}`.replace("  ", " "),
-  };
+  if (!(await stateMatches(kind, args, sub, exec))) return { effect: "absent" };
+  return statePresentNotice(kind, args.target, sub);
 }
 
-async function gitTagEffect(words: string[], exec: Exec): Promise<EffectCheck> {
-  const [git, sub, ...rest] = words;
-  if (git !== "git" || sub !== "tag") return { effect: "unparseable" };
+const GIT_TAG_BOOL_FLAGS = ["-a", "--annotate", "-s", "--sign", "-f", "--force"];
+const GIT_TAG_VALUE_FLAGS = ["-m", "--message", "-F", "--file", "-u", "--local-user"];
+
+function gitTagName(rest: string[]): string | null {
   let name: string | undefined;
   for (let i = 0; i < rest.length; i++) {
     const word = rest[i];
-    if (word === undefined) return { effect: "unparseable" };
-    if (["-a", "--annotate", "-s", "--sign", "-f", "--force"].includes(word)) continue;
-    if (["-m", "--message", "-F", "--file", "-u", "--local-user"].includes(word)) {
+    if (word === undefined) return null;
+    if (GIT_TAG_BOOL_FLAGS.includes(word)) continue;
+    if (GIT_TAG_VALUE_FLAGS.includes(word)) {
       i++;
     } else if (word.startsWith("-")) {
-      return { effect: "unparseable" };
+      return null;
     } else if (name === undefined) {
       name = word;
     } else {
-      return { effect: "unparseable" };
+      return null;
     }
   }
-  if (!name) return { effect: "unparseable" };
+  return name || null;
+}
 
+async function tagAtHead(name: string, exec: Exec): Promise<EffectCheck> {
   const tag = await exec(["git", "rev-parse", `refs/tags/${name}^{commit}`]);
   if (tag.exitCode !== 0) return { effect: "absent" };
   const head = await exec(["git", "rev-parse", "HEAD"]);
   if (head.exitCode !== 0 || tag.stdout.trim() !== head.stdout.trim()) return { effect: "absent" };
   return { effect: "present", notice: `tag ${name} already exists at HEAD` };
+}
+
+async function gitTagEffect(words: string[], exec: Exec): Promise<EffectCheck> {
+  const [git, sub, ...rest] = words;
+  if (git !== "git" || sub !== "tag") return { effect: "unparseable" };
+  const name = gitTagName(rest);
+  if (!name) return { effect: "unparseable" };
+  return tagAtHead(name, exec);
 }
 
 type GhComment = { body: string; url: string };

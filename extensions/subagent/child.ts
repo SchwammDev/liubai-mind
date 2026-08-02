@@ -155,20 +155,16 @@ export function firstProfileName(profiles: Record<string, unknown>): string | un
   return names.length > 0 ? names[0] : undefined;
 }
 
-export function loadActiveProfileName(profilePath: string = defaultActiveProfilePath()): string | undefined {
-  let raw: string;
+function readActiveProfileRaw(profilePath: string): string | undefined {
   try {
-    raw = fs.readFileSync(profilePath, "utf8");
+    return fs.readFileSync(profilePath, "utf8");
   } catch (e) {
     if (e instanceof Error && "code" in e && e.code === "ENOENT") return undefined;
     throw e;
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error(`Active profile config at ${profilePath} is not valid JSON.`);
-  }
+}
+
+function requireProfileName(parsed: unknown, profilePath: string): string {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error(`Active profile config at ${profilePath} must be an object.`);
   }
@@ -177,6 +173,18 @@ export function loadActiveProfileName(profilePath: string = defaultActiveProfile
     throw new Error(`Active profile config at ${profilePath} needs a "profile" string.`);
   }
   return profile;
+}
+
+export function loadActiveProfileName(profilePath: string = defaultActiveProfilePath()): string | undefined {
+  const raw = readActiveProfileRaw(profilePath);
+  if (raw === undefined) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`Active profile config at ${profilePath} is not valid JSON.`);
+  }
+  return requireProfileName(parsed, profilePath);
 }
 
 export function loadComplexitySelection(
@@ -303,72 +311,88 @@ export function formatUsageStats(
   return parts.join(" ");
 }
 
+type ThemeFg = (color: ThemeColor, text: string) => string;
+type ToolCallFormatter = (args: Record<string, unknown>, fg: ThemeFg) => string;
+
+function shortenHomePath(p: string): string {
+  const home = os.homedir();
+  return p.startsWith(home) ? `~${p.slice(home.length)}` : p;
+}
+
+function argPath(args: Record<string, unknown>): string {
+  return shortenHomePath((args.file_path || args.path || "...") as string);
+}
+
+function formatBashCall(args: Record<string, unknown>, fg: ThemeFg): string {
+  const command = (args.command as string) || "...";
+  const preview = command.length > 60 ? `${command.slice(0, 60)}...` : command;
+  return fg("muted", "$ ") + fg("toolOutput", preview);
+}
+
+function formatReadCall(args: Record<string, unknown>, fg: ThemeFg): string {
+  const offset = args.offset as number | undefined;
+  const limit = args.limit as number | undefined;
+  let text = fg("accent", argPath(args));
+  if (offset !== undefined || limit !== undefined) {
+    const startLine = offset ?? 1;
+    const endLine = limit !== undefined ? startLine + limit - 1 : "";
+    text += fg("warning", `:${startLine}${endLine ? `-${endLine}` : ""}`);
+  }
+  return fg("muted", "read ") + text;
+}
+
+function formatWriteCall(args: Record<string, unknown>, fg: ThemeFg): string {
+  const content = (args.content || "") as string;
+  const lines = content.split("\n").length;
+  let text = fg("muted", "write ") + fg("accent", argPath(args));
+  if (lines > 1) text += fg("dim", ` (${lines} lines)`);
+  return text;
+}
+
+function formatEditCall(args: Record<string, unknown>, fg: ThemeFg): string {
+  return fg("muted", "edit ") + fg("accent", argPath(args));
+}
+
+function formatLsCall(args: Record<string, unknown>, fg: ThemeFg): string {
+  const rawPath = (args.path || ".") as string;
+  return fg("muted", "ls ") + fg("accent", shortenHomePath(rawPath));
+}
+
+function formatFindCall(args: Record<string, unknown>, fg: ThemeFg): string {
+  const pattern = (args.pattern || "*") as string;
+  const rawPath = (args.path || ".") as string;
+  return fg("muted", "find ") + fg("accent", pattern) + fg("dim", ` in ${shortenHomePath(rawPath)}`);
+}
+
+function formatGrepCall(args: Record<string, unknown>, fg: ThemeFg): string {
+  const pattern = (args.pattern || "") as string;
+  const rawPath = (args.path || ".") as string;
+  return fg("muted", "grep ") + fg("accent", `/${pattern}/`) + fg("dim", ` in ${shortenHomePath(rawPath)}`);
+}
+
+function formatUnknownCall(toolName: string, args: Record<string, unknown>, fg: ThemeFg): string {
+  const argsStr = JSON.stringify(args);
+  const preview = argsStr.length > 50 ? `${argsStr.slice(0, 50)}...` : argsStr;
+  return fg("accent", toolName) + fg("dim", ` ${preview}`);
+}
+
+const TOOL_CALL_FORMATTERS: Record<string, ToolCallFormatter> = {
+  bash: formatBashCall,
+  read: formatReadCall,
+  write: formatWriteCall,
+  edit: formatEditCall,
+  ls: formatLsCall,
+  find: formatFindCall,
+  grep: formatGrepCall,
+};
+
 export function formatToolCall(
   toolName: string,
   args: Record<string, unknown>,
   themeFg: (color: ThemeColor, text: string) => string,
 ): string {
-  const shortenPath = (p: string) => {
-    const home = os.homedir();
-    return p.startsWith(home) ? `~${p.slice(home.length)}` : p;
-  };
-
-  switch (toolName) {
-    case "bash": {
-      const command = (args.command as string) || "...";
-      const preview = command.length > 60 ? `${command.slice(0, 60)}...` : command;
-      return themeFg("muted", "$ ") + themeFg("toolOutput", preview);
-    }
-    case "read": {
-      const rawPath = (args.file_path || args.path || "...") as string;
-      const filePath = shortenPath(rawPath);
-      const offset = args.offset as number | undefined;
-      const limit = args.limit as number | undefined;
-      let text = themeFg("accent", filePath);
-      if (offset !== undefined || limit !== undefined) {
-        const startLine = offset ?? 1;
-        const endLine = limit !== undefined ? startLine + limit - 1 : "";
-        text += themeFg("warning", `:${startLine}${endLine ? `-${endLine}` : ""}`);
-      }
-      return themeFg("muted", "read ") + text;
-    }
-    case "write": {
-      const rawPath = (args.file_path || args.path || "...") as string;
-      const filePath = shortenPath(rawPath);
-      const content = (args.content || "") as string;
-      const lines = content.split("\n").length;
-      let text = themeFg("muted", "write ") + themeFg("accent", filePath);
-      if (lines > 1) text += themeFg("dim", ` (${lines} lines)`);
-      return text;
-    }
-    case "edit": {
-      const rawPath = (args.file_path || args.path || "...") as string;
-      return themeFg("muted", "edit ") + themeFg("accent", shortenPath(rawPath));
-    }
-    case "ls": {
-      const rawPath = (args.path || ".") as string;
-      return themeFg("muted", "ls ") + themeFg("accent", shortenPath(rawPath));
-    }
-    case "find": {
-      const pattern = (args.pattern || "*") as string;
-      const rawPath = (args.path || ".") as string;
-      return themeFg("muted", "find ") + themeFg("accent", pattern) + themeFg("dim", ` in ${shortenPath(rawPath)}`);
-    }
-    case "grep": {
-      const pattern = (args.pattern || "") as string;
-      const rawPath = (args.path || ".") as string;
-      return (
-        themeFg("muted", "grep ") +
-        themeFg("accent", `/${pattern}/`) +
-        themeFg("dim", ` in ${shortenPath(rawPath)}`)
-      );
-    }
-    default: {
-      const argsStr = JSON.stringify(args);
-      const preview = argsStr.length > 50 ? `${argsStr.slice(0, 50)}...` : argsStr;
-      return themeFg("accent", toolName) + themeFg("dim", ` ${preview}`);
-    }
-  }
+  const formatter = TOOL_CALL_FORMATTERS[toolName];
+  return formatter ? formatter(args, themeFg) : formatUnknownCall(toolName, args, themeFg);
 }
 
 export function getFinalOutput(messages: Message[]): string {

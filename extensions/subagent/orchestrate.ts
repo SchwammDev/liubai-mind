@@ -252,6 +252,16 @@ async function runParallel(
   };
 }
 
+function loadComplexityOrError(
+  deps: SpawnDeps,
+): { kind: "ok"; value: ComplexitySelection } | { kind: "error"; message: string } {
+  try {
+    return { kind: "ok", value: (deps.loadComplexity ?? loadComplexitySelection)() };
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export async function runSpawn(
   deps: SpawnDeps,
   ctx: SpawnContext,
@@ -263,12 +273,9 @@ export async function runSpawn(
   const mode = selectMode(params);
   if (mode.kind === "error") return textResult("single", mode.message);
 
-  let complexity: ComplexitySelection;
-  try {
-    complexity = (deps.loadComplexity ?? loadComplexitySelection)();
-  } catch (e) {
-    return textResult(mode.kind, e instanceof Error ? e.message : String(e), true);
-  }
+  const loaded = loadComplexityOrError(deps);
+  if (loaded.kind === "error") return textResult(mode.kind, loaded.message, true);
+  const complexity = loaded.value;
   const complexityMap = complexity.map;
 
   const catalog = ctx.modelRegistry;

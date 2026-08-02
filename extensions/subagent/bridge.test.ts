@@ -176,6 +176,11 @@ const answerInput = async (bridge: AskBridge, f: FakeForwarder, id: string, resu
   await bridge.handle(uiRequest({ id, method: "input", title: "T" }));
 };
 
+const answerEditor = async (bridge: AskBridge, f: FakeForwarder, id: string, result: string | undefined) => {
+  f.editorResult = result;
+  await bridge.handle(uiRequest({ id, method: "editor", title: "T" }));
+};
+
 const settle = (t: FakeTransport) => t.emitLine(AGENT_SETTLED);
 
 const settleAnd = async (t: FakeTransport, p: Promise<unknown>) => {
@@ -357,6 +362,16 @@ test("AskBridge input writes {id, value} for a string and {id, cancelled} for un
 
   assertResponse(w, 0, valueResponse("i1", "typed"));
   assertResponse(w, 1, cancelledResponse("i2"));
+});
+
+test("AskBridge editor writes {id, value} for a string and {id, cancelled} for undefined", async () => {
+  const { f, w, bridge } = makeBridge();
+
+  await answerEditor(bridge, f, "e1", "edited");
+  await answerEditor(bridge, f, "e2", undefined);
+
+  assertResponse(w, 0, valueResponse("e1", "edited"));
+  assertResponse(w, 1, cancelledResponse("e2"));
 });
 
 test("AskBridge notify forwards to the forwarder and writes nothing", async () => {

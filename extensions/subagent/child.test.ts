@@ -13,6 +13,7 @@ import {
   validateProfilesConfig,
   firstProfileName,
   loadActiveProfileName,
+  formatToolCall,
   loadComplexitySelection,
   aggregateUsage,
   getFinalOutput,
@@ -274,6 +275,108 @@ test("loadActiveProfileName returns the selected name when present", () => {
   );
 
   assert.equal(loadActiveProfileName(profilePath), "heavy");
+});
+
+const activeProfileFileHolding = (contents: string): string => {
+  const { profilePath } = profileConfigFiles(JSON.stringify({ profiles: PROFILES }), contents);
+  return profilePath;
+};
+
+test("loadActiveProfileName rejects a file that is not valid JSON", () => {
+  const profilePath = activeProfileFileHolding("{not json");
+
+  assert.throws(() => loadActiveProfileName(profilePath), /not valid JSON/);
+});
+
+test("loadActiveProfileName rejects a JSON array as needing to be an object", () => {
+  const profilePath = activeProfileFileHolding(JSON.stringify(["heavy"]));
+
+  assert.throws(() => loadActiveProfileName(profilePath), /must be an object/);
+});
+
+test("loadActiveProfileName rejects an object without a profile string", () => {
+  const profilePath = activeProfileFileHolding(JSON.stringify({ other: "heavy" }));
+
+  assert.throws(() => loadActiveProfileName(profilePath), /"profile" string/);
+});
+
+test("loadActiveProfileName rejects a blank profile string", () => {
+  const profilePath = activeProfileFileHolding(JSON.stringify({ profile: "   " }));
+
+  assert.throws(() => loadActiveProfileName(profilePath), /"profile" string/);
+});
+
+const fg = (color: string, text: string): string => `[${color}]${text}`;
+const formatted = (tool: string, args: Record<string, unknown>): string => formatToolCall(tool, args, fg);
+
+test("formatToolCall renders a short bash command inline", () => {
+  assert.equal(formatted("bash", { command: "echo hi" }), "[muted]$ [toolOutput]echo hi");
+});
+
+test("formatToolCall truncates a bash command longer than sixty characters", () => {
+  const long = "a".repeat(70);
+
+  assert.equal(formatted("bash", { command: long }), `[muted]$ [toolOutput]${"a".repeat(60)}...`);
+});
+
+test("formatToolCall falls back to an ellipsis for a bash call missing its command", () => {
+  assert.equal(formatted("bash", {}), "[muted]$ [toolOutput]...");
+});
+
+test("formatToolCall renders a read as a path with no range when unbounded", () => {
+  assert.equal(formatted("read", { file_path: "/etc/hosts" }), "[muted]read [accent]/etc/hosts");
+});
+
+test("formatToolCall appends the offset-limit range to a bounded read", () => {
+  assert.equal(
+    formatted("read", { file_path: "/etc/hosts", offset: 5, limit: 10 }),
+    "[muted]read [accent]/etc/hosts[warning]:5-14",
+  );
+});
+
+test("formatToolCall shows an offset-only read as an open-ended line", () => {
+  assert.equal(formatted("read", { file_path: "/etc/hosts", offset: 5 }), "[muted]read [accent]/etc/hosts[warning]:5");
+});
+
+test("formatToolCall abbreviates a home-relative path to a tilde", () => {
+  const underHome = path.join(os.homedir(), "proj/x");
+
+  assert.equal(formatted("read", { file_path: underHome }), "[muted]read [accent]~/proj/x");
+});
+
+test("formatToolCall annotates a multi-line write with its line count", () => {
+  assert.equal(formatted("write", { path: "/x", content: "a\nb\nc" }), "[muted]write [accent]/x[dim] (3 lines)");
+});
+
+test("formatToolCall leaves a single-line write without a line count", () => {
+  assert.equal(formatted("write", { path: "/x", content: "solo" }), "[muted]write [accent]/x");
+});
+
+test("formatToolCall renders an edit as its path", () => {
+  assert.equal(formatted("edit", { file_path: "/x" }), "[muted]edit [accent]/x");
+});
+
+test("formatToolCall defaults an ls without a path to the current directory", () => {
+  assert.equal(formatted("ls", {}), "[muted]ls [accent].");
+});
+
+test("formatToolCall renders a find as its pattern within a path", () => {
+  assert.equal(formatted("find", { pattern: "*.ts", path: "/src" }), "[muted]find [accent]*.ts[dim] in /src");
+});
+
+test("formatToolCall renders a grep pattern between slashes within a path", () => {
+  assert.equal(formatted("grep", { pattern: "foo", path: "/src" }), "[muted]grep [accent]/foo/[dim] in /src");
+});
+
+test("formatToolCall previews an unknown tool's arguments as JSON", () => {
+  assert.equal(formatted("custom", { a: 1 }), '[accent]custom[dim] {"a":1}');
+});
+
+test("formatToolCall truncates an unknown tool's argument preview past fifty characters", () => {
+  const wide = { note: "z".repeat(60) };
+  const expected = JSON.stringify(wide).slice(0, 50);
+
+  assert.equal(formatted("custom", wide), `[accent]custom[dim] ${expected}...`);
 });
 
 test("a report under the cap is accepted", () => {
