@@ -11,6 +11,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 TS_DIR="$ROOT/extensions/rails"
+COV_TMP="$ROOT/coverage/tmp"
+COV_SNAP="$ROOT/coverage/snapshot.json"
 
 args=("$@")
 ts_args=("${args[@]}")
@@ -18,8 +20,13 @@ ts_args=("${args[@]}")
 
 status=0
 
+# Collect V8 coverage during the node --test runs so the pre-commit CRAP gate
+# (liubai crap) has a fresh snapshot. Refreshed on every run, merged into
+# coverage/snapshot.json in the finally block below regardless of test result.
+rm -rf "$COV_TMP"
+
 echo "## TypeScript (node --test)"
-ts_out=$(mise exec -- node --test --experimental-strip-types --test-concurrency=1 "${ts_args[@]}" 2>&1) || status=1
+ts_out=$(NODE_V8_COVERAGE="$COV_TMP" mise exec -- node --test --experimental-strip-types --test-concurrency=1 "${ts_args[@]}" 2>&1) || status=1
 if [ $status -eq 0 ]; then
   echo "✅ TypeScript tests passed"
 else
@@ -28,11 +35,18 @@ fi
 
 echo
 echo "## Setup tooling (node --test)"
-mjs_out=$(mise exec -- node --test "$ROOT"/bin/*.test.mjs 2>&1) || status=1
+mjs_out=$(NODE_V8_COVERAGE="$COV_TMP" mise exec -- node --test "$ROOT"/bin/*.test.mjs 2>&1) || status=1
 if [ $status -eq 0 ]; then
   echo "✅ Setup tooling tests passed"
 else
   echo "$mjs_out"
+fi
+
+# Regenerate the coverage snapshot from whatever V8 wrote, even if tests failed —
+# a stale or missing snapshot makes the CRAP gate lie. Guarded: only when the
+# tmp dir is non-empty, otherwise coverage-v8-cli would error on nothing.
+if [ -d "$COV_TMP" ] && [ -n "$(ls -A "$COV_TMP" 2>/dev/null)" ]; then
+  mise exec -- node --experimental-strip-types "$ROOT/engine/coverage-v8-cli.ts" "$COV_TMP" "$ROOT" "$COV_SNAP" >/dev/null
 fi
 
 tsc_status=0

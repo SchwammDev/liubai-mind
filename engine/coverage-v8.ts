@@ -110,6 +110,7 @@ function resolveFileUnderRoot(fileUrl: string, repoAbs: string): string | undefi
   if (rel === "" || rel.startsWith("..")) return undefined;
   const segments = rel.split(path.sep);
   if (segments.includes("node_modules")) return undefined;
+  if (!fs.existsSync(absPath)) return undefined;
   return absPath;
 }
 
