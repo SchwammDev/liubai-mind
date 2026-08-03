@@ -25,6 +25,7 @@ export type Change = "new" | "changed" | "same";
 export interface FunctionFacts {
   name: string;
   startLine: number;
+  endLine: number;
   cyclomaticComplexity: number;
   missingAnnotations: string[];
   isTest: boolean;

@@ -156,6 +156,7 @@ def _function_facts(tree: ast.AST, lines: list[str], path: str, before_funcs: di
         facts[node.name] = {
             "name": node.name,
             "startLine": node.lineno,
+            "endLine": node.end_lineno or node.lineno,
             "cyclomaticComplexity": cyclomatic_complexity(node),
             "missingAnnotations": missing_annotations(node),
             "isTest": node.name.startswith("test_") and test_file,

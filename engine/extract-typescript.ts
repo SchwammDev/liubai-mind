@@ -121,6 +121,7 @@ export function validateFunction(raw: unknown): FunctionFacts {
     missingAnnotations: requireStringArray(raw.missingAnnotations, "extract-typescript: function missingAnnotations is not a string array"),
     isTest: requireBoolean(raw.isTest, "extract-typescript: function isTest is not a boolean"),
     bodyLineCount: requireNumber(raw.bodyLineCount, "extract-typescript: function bodyLineCount is not a number"),
+    endLine: requireNumber(raw.endLine, "extract-typescript: function endLine is not a number"),
     signature: requireChange(raw.signature, "extract-typescript: function signature is not a Change"),
     body: requireChange(raw.body, "extract-typescript: function body is not a Change"),
   };
@@ -373,6 +374,7 @@ function functionFacts(
     }
 
     const startLine = node.startPosition.row + 1;
+    const endLine = node.endPosition.row + 1;
     const cc = cyclomaticComplexityWithin(node);
 
     const bodyLineCount = bodyLineCountOf(body);
@@ -394,6 +396,7 @@ function functionFacts(
     return {
       name,
       startLine,
+      endLine,
       cyclomaticComplexity: cc,
       missingAnnotations: [],
       isTest: testPath && isTestCallback,

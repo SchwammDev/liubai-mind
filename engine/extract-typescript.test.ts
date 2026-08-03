@@ -20,6 +20,12 @@ async function ccOf(src: string, name: string, path = "app/foo.ts"): Promise<num
   return findFn(ext, name).cyclomaticComplexity;
 }
 
+test("endLine_marks_the_last_line_of_the_function_node", async () => {
+  const src = "function f() {\n  return 1;\n}\n";
+  const fn = findFn(await extractText("app/foo.ts", src), "f");
+  assert.equal(fn.endLine, 3);
+});
+
 test("function_declaration_is_extracted_with_declared_name", async () => {
   const src = "function foo() {\n  return 1;\n}\n";
   const ext = await extractText("app/foo.ts", src);
@@ -374,7 +380,7 @@ test("a non-test call's trailing callback in a test file stays anonymous and non
 });
 
 const WELL_FORMED_FUNCTION = {
-  name: "f", startLine: 1, cyclomaticComplexity: 1, missingAnnotations: [],
+  name: "f", startLine: 1, endLine: 1, cyclomaticComplexity: 1, missingAnnotations: [],
   isTest: false, bodyLineCount: 1, signature: "new", body: "new",
 };
 const WELL_FORMED_COMMENT = { line: 1, text: "// x", kind: "line", added: true };

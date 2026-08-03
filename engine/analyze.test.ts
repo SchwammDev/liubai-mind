@@ -10,6 +10,7 @@ const APP_PY = "app/foo.py";
 const TOUCHED_FUNCTION: FunctionFacts = {
   name: "f",
   startLine: 1,
+  endLine: 3,
   cyclomaticComplexity: 9,
   missingAnnotations: ["x"],
   isTest: false,

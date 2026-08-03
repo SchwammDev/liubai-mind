@@ -168,7 +168,7 @@ test("missing_lizard_hard_fails_with_install_message", async () => {
 });
 
 const WELL_FORMED_FUNCTION = {
-  name: "f", startLine: 1, cyclomaticComplexity: 1, missingAnnotations: [],
+  name: "f", startLine: 1, endLine: 1, cyclomaticComplexity: 1, missingAnnotations: [],
   isTest: false, bodyLineCount: 1, signature: "new", body: "new",
 };
 
