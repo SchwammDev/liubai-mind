@@ -28,6 +28,7 @@ function func(over: Partial<FunctionFacts>): FunctionFacts {
   return {
     name: "f",
     startLine: 1,
+    endLine: 3,
     cyclomaticComplexity: 1,
     missingAnnotations: [],
     isTest: false,
