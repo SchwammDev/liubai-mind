@@ -32,6 +32,13 @@ if [ "${1:-}" = "cc-hook" ]; then
   exec mise exec -- node --experimental-strip-types "$HOME/.pi/agent/engine/cc-hook.ts" "$@"
 fi
 
+# `liubai crap` runs the CRAP gate against staged TS files using the coverage
+# snapshot in the caller's working directory (coverage/snapshot.json, produced
+# by run-tests.sh). Intended as a pre-commit hook; run from the repo root.
+if [ "${1:-}" = "crap" ]; then
+  exec mise exec -- node --experimental-strip-types "$REPO/engine/crap-cli.ts"
+fi
+
 [ -x "$PI_BIN" ] || { echo "liubai: engine not installed — run $REPO/setup.sh" >&2; exit 1; }
 
 # `liubai --dev` steers the session from the working tree instead of the installed

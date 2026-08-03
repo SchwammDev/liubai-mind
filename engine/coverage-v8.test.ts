@@ -221,6 +221,22 @@ test("executed and missing line arrays are sorted ascending", async () => {
   }
 });
 
+test("a file url pointing at a non-existent path under root is skipped not crashed", async () => {
+  const root = tmpDir("v8cov-phantom-");
+  try {
+    const phantom = path.join(root, "[eval1]");
+    writeCoverage(path.join(root, "coverage"), "proc-1.json", [
+      { url: fileUrl(phantom), ranges: [{ startOffset: 0, endOffset: 10, count: 1 }] },
+    ]);
+
+    const snap = await snapshotOf(root);
+
+    assert.deepEqual(snap.files, {});
+  } finally {
+    rmTree(root);
+  }
+});
+
 test("a real node --test subprocess produces a snapshot marking the untaken branch missing", async () => {
   const root = tmpDir("v8cov-integ-");
   try {

@@ -7,3 +7,4 @@ scratch-oh/
 config/models.json
 .coverage
 .venv
+coverage/
