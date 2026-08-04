@@ -67,7 +67,7 @@ test("no_staged_ts_files_passes_without_needing_coverage", async () => {
   const root = tmpRepo("crap-empty-");
 
   try {
-    const res = await runCrap({ cwd: root, adapter: fakeAdapter({ exists: false }) });
+    const res = await runCrap({ cwd: root, adapters: { typescript: fakeAdapter({ exists: false }) } });
 
     assert.equal(res.status, 0);
     assert.equal(res.stderr, "");
@@ -82,7 +82,7 @@ test("missing_snapshot_fails_with_a_run_tests_message", async () => {
     stageWithHunk(root, "foo.ts", "function f() {\n  return 1;\n}\n");
     amendLine(root, "foo.ts", "function f() {\n  return 2;\n}\n");
 
-    const res = await runCrap({ cwd: root, adapter: fakeAdapter({ exists: false }) });
+    const res = await runCrap({ cwd: root, adapters: { typescript: fakeAdapter({ exists: false }) } });
 
     assert.equal(res.status, 1);
     assert.match(res.stderr, /run tests with coverage first/i);
@@ -102,7 +102,7 @@ test("stale_coverage_fails_before_evaluating_violations", async () => {
 
     const res = await runCrap({
       cwd: root,
-      adapter: fakeAdapter({ mtime: future - 120, functions: [HIGH_CC_FN] }),
+      adapters: { typescript: fakeAdapter({ mtime: future - 120, functions: [HIGH_CC_FN] }) },
     });
 
     assert.equal(res.status, 1);
@@ -120,10 +120,10 @@ test("violation_over_threshold_is_reported_and_fails", async () => {
 
     const res = await runCrap({
       cwd: root,
-      adapter: fakeAdapter({
+      adapters: { typescript: fakeAdapter({
         functions: [HIGH_CC_FN],
         snapshot: { files: { "foo.ts": { executed: [1], missing: [2, 3, 4, 5] } } },
-      }),
+      }) },
     });
 
     assert.equal(res.status, 1);
@@ -142,10 +142,10 @@ test("function_not_intersecting_hunk_is_not_reported", async () => {
 
     const res = await runCrap({
       cwd: root,
-      adapter: fakeAdapter({
+      adapters: { typescript: fakeAdapter({
         functions: [HIGH_CC_FN],
         snapshot: { files: { "foo.ts": { executed: [], missing: [1, 2, 3] } } },
-      }),
+      }) },
     });
 
     assert.equal(res.status, 0);
@@ -160,7 +160,7 @@ test("test_file_is_skipped_even_with_a_high_cc_function", async () => {
     stageWithHunk(root, "foo.test.ts", "function f() {\n  return 1;\n}\n");
     amendLine(root, "foo.test.ts", "function f() {\n  return 2;\n}\n");
 
-    const res = await runCrap({ cwd: root, adapter: fakeAdapter({ functions: [HIGH_CC_FN] }) });
+    const res = await runCrap({ cwd: root, adapters: { typescript: fakeAdapter({ functions: [HIGH_CC_FN] }) } });
 
     assert.equal(res.status, 0);
   } finally {
@@ -174,7 +174,7 @@ test("declaration_file_is_skipped", async () => {
     stageWithHunk(root, "types.d.ts", "declare const x: number;\n");
     amendLine(root, "types.d.ts", "declare const x: string;\n");
 
-    const res = await runCrap({ cwd: root, adapter: fakeAdapter({ functions: [HIGH_CC_FN] }) });
+    const res = await runCrap({ cwd: root, adapters: { typescript: fakeAdapter({ functions: [HIGH_CC_FN] }) } });
 
     assert.equal(res.status, 0);
   } finally {
@@ -188,7 +188,7 @@ test("file_under_a_skipped_path_segment_is_skipped", async () => {
     stageWithHunk(root, "scripts/run.ts", "function f() {\n  return 1;\n}\n");
     amendLine(root, "scripts/run.ts", "function f() {\n  return 2;\n}\n");
 
-    const res = await runCrap({ cwd: root, adapter: fakeAdapter({ functions: [HIGH_CC_FN] }) });
+    const res = await runCrap({ cwd: root, adapters: { typescript: fakeAdapter({ functions: [HIGH_CC_FN] }) } });
 
     assert.equal(res.status, 0);
   } finally {
@@ -202,7 +202,7 @@ test("file_in_a_dot_directory_is_skipped", async () => {
     stageWithHunk(root, ".cache/run.ts", "function f() {\n  return 1;\n}\n");
     amendLine(root, ".cache/run.ts", "function f() {\n  return 2;\n}\n");
 
-    const res = await runCrap({ cwd: root, adapter: fakeAdapter({ functions: [HIGH_CC_FN] }) });
+    const res = await runCrap({ cwd: root, adapters: { typescript: fakeAdapter({ functions: [HIGH_CC_FN] }) } });
 
     assert.equal(res.status, 0);
   } finally {
@@ -217,7 +217,7 @@ test("generated_header_file_is_skipped", async () => {
     stageWithHunk(root, "gen.ts", header);
     amendLine(root, "gen.ts", "// @generated\n// do not edit\nfunction f() {\n  return 2;\n}\n");
 
-    const res = await runCrap({ cwd: root, adapter: fakeAdapter({ functions: [HIGH_CC_FN] }) });
+    const res = await runCrap({ cwd: root, adapters: { typescript: fakeAdapter({ functions: [HIGH_CC_FN] }) } });
 
     assert.equal(res.status, 0);
   } finally {
@@ -233,7 +233,7 @@ test("file_absent_from_snapshot_is_treated_as_new_with_zero_coverage", async () 
 
     const res = await runCrap({
       cwd: root,
-      adapter: fakeAdapter({ functions: [HIGH_CC_FN], snapshot: { files: {} } }),
+      adapters: { typescript: fakeAdapter({ functions: [HIGH_CC_FN], snapshot: { files: {} } }) },
     });
 
     assert.equal(res.status, 1);
@@ -253,14 +253,215 @@ test("threshold_is_configurable", async () => {
     const res = await runCrap({
       cwd: root,
       threshold: 1,
-      adapter: fakeAdapter({
+      adapters: { typescript: fakeAdapter({
         functions: [lowCc],
         snapshot: { files: { "foo.ts": { executed: [], missing: [1, 2, 3] } } },
-      }),
+      }) },
     });
 
     assert.equal(res.status, 1);
     assert.match(res.stderr, /threshold=1\):/);
+  } finally {
+    rmTree(root);
+  }
+});
+
+test("python_file_candidate_is_routed_to_the_python_adapter", async () => {
+  const root = tmpRepo("crap-py-rt-");
+  try {
+    stageWithHunk(root, "foo.py", "def f(x):\n    return 1\n");
+    amendLine(root, "foo.py", "def f(x):\n    return 2\n");
+
+    const res = await runCrap({
+      cwd: root,
+      adapters: { python: fakeAdapter({
+        functions: [HIGH_CC_FN],
+        snapshot: { files: { "foo.py": { executed: [1], missing: [2, 3, 4, 5] } } },
+      }) },
+    });
+
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /foo\.py:f  CC=11  cov=20%/);
+  } finally {
+    rmTree(root);
+  }
+});
+
+test("python_missing_coverage_fails_with_a_run_tests_message", async () => {
+  const root = tmpRepo("crap-pynocov-");
+  try {
+    stageWithHunk(root, "foo.py", "def f():\n    return 1\n");
+    amendLine(root, "foo.py", "def f():\n    return 2\n");
+
+    const res = await runCrap({
+      cwd: root,
+      adapters: { python: fakeAdapter({ exists: false }) },
+    });
+
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /run tests with coverage first/i);
+  } finally {
+    rmTree(root);
+  }
+});
+
+test("python_missing_coverage_fails_even_when_typescript_coverage_is_present", async () => {
+  const root = tmpRepo("crap-pymerge-miss-");
+  try {
+    stageWithHunk(root, "foo.ts", "function f() {\n  return 1;\n}\n");
+    stageWithHunk(root, "bar.py", "def f():\n    return 1\n");
+    amendLine(root, "foo.ts", "function f() {\n  return 2;\n}\n");
+    amendLine(root, "bar.py", "def f():\n    return 2\n");
+
+    const res = await runCrap({
+      cwd: root,
+      adapters: {
+        typescript: fakeAdapter({ functions: [], snapshot: { files: { "foo.ts": { executed: [1], missing: [] } } } }),
+        python: fakeAdapter({ exists: false }),
+      },
+    });
+
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /run tests with coverage first/i);
+  } finally {
+    rmTree(root);
+  }
+});
+
+test("violations_across_typescript_and_python_are_merged_into_one_report", async () => {
+  const root = tmpRepo("crap-pymerge-viol-");
+  try {
+    stageWithHunk(root, "foo.ts", "function f() {\n  return 1;\n}\n");
+    stageWithHunk(root, "bar.py", "def f():\n    return 1\n");
+    amendLine(root, "foo.ts", "function f() {\n  return 2;\n}\n");
+    amendLine(root, "bar.py", "def f():\n    return 2\n");
+
+    const res = await runCrap({
+      cwd: root,
+      adapters: {
+        typescript: fakeAdapter({
+          functions: [HIGH_CC_FN],
+          snapshot: { files: { "foo.ts": { executed: [], missing: [1, 2, 3] } } },
+        }),
+        python: fakeAdapter({
+          functions: [HIGH_CC_FN],
+          snapshot: { files: { "bar.py": { executed: [], missing: [1, 2, 3] } } },
+        }),
+      },
+    });
+
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /foo\.ts:f /);
+    assert.match(res.stderr, /bar\.py:f /);
+  } finally {
+    rmTree(root);
+  }
+});
+
+test("python_test_file_under_tests_dir_is_skipped", async () => {
+  const root = tmpRepo("crap-pyskip-test-");
+  try {
+    stageWithHunk(root, "tests/test_foo.py", "def test_f():\n    assert True\n");
+    amendLine(root, "tests/test_foo.py", "def test_f():\n    assert False\n");
+
+    const res = await runCrap({
+      cwd: root,
+      adapters: { python: fakeAdapter({ functions: [HIGH_CC_FN] }) },
+    });
+
+    assert.equal(res.status, 0);
+  } finally {
+    rmTree(root);
+  }
+});
+
+test("python_conftest_file_is_skipped", async () => {
+  const root = tmpRepo("crap-pyskip-conf-");
+  try {
+    stageWithHunk(root, "conftest.py", "def f():\n    return 1\n");
+    amendLine(root, "conftest.py", "def f():\n    return 2\n");
+
+    const res = await runCrap({
+      cwd: root,
+      adapters: { python: fakeAdapter({ functions: [HIGH_CC_FN] }) },
+    });
+
+    assert.equal(res.status, 0);
+  } finally {
+    rmTree(root);
+  }
+});
+
+test("python_protobuf_file_is_skipped", async () => {
+  const root = tmpRepo("crap-pyskip-pb-");
+  try {
+    stageWithHunk(root, "foo_pb2.py", "def f():\n    return 1\n");
+    amendLine(root, "foo_pb2.py", "def f():\n    return 2\n");
+
+    const res = await runCrap({
+      cwd: root,
+      adapters: { python: fakeAdapter({ functions: [HIGH_CC_FN] }) },
+    });
+
+    assert.equal(res.status, 0);
+  } finally {
+    rmTree(root);
+  }
+});
+
+test("python_file_in_migrations_segment_is_skipped", async () => {
+  const root = tmpRepo("crap-pyskip-mig-");
+  try {
+    stageWithHunk(root, "migrations/001.py", "def f():\n    return 1\n");
+    amendLine(root, "migrations/001.py", "def f():\n    return 2\n");
+
+    const res = await runCrap({
+      cwd: root,
+      adapters: { python: fakeAdapter({ functions: [HIGH_CC_FN] }) },
+    });
+
+    assert.equal(res.status, 0);
+  } finally {
+    rmTree(root);
+  }
+});
+
+test("python_generated_header_file_is_skipped", async () => {
+  const root = tmpRepo("crap-pyskip-gen-");
+  try {
+    const header = "# @generated\n# do not edit\ndef f():\n    return 1\n";
+    stageWithHunk(root, "gen.py", header);
+    amendLine(root, "gen.py", "# @generated\n# do not edit\ndef f():\n    return 2\n");
+
+    const res = await runCrap({
+      cwd: root,
+      adapters: { python: fakeAdapter({ functions: [HIGH_CC_FN] }) },
+    });
+
+    assert.equal(res.status, 0);
+  } finally {
+    rmTree(root);
+  }
+});
+
+test("python_coverage_cli_error_surfaces_as_a_clean_message", async () => {
+  const root = tmpRepo("crap-pyerr-");
+  try {
+    stageWithHunk(root, "foo.py", "def f():\n    return 1\n");
+    amendLine(root, "foo.py", "def f():\n    return 2\n");
+
+    const res = await runCrap({
+      cwd: root,
+      adapters: { python: {
+        snapshotExists: () => true,
+        snapshotMtime: () => Date.now() / 1000,
+        loadSnapshot: () => ({ error: "crap: coverage CLI not on PATH" }),
+        extractFunctions: () => [],
+      } },
+    });
+
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /coverage CLI not on PATH/);
   } finally {
     rmTree(root);
   }
