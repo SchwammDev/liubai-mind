@@ -1,0 +1,8 @@
+{
+  "id": "py-status-dispatch",
+  "lang": "python",
+  "files": ["status.py.case"],
+  "entry": "status.py",
+  "task": "Improve status.py. Keep the public function signature and behavior unchanged.",
+  "baseline": { "decisionPoints": 11, "functions": 1, "silentHandlers": 0 }
+}

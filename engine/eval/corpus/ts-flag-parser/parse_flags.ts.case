@@ -1,0 +1,112 @@
+export interface FlagConfig {
+  verbose: boolean;
+  quiet: boolean;
+  outputPath: string | null;
+  format: string;
+  maxRetries: number;
+  timeoutMs: number;
+  dryRun: boolean;
+  force: boolean;
+  logLevel: string;
+  configPath: string | null;
+  parallelism: number;
+  color: boolean;
+  strict: boolean;
+}
+
+const ALIASES: Record<string, string> = {
+  "-v": "--verbose",
+  "-q": "--quiet",
+  "-f": "--force",
+  "-o": "--output",
+};
+
+function normalizeFlag(arg: string): string {
+  return ALIASES[arg] ?? arg;
+}
+
+function defaultFlagConfig(): FlagConfig {
+  return {
+    verbose: false,
+    quiet: false,
+    outputPath: null,
+    format: "text",
+    maxRetries: 3,
+    timeoutMs: 30000,
+    dryRun: false,
+    force: false,
+    logLevel: "info",
+    configPath: null,
+    parallelism: 1,
+    color: true,
+    strict: false,
+  };
+}
+
+export function parseFlags(argv: string[]): FlagConfig {
+  const config = defaultFlagConfig();
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = normalizeFlag(argv[i]!);
+
+    if (arg === "--verbose") {
+      config.verbose = true;
+    } else if (arg === "--quiet") {
+      config.quiet = true;
+    } else if (arg === "--dry-run") {
+      config.dryRun = true;
+    } else if (arg === "--force") {
+      config.force = true;
+    } else if (arg === "--no-color") {
+      config.color = false;
+    } else if (arg === "--strict") {
+      config.strict = true;
+    } else if (arg === "--output") {
+      const value = argv[++i];
+      if (value === undefined) {
+        throw new Error("--output requires a path");
+      }
+      config.outputPath = value;
+    } else if (arg === "--config") {
+      const value = argv[++i];
+      if (value === undefined) {
+        throw new Error("--config requires a path");
+      }
+      config.configPath = value;
+    } else if (arg === "--format") {
+      const value = argv[++i];
+      if (value === undefined || !["json", "yaml", "text"].includes(value)) {
+        throw new Error(`unsupported format: ${String(value)}`);
+      }
+      config.format = value;
+    } else if (arg === "--log-level") {
+      const value = argv[++i];
+      if (value === undefined || !["debug", "info", "warn", "error"].includes(value)) {
+        throw new Error(`unsupported log level: ${String(value)}`);
+      }
+      config.logLevel = value;
+    } else if (arg === "--retries") {
+      const value = Number(argv[++i]);
+      if (!Number.isInteger(value)) {
+        throw new Error("--retries must be an integer");
+      }
+      config.maxRetries = value;
+    } else if (arg === "--timeout") {
+      const value = Number(argv[++i]);
+      if (!Number.isInteger(value)) {
+        throw new Error("--timeout must be an integer");
+      }
+      config.timeoutMs = value;
+    } else if (arg === "--parallel") {
+      const value = Number(argv[++i]);
+      if (!Number.isInteger(value)) {
+        throw new Error("--parallel must be an integer");
+      }
+      config.parallelism = value;
+    } else {
+      throw new Error(`unknown flag: ${arg}`);
+    }
+  }
+
+  return config;
+}

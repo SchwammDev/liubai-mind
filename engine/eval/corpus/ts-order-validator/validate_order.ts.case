@@ -1,0 +1,69 @@
+export interface OrderItem {
+  sku: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+export interface Address {
+  line1: string;
+  city: string;
+  postalCode: string;
+  country: string;
+}
+
+export interface Order {
+  id: string;
+  customerId: string;
+  items: OrderItem[];
+  shippingAddress: Address | null;
+  billingAddress: Address | null;
+  totalCents: number;
+  currency: string;
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+export function validateOrder(order: Order): ValidationResult {
+  const errors: string[] = [];
+
+  if (order.id.length === 0) {
+    errors.push("order id is required");
+  }
+
+  if (order.customerId.length === 0) {
+    errors.push("customer id is required");
+  }
+
+  if (order.items.length === 0) {
+    errors.push("order must contain at least one item");
+  } else {
+    for (const item of order.items) {
+      if (item.quantity <= 0 || item.quantity === 0) {
+        errors.push(`item ${item.sku} has a non-positive quantity`);
+      }
+    }
+  }
+
+  if (order.shippingAddress === null) {
+    errors.push("shipping address is required");
+  } else if (order.shippingAddress.postalCode.length === 0 || order.shippingAddress.postalCode.trim().length === 0) {
+    errors.push("shipping postal code is required");
+  }
+
+  if (order.billingAddress === null) {
+    errors.push("billing address is required");
+  }
+
+  if (order.totalCents <= 0) {
+    errors.push("order total must be positive");
+  }
+
+  if (order.currency !== "USD" && order.currency !== "EUR") {
+    errors.push(`unsupported currency: ${order.currency}`);
+  }
+
+  return { valid: errors.length === 0, errors };
+}
