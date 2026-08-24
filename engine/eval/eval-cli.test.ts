@@ -18,6 +18,7 @@ function assertParsedCollect(parsed: ParsedCli, over: Partial<Extract<ParsedCli,
     run: "baseline",
     model: "anthropic/claude-test",
     reps: 5,
+    parallel: 1,
     ...over,
   });
 }
@@ -86,6 +87,24 @@ test("parseCliArgs_rejects_non_integer_reps", () => {
   assert.ok("error" in parsed);
 });
 
+test("parseCliArgs_parses_the_parallel_flag_into_collect_opts", () => {
+  const parsed = parseCliArgs(collectArgv("--parallel", "3"));
+
+  assertParsedCollect(parsed, { parallel: 3 });
+});
+
+test("parseCliArgs_defaults_parallel_to_one_when_omitted", () => {
+  const parsed = parseCliArgs(collectArgv("--reps", "2"));
+
+  assertParsedCollect(parsed, { reps: 2 });
+});
+
+test("parseCliArgs_rejects_non_integer_parallel", () => {
+  const parsed = parseCliArgs(collectArgv("--parallel", "1.5"));
+
+  assert.ok("error" in parsed);
+});
+
 test("parseCliArgs_accumulates_repeated_case_flags", () => {
   const parsed = parseCliArgs(collectArgv(...repeated("--case", ["a", "b", "c"])));
 
@@ -134,6 +153,14 @@ test("runEval_routes_score_to_the_score_dependency_with_corpus_dir", async () =>
   assert.equal(calls[0]?.corpusDir, join(REPO_ROOT, "engine", "eval", "corpus"));
   assert.equal(calls[0]?.runDir, join(REPO_ROOT, "engine", "eval", "runs", "baseline"));
   assert.equal(result.stdout, "table");
+});
+
+test("runEval_passes_parallel_through_to_the_collect_dependency", async () => {
+  const { collect, calls } = recordingCollect({ status: 0, rowsWritten: 1, rowsSkipped: 0, stderr: "" });
+
+  await runEval(["collect", "--run", "baseline", "--model", "anthropic/claude-test", "--parallel", "3"], { collect });
+
+  assert.equal(calls[0]?.parallel, 3);
 });
 
 test("runEval_propagates_nonzero_status_from_dependency", async () => {
