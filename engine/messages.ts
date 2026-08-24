@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import type { Lang, Nudge } from "./contract.ts";
 
 export interface HelperConvention {
@@ -5,11 +7,46 @@ export interface HelperConvention {
   root: string;
 }
 
-export const CC_ADVICE: Record<Lang, string> = {
+const DEFAULT_CC_ADVICE: Record<Lang, string> = {
   python: "replace if/elif chains with dispatch dicts",
   typescript: "replace if/else chains with lookup objects",
   cpp: "replace if/else chains with dispatch tables",
 };
+
+const KNOWN_LANGS: readonly Lang[] = ["python", "typescript", "cpp"];
+
+function isLang(value: string): value is Lang {
+  return (KNOWN_LANGS as readonly string[]).includes(value);
+}
+
+export function readPack(path: string | undefined, read: (p: string) => string): unknown {
+  if (path === undefined) return {};
+  try {
+    return JSON.parse(read(path));
+  } catch {
+    return {};
+  }
+}
+
+export function resolveCcAdvice(defaults: Record<Lang, string>, pack: unknown): Record<Lang, string> {
+  const resolved = { ...defaults };
+  if (typeof pack !== "object" || pack === null) return resolved;
+
+  const ccAdvice = (pack as Record<string, unknown>).CC_ADVICE;
+  if (typeof ccAdvice !== "object" || ccAdvice === null) return resolved;
+
+  for (const [lang, advice] of Object.entries(ccAdvice as Record<string, unknown>)) {
+    if (!isLang(lang)) continue;
+    if (typeof advice !== "string") continue;
+    resolved[lang] = advice;
+  }
+  return resolved;
+}
+
+export const CC_ADVICE: Record<Lang, string> = resolveCcAdvice(
+  DEFAULT_CC_ADVICE,
+  readPack(process.env.LIUBAI_PHRASING_PACK, (p) => readFileSync(p, "utf8")),
+);
 
 export const DOC_COMMENT_FORM: Record<Lang, string> = {
   python: "Remove docstrings too, not just '#' lines.",
