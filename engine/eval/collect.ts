@@ -22,6 +22,7 @@ export interface CollectOpts {
   now?: () => string;
   conditionsDir?: string;
   corpusDir?: string;
+  parallel?: number;
 }
 
 export interface CollectResult {
@@ -46,6 +47,7 @@ interface CollectContext {
   spawner: PiSpawner;
   workRoot: string;
   now: () => string;
+  parallel: number;
 }
 
 interface ItemResult {
@@ -185,6 +187,12 @@ function loadError(message: string): CollectResult {
   return { status: 1, rowsWritten: 0, rowsSkipped: 0, stderr: message };
 }
 
+function validateParallel(parallel: number | undefined): CollectResult | undefined {
+  if (parallel === undefined) return undefined;
+  if (Number.isInteger(parallel) && parallel >= 1) return undefined;
+  return loadError(`parallel must be a positive integer, got: ${parallel}`);
+}
+
 function buildContext(opts: CollectOpts, corpusDir: string, conditionsDir: string): CollectContext {
   return {
     repoRoot: opts.repoRoot,
@@ -195,6 +203,7 @@ function buildContext(opts: CollectOpts, corpusDir: string, conditionsDir: strin
     spawner: opts.spawner ?? defaultPiSpawner(opts.repoRoot),
     workRoot: opts.workRoot ?? tmpdir(),
     now: opts.now ?? (() => new Date().toISOString()),
+    parallel: opts.parallel ?? 1,
   };
 }
 
@@ -204,6 +213,53 @@ interface CollectCounts {
   failures: string[];
 }
 
+function partitionItems(items: WorkItem[], existingKeys: Set<string>): { toRun: WorkItem[]; rowsSkipped: number } {
+  const toRun: WorkItem[] = [];
+  let rowsSkipped = 0;
+
+  for (const item of items) {
+    if (existingKeys.has(itemKey(item))) rowsSkipped += 1;
+    else toRun.push(item);
+  }
+
+  return { toRun, rowsSkipped };
+}
+
+async function dispatchItem(
+  ctx: CollectContext,
+  runDir: string,
+  rawPath: string,
+  item: WorkItem,
+  counts: CollectCounts,
+): Promise<void> {
+  const result = await runItem(ctx, item);
+  if (result.failure !== undefined) {
+    counts.failures.push(result.failure);
+    return;
+  }
+
+  appendFileSync(rawPath, `${JSON.stringify(result.row)}\n`);
+  writeFileSync(transcriptPath(runDir, item), result.stdoutJsonl ?? "");
+  counts.rowsWritten += 1;
+}
+
+async function runLane(
+  ctx: CollectContext,
+  runDir: string,
+  rawPath: string,
+  items: WorkItem[],
+  cursor: { next: number },
+  counts: CollectCounts,
+): Promise<void> {
+  while (cursor.next < items.length) {
+    const index = cursor.next;
+    cursor.next += 1;
+    const item = items[index];
+    if (item === undefined) continue;
+    await dispatchItem(ctx, runDir, rawPath, item, counts);
+  }
+}
+
 async function runWorkItems(
   ctx: CollectContext,
   runDir: string,
@@ -211,28 +267,15 @@ async function runWorkItems(
   items: WorkItem[],
   existingKeys: Set<string>,
 ): Promise<CollectCounts> {
-  let rowsWritten = 0;
-  let rowsSkipped = 0;
-  const failures: string[] = [];
+  const { toRun, rowsSkipped } = partitionItems(items, existingKeys);
+  const counts: CollectCounts = { rowsWritten: 0, rowsSkipped, failures: [] };
+  const cursor = { next: 0 };
+  const laneCount = Math.min(ctx.parallel, toRun.length);
+  const lanes = Array.from({ length: laneCount }, () => runLane(ctx, runDir, rawPath, toRun, cursor, counts));
 
-  for (const item of items) {
-    if (existingKeys.has(itemKey(item))) {
-      rowsSkipped += 1;
-      continue;
-    }
+  await Promise.all(lanes);
 
-    const result = await runItem(ctx, item);
-    if (result.failure !== undefined) {
-      failures.push(result.failure);
-      continue;
-    }
-
-    appendFileSync(rawPath, `${JSON.stringify(result.row)}\n`);
-    writeFileSync(transcriptPath(runDir, item), result.stdoutJsonl ?? "");
-    rowsWritten += 1;
-  }
-
-  return { rowsWritten, rowsSkipped, failures };
+  return counts;
 }
 
 function toCollectResult(counts: CollectCounts): CollectResult {
@@ -245,6 +288,9 @@ function toCollectResult(counts: CollectCounts): CollectResult {
 }
 
 export async function runCollect(opts: CollectOpts): Promise<CollectResult> {
+  const parallelError = validateParallel(opts.parallel);
+  if (parallelError !== undefined) return parallelError;
+
   const conditionsDir = opts.conditionsDir ?? join(import.meta.dirname, "conditions");
   const corpusDir = opts.corpusDir ?? join(import.meta.dirname, "corpus");
 

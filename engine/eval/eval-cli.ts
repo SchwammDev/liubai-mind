@@ -4,7 +4,7 @@ import { runCollect } from "./collect.ts";
 import { runScore } from "./score.ts";
 
 export type ParsedCli =
-  | { cmd: "collect"; run: string; model: string; reps: number; timeoutMs?: number; cases?: string[]; conditions?: string[] }
+  | { cmd: "collect"; run: string; model: string; reps: number; parallel: number; timeoutMs?: number; cases?: string[]; conditions?: string[] }
   | { cmd: "score"; run: string; compare?: string }
   | { error: string };
 
@@ -15,10 +15,11 @@ interface EvalRunResult {
 }
 
 const DEFAULT_REPS = 5;
+const DEFAULT_PARALLEL = 1;
 
 const USAGE = [
   "Usage:",
-  "  liubai eval collect --run <name> --model <provider/id> [--reps N] [--timeout-ms N] [--case id]... [--condition id]...",
+  "  liubai eval collect --run <name> --model <provider/id> [--reps N] [--parallel N] [--timeout-ms N] [--case id]... [--condition id]...",
   "  liubai eval score --run <name> [--compare <otherRunName>]",
 ].join("\n");
 
@@ -30,6 +31,7 @@ interface CollectAccum {
   run?: string;
   model?: string;
   repsRaw?: string;
+  parallelRaw?: string;
   timeoutMsRaw?: string;
   cases: string[];
   conditions: string[];
@@ -59,6 +61,7 @@ function collectFlagHandlers(): FlagHandlers<CollectAccum> {
     "--run": (a, v) => { a.run = v; },
     "--model": (a, v) => { a.model = v; },
     "--reps": (a, v) => { a.repsRaw = v; },
+    "--parallel": (a, v) => { a.parallelRaw = v; },
     "--timeout-ms": (a, v) => { a.timeoutMsRaw = v; },
     "--case": (a, v) => { a.cases.push(v); },
     "--condition": (a, v) => { a.conditions.push(v); },
@@ -79,6 +82,23 @@ function parseReps(raw: string | undefined): { value: number } | { error: string
   return { value: n };
 }
 
+function parseParallel(raw: string | undefined): { value: number } | { error: string } {
+  if (raw === undefined) return { value: DEFAULT_PARALLEL };
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) return { error: `--parallel must be a positive integer, got: ${raw}` };
+  return { value: n };
+}
+
+function collectOptionalFields(accum: CollectAccum): Partial<Extract<ParsedCli, { cmd: "collect" }>> {
+  const timeoutMs = accum.timeoutMsRaw === undefined ? undefined : Number(accum.timeoutMsRaw);
+
+  return {
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(accum.cases.length > 0 ? { cases: accum.cases } : {}),
+    ...(accum.conditions.length > 0 ? { conditions: accum.conditions } : {}),
+  };
+}
+
 function buildCollectResult(accum: CollectAccum): ParsedCli {
   if (accum.run === undefined) return usageError("collect requires --run");
   if (accum.model === undefined) return usageError("collect requires --model");
@@ -86,16 +106,16 @@ function buildCollectResult(accum: CollectAccum): ParsedCli {
   const reps = parseReps(accum.repsRaw);
   if ("error" in reps) return usageError(reps.error);
 
-  const timeoutMs = accum.timeoutMsRaw === undefined ? undefined : Number(accum.timeoutMsRaw);
+  const parallel = parseParallel(accum.parallelRaw);
+  if ("error" in parallel) return usageError(parallel.error);
 
   return {
     cmd: "collect",
     run: accum.run,
     model: accum.model,
     reps: reps.value,
-    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-    ...(accum.cases.length > 0 ? { cases: accum.cases } : {}),
-    ...(accum.conditions.length > 0 ? { conditions: accum.conditions } : {}),
+    parallel: parallel.value,
+    ...collectOptionalFields(accum),
   };
 }
 
@@ -136,6 +156,7 @@ async function runCollectCmd(
     repoRoot,
     runDir: join(runsRoot, parsed.run),
     reps: parsed.reps,
+    parallel: parsed.parallel,
     model: parsed.model,
     ...(parsed.timeoutMs !== undefined ? { timeoutMs: parsed.timeoutMs } : {}),
     ...(parsed.cases !== undefined ? { cases: parsed.cases } : {}),

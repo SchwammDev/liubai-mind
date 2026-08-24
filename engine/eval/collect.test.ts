@@ -114,6 +114,32 @@ function mutatingSpawner(filename: string, content: string): PiSpawner {
   };
 }
 
+function parallelOpts(cases: string[], conditions: string[], spawner: PiSpawner, parallel: number): CollectOpts {
+  return baseOpts({ cases, conditions, spawner, parallel });
+}
+
+function assertPartialFailureReportsStatusOne(result: { status: number; rowsWritten: number; stderr: string }, written: number): void {
+  assert.equal(result.status, 1);
+  assert.equal(result.rowsWritten, written);
+  assert.match(result.stderr, /boom/);
+}
+
+function trackingConcurrencySpawner(): { spawner: PiSpawner; maxInFlight: () => number } {
+  let inFlight = 0;
+  let max = 0;
+  let seq = 0;
+  const spawner: PiSpawner = async () => {
+    inFlight += 1;
+    max = Math.max(max, inFlight);
+    const delayMs = seq % 2 === 0 ? 15 : 5;
+    seq += 1;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    inFlight -= 1;
+    return { exitCode: 0, stdoutJsonl: "", timedOut: false };
+  };
+  return { spawner, maxInFlight: () => max };
+}
+
 function rejectFirstThenMutate(): PiSpawner {
   let calls = 0;
   return async (spec) => {
@@ -247,9 +273,7 @@ test("runCollect_continues_past_a_rejecting_spawner_and_reports_status_1", async
 
   const result = await runCollect(opts);
 
-  assert.equal(result.status, 1);
-  assert.equal(result.rowsWritten, 1);
-  assert.match(result.stderr, /boom/);
+  assertPartialFailureReportsStatusOne(result, 1);
 });
 
 test("runCollect_reports_status_1_and_nothing_spawned_on_a_load_error", async () => {
@@ -261,4 +285,64 @@ test("runCollect_reports_status_1_and_nothing_spawned_on_a_load_error", async ()
   assert.equal(result.status, 1);
   assert.equal(calls.length, 0);
   assert.match(result.stderr, /nonexistent/);
+});
+
+test("runCollect_bounds_the_worker_pool_to_the_parallel_limit", async () => {
+  const { spawner, maxInFlight } = trackingConcurrencySpawner();
+  const opts = parallelOpts(["ts-flag-parser", "ts-order-validator", "py-ingest-bait"], ["control", "rails-default"], spawner, 2);
+
+  const result = await runCollect(opts);
+
+  assertRawRowCounts(result, 6, 0);
+  assert.equal(maxInFlight(), 2);
+});
+
+test("runCollect_defaults_to_sequential_execution_when_parallel_is_omitted", async () => {
+  const { spawner, maxInFlight } = trackingConcurrencySpawner();
+  const opts = baseOpts({ cases: ["ts-flag-parser", "ts-order-validator"], conditions: ["control", "rails-default"], spawner });
+
+  await runCollect(opts);
+
+  assert.equal(maxInFlight(), 1);
+});
+
+test("runCollect_writes_every_row_when_running_with_parallel_greater_than_one", async () => {
+  const { spawner } = recordingSpawner((spec) => mutateEveryFile(spec.cwd));
+  const opts = parallelOpts(["ts-flag-parser", "ts-order-validator"], ["control", "rails-default"], spawner, 3);
+
+  const result = await runCollect(opts);
+
+  assertRawRowCounts(result, 4, 0);
+  assert.deepEqual(readRawRows(opts.runDir).map(pairKey).sort(), EXPECTED_FOUR_PAIRS);
+});
+
+test("runCollect_resumes_by_skipping_keys_already_present_in_raw_jsonl_with_parallel_greater_than_one", async () => {
+  const { spawner } = recordingSpawner((spec) => mutateEveryFile(spec.cwd));
+  const opts = parallelOpts(["ts-flag-parser", "ts-order-validator"], ["control", "rails-default"], spawner, 2);
+  writeExistingRawRow(opts.runDir, { caseId: "ts-flag-parser", conditionId: "control", rep: 1 });
+
+  const result = await runCollect(opts);
+
+  assertRawRowCounts(result, 3, 1);
+  assertResumedRawFileHasAllFourRowsWithoutDuplicates(opts.runDir);
+});
+
+test("runCollect_lets_other_items_finish_when_one_spawner_call_rejects_under_parallelism", async () => {
+  const spawner = rejectFirstThenMutate();
+  const opts = parallelOpts(["ts-flag-parser", "ts-order-validator", "py-ingest-bait"], ["control"], spawner, 2);
+
+  const result = await runCollect(opts);
+
+  assertPartialFailureReportsStatusOne(result, 2);
+});
+
+test("runCollect_rejects_a_non_positive_parallel_value_with_a_load_error", async () => {
+  const { spawner, calls } = recordingSpawner();
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner, parallel: 0 });
+
+  const result = await runCollect(opts);
+
+  assert.equal(result.status, 1);
+  assert.equal(calls.length, 0);
+  assert.match(result.stderr, /parallel/);
 });
