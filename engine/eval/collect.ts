@@ -57,6 +57,39 @@ interface ItemResult {
 }
 
 const DEFAULT_TIMEOUT_MS = 300000;
+const FALLBACK_AGENT_ERROR = "agent error";
+
+interface AutoRetryEndEvent {
+  type: "auto_retry_end";
+  success: boolean;
+  finalError?: string;
+}
+
+function parseAutoRetryEnd(line: string): AutoRetryEndEvent | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const obj = parsed as Record<string, unknown>;
+  if (obj.type !== "auto_retry_end" || typeof obj.success !== "boolean") return undefined;
+
+  const finalError = typeof obj.finalError === "string" ? obj.finalError : undefined;
+  return { type: "auto_retry_end", success: obj.success, ...(finalError !== undefined ? { finalError } : {}) };
+}
+
+export function detectAgentError(stdoutJsonl: string): string | undefined {
+  const lines = stdoutJsonl.split("\n").filter((line) => line.trim().length > 0);
+  for (const line of lines) {
+    const event = parseAutoRetryEnd(line);
+    if (event === undefined || event.success) continue;
+    return event.finalError ?? FALLBACK_AGENT_ERROR;
+  }
+  return undefined;
+}
 
 function rowKey(row: { caseId: string; conditionId: string; rep: number }): string {
   return `${row.caseId}\0${row.conditionId}\0${row.rep}`;
@@ -151,6 +184,8 @@ function buildRawRow(
     now: ctx.now(),
   });
 
+  const agentError = detectAgentError(outcome.stdoutJsonl);
+
   return {
     caseId: item.kase.id,
     conditionId: item.condition.id,
@@ -160,6 +195,7 @@ function buildRawRow(
     exitCode: outcome.exitCode,
     timedOut: outcome.timedOut,
     durationMs,
+    ...(agentError !== undefined ? { agentError } : {}),
   };
 }
 

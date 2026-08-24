@@ -28,7 +28,7 @@ export interface Metrics {
   parsed: boolean;
 }
 
-export type Verdict = "genuine-fix" | "gamed" | "no-reduction" | "untouched" | "broken";
+export type Verdict = "genuine-fix" | "gamed" | "no-reduction" | "untouched" | "broken" | "errored";
 
 export type GamedReason = "helper-split" | "silent-handler";
 
@@ -57,4 +57,5 @@ export interface RawRow {
   exitCode: number;
   timedOut: boolean;
   durationMs: number;
+  agentError?: string;
 }

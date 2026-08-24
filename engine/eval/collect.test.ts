@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, appen
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { runCollect } from "./collect.ts";
+import { runCollect, detectAgentError } from "./collect.ts";
 import type { CollectOpts } from "./collect.ts";
 import type { RunSpec, RunOutcome, PiSpawner } from "./spawner.ts";
 import { gitSha } from "./provenance.ts";
@@ -334,6 +334,60 @@ test("runCollect_lets_other_items_finish_when_one_spawner_call_rejects_under_par
   const result = await runCollect(opts);
 
   assertPartialFailureReportsStatusOne(result, 2);
+});
+
+function autoRetryEndLine(overrides: Partial<{ success: boolean; finalError: string; attempt: number }> = {}): string {
+  return `${JSON.stringify({ type: "auto_retry_end", success: true, attempt: 1, ...overrides })}\n`;
+}
+
+test("detectAgentError_returns_the_finalError_text_for_a_terminal_retry_failure", () => {
+  const stdoutJsonl =
+    autoRetryEndLine({ success: true }) +
+    autoRetryEndLine({ success: false, attempt: 2, finalError: "OpenAI API error (404): model not found" });
+
+  const agentError = detectAgentError(stdoutJsonl);
+
+  assert.equal(agentError, "OpenAI API error (404): model not found");
+});
+
+test("detectAgentError_returns_undefined_when_every_auto_retry_end_event_succeeded", () => {
+  const stdoutJsonl = autoRetryEndLine({ attempt: 1 }) + autoRetryEndLine({ attempt: 2 });
+
+  const agentError = detectAgentError(stdoutJsonl);
+
+  assert.equal(agentError, undefined);
+});
+
+test("detectAgentError_returns_undefined_for_empty_stdout", () => {
+  assert.equal(detectAgentError(""), undefined);
+});
+
+test("detectAgentError_skips_unparseable_lines_and_returns_undefined_when_none_indicate_failure", () => {
+  const stdoutJsonl = ["not json", "{also not json", autoRetryEndLine({ success: true })].join("\n");
+
+  const agentError = detectAgentError(stdoutJsonl);
+
+  assert.equal(agentError, undefined);
+});
+
+test("runCollect_stamps_agentError_into_the_raw_row_when_stdout_reports_a_terminal_retry_failure", async () => {
+  const stdoutJsonl = autoRetryEndLine({ success: false, attempt: 2, finalError: "OpenAI API error (404): model not found" });
+  const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl, timedOut: false });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+
+  await runCollect(opts);
+
+  assert.equal(firstRow(opts.runDir).agentError, "OpenAI API error (404): model not found");
+});
+
+test("runCollect_leaves_agentError_absent_when_stdout_shows_only_successful_retries", async () => {
+  const stdoutJsonl = autoRetryEndLine({ attempt: 1 });
+  const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl, timedOut: false });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+
+  await runCollect(opts);
+
+  assert.equal("agentError" in firstRow(opts.runDir), false);
 });
 
 test("runCollect_rejects_a_non_positive_parallel_value_with_a_load_error", async () => {
