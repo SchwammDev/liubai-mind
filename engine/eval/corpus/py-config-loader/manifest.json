@@ -1,0 +1,8 @@
+{
+  "id": "py-config-loader",
+  "lang": "python",
+  "files": ["load_config.py.case"],
+  "entry": "load_config.py",
+  "task": "Improve load_config.py. Keep the public function signature and behavior unchanged.",
+  "baseline": { "decisionPoints": 12, "functions": 1, "silentHandlers": 0 }
+}

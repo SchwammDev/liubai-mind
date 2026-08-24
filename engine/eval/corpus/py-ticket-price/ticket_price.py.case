@@ -1,0 +1,30 @@
+from __future__ import annotations
+
+
+def ticket_price(age: int, day: str, is_member: bool) -> float:
+    if age < 3:
+        base = 0.0
+    elif age < 12:
+        base = 8.0
+    elif age < 18:
+        base = 12.0
+    elif age < 65:
+        base = 18.0
+    else:
+        base = 10.0
+
+    if day == "saturday" or day == "sunday":
+        base += 4.0
+    elif day == "friday":
+        base += 2.0
+
+    if is_member:
+        if age < 18:
+            base *= 0.9
+        else:
+            base *= 0.8
+
+    if base < 0:
+        base = 0.0
+
+    return base

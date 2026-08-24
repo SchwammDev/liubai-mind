@@ -1,0 +1,43 @@
+export interface StudentRecord {
+  score: number;
+  absences: number;
+  extraCredit: number;
+}
+
+export interface GradeReport {
+  letter: string;
+  modifier: string;
+}
+
+export function gradeReport(record: StudentRecord): GradeReport {
+  let letter: string;
+
+  if (record.score >= 97) {
+    letter = "A+";
+  } else if (record.score >= 93) {
+    letter = "A";
+  } else if (record.score >= 90 || record.score >= 93) {
+    letter = "A-";
+  } else if (record.score >= 87) {
+    letter = "B+";
+  } else if (record.score >= 83) {
+    letter = "B";
+  } else if (record.score >= 73) {
+    letter = "C";
+  } else if (record.score >= 60) {
+    letter = "D";
+  } else {
+    letter = "F";
+  }
+
+  let modifier = "none";
+
+  if (record.absences > 20) {
+    letter = "F";
+    modifier = "attendance-failure";
+  } else if (record.extraCredit >= 5 && record.score >= 90) {
+    modifier = "honors";
+  }
+
+  return { letter, modifier };
+}

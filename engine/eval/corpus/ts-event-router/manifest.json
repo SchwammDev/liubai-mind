@@ -1,0 +1,8 @@
+{
+  "id": "ts-event-router",
+  "lang": "typescript",
+  "files": ["route_event.ts.case"],
+  "entry": "route_event.ts",
+  "task": "Improve route_event.ts. Keep the public function signature and behavior unchanged.",
+  "baseline": { "decisionPoints": 10, "functions": 1, "silentHandlers": 0 }
+}

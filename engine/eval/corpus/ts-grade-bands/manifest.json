@@ -1,0 +1,8 @@
+{
+  "id": "ts-grade-bands",
+  "lang": "typescript",
+  "files": ["grade_report.ts.case"],
+  "entry": "grade_report.ts",
+  "task": "Improve grade_report.ts. Keep the public function signature and behavior unchanged.",
+  "baseline": { "decisionPoints": 11, "functions": 1, "silentHandlers": 0 }
+}

@@ -1,0 +1,50 @@
+export interface ShipmentOrder {
+  zone: "domestic" | "regional" | "international";
+  weightKg: number;
+  priority: boolean;
+  fragile: boolean;
+}
+
+export function shippingCost(order: ShipmentOrder): number {
+  let base: number;
+
+  if (order.zone === "domestic") {
+    if (order.weightKg <= 1) {
+      base = 4;
+    } else if (order.weightKg <= 5) {
+      base = 7;
+    } else if (order.weightKg <= 20) {
+      base = 12;
+    } else {
+      base = 20;
+    }
+  } else if (order.zone === "regional") {
+    if (order.weightKg <= 1) {
+      base = 9;
+    } else if (order.weightKg <= 5) {
+      base = 15;
+    } else if (order.weightKg <= 20) {
+      base = 25;
+    } else {
+      base = 40;
+    }
+  } else {
+    if (order.weightKg <= 1) {
+      base = 18;
+    } else if (order.weightKg <= 5) {
+      base = 30;
+    } else {
+      base = 55;
+    }
+  }
+
+  if (order.priority) {
+    base = base * 2;
+  }
+
+  if (order.fragile && order.weightKg > 5) {
+    base = base + 6;
+  }
+
+  return base;
+}

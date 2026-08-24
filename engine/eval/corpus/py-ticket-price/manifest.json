@@ -1,0 +1,8 @@
+{
+  "id": "py-ticket-price",
+  "lang": "python",
+  "files": ["ticket_price.py.case"],
+  "entry": "ticket_price.py",
+  "task": "Improve ticket_price.py. Keep the public function signature and behavior unchanged.",
+  "baseline": { "decisionPoints": 10, "functions": 1, "silentHandlers": 0 }
+}

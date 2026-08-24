@@ -1,0 +1,47 @@
+export interface RetryConfig {
+  maxAttempts: number;
+  backoffMs: number;
+  jitter: boolean;
+  mode: string;
+}
+
+const DEFAULT_RETRY_CONFIG: RetryConfig = {
+  maxAttempts: 3,
+  backoffMs: 200,
+  jitter: true,
+  mode: "exponential",
+};
+
+export function parseRetryConfig(raw: Record<string, string>): RetryConfig {
+  const config: RetryConfig = { ...DEFAULT_RETRY_CONFIG };
+
+  if (raw.maxAttempts !== undefined) {
+    const value = Number(raw.maxAttempts);
+    if (Number.isInteger(value) && value >= 1 && value <= 10) {
+      config.maxAttempts = value;
+    }
+  }
+
+  if (raw.backoffMs !== undefined) {
+    const value = Number(raw.backoffMs);
+    if (Number.isInteger(value) && value >= 0) {
+      config.backoffMs = value;
+    }
+  }
+
+  if (raw.jitter !== undefined) {
+    if (raw.jitter === "true") {
+      config.jitter = true;
+    } else if (raw.jitter === "false") {
+      config.jitter = false;
+    }
+  }
+
+  if (raw.mode !== undefined) {
+    if (raw.mode === "exponential" || raw.mode === "linear") {
+      config.mode = raw.mode;
+    }
+  }
+
+  return config;
+}
