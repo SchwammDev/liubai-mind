@@ -39,6 +39,13 @@ if [ "${1:-}" = "crap" ]; then
   exec mise exec -- node --experimental-strip-types "$REPO/engine/crap-cli.ts"
 fi
 
+# `liubai eval collect|score` runs the nudge-phrasing eval harness from the repo
+# working tree, like `crap` above. See README.md for the command reference.
+if [ "${1:-}" = "eval" ]; then
+  shift
+  exec mise exec -- node --experimental-strip-types "$REPO/engine/eval/eval-cli.ts" "$@"
+fi
+
 [ -x "$PI_BIN" ] || { echo "liubai: engine not installed — run $REPO/setup.sh" >&2; exit 1; }
 
 # `liubai --dev` steers the session from the working tree instead of the installed

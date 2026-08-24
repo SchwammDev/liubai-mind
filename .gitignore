@@ -8,3 +8,4 @@ config/models.json
 .coverage
 .venv
 coverage/
+engine/eval/runs/

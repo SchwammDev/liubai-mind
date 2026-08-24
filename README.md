@@ -53,6 +53,21 @@ spawn tasks=[
 ]
 ```
 
+## Nudge-phrasing eval
+
+```
+liubai eval collect --run <name> --model <provider/id> [--reps N] [--timeout-ms N] [--case id]... [--condition id]...
+liubai eval score --run <name> [--compare <otherRunName>]
+```
+
+**Conditions** — `engine/eval/conditions/*.json`, one per steering variant; optional phrasing pack set via `LIUBAI_PHRASING_PACK`.
+**Corpus** — `engine/eval/corpus/<case>/`, entry file uses the `.case` extension.
+**Verdicts** — `genuine-fix` (real complexity drop), `gamed` (`helper-split` | `silent-handler` — complexity moved, not removed), `no-reduction` (touched, no improvement), `untouched` (entry file unchanged), `broken` (output failed to parse).
+
+`collect` runs the working-tree rails via pi headless, one spawn per case/condition/rep. `score` re-judges `raw.jsonl` offline — no model calls, safe to re-run after judge changes.
+
+Issue #44.
+
 ## License
 
 Copyright 2026 Bernhard Raml. Licensed under [Apache 2.0](LICENSE).
