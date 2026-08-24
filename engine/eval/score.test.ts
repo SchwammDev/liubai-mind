@@ -78,7 +78,18 @@ function judgedRow(conditionId: string, caseId: string, verdict: Verdict, gamedR
 }
 
 function emptyVerdictCounts(): Record<Verdict, number> {
-  return { "genuine-fix": 0, gamed: 0, "no-reduction": 0, untouched: 0, broken: 0 };
+  return { "genuine-fix": 0, gamed: 0, "no-reduction": 0, untouched: 0, broken: 0, errored: 0 };
+}
+
+function erroredRawRow(conditionId: string, caseId: string, agentError: string, rep: number): RawRow {
+  return rawRow(conditionId, caseId, { agentError, files: {}, exitCode: 1, rep });
+}
+
+function allErroredRawRows(): RawRow[] {
+  return [
+    erroredRawRow("rails-default", "ts-flag-parser", "OpenAI API error (404): model not found", 1),
+    erroredRawRow("control", "ts-order-validator", "OpenAI API error (404): model not found", 2),
+  ];
 }
 
 function summaryRow(conditionId: string, caseId: string | null, counts: Partial<Record<Verdict, number>>, total: number): SummaryRow {
@@ -141,9 +152,17 @@ test("formatMarkdown_renders_one_line_per_condition_with_counts_and_genuine_rate
 
   const table = formatMarkdown(summary);
 
-  assertConditionLine(table, "rails-default", "4 \\| 3 \\| 1 \\| 0 \\| 0 \\| 0 \\| 75\\.0%");
-  assertConditionLine(table, "control", "2 \\| 0 \\| 0 \\| 2 \\| 0 \\| 0 \\| 0\\.0%");
+  assertConditionLine(table, "rails-default", "4 \\| 3 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 75\\.0%");
+  assertConditionLine(table, "control", "2 \\| 0 \\| 0 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0\\.0%");
   assert.equal(table.split("\n").length, 4);
+});
+
+test("formatMarkdown_renders_the_errored_column_between_broken_and_genuine_percent", () => {
+  const summary: SummaryRow[] = [summaryRow("rails-default", null, { broken: 1, errored: 2 }, 3)];
+
+  const table = formatMarkdown(summary);
+
+  assertConditionLine(table, "rails-default", "3 \\| 0 \\| 0 \\| 0 \\| 0 \\| 1 \\| 2 \\| 0\\.0%");
 });
 
 test("compareProvenance_lists_differing_fields_between_two_runs", () => {
@@ -165,6 +184,15 @@ test("compareProvenance_is_empty_when_provenance_is_identical", () => {
   assert.deepEqual(diffs, []);
 });
 
+test("judgeRows_classifies_a_row_with_agentError_as_errored_without_running_the_judge", async () => {
+  const rows = [erroredRawRow("rails-default", "ts-flag-parser", "OpenAI API error (404): model not found", 1)];
+
+  const judged = await judgeRows(rows, CORPUS_DIR);
+
+  assert.equal(judged[0]!.judge.verdict, "errored");
+  assert.equal(judged[0]!.judge.after.parsed, false);
+});
+
 test("runScore_classifies_the_ts_fixture_rows_into_the_expected_verdicts", async () => {
   const rows = tsOnlyRows(readFixtureRows());
   const runDir = tempRunDir();
@@ -176,7 +204,7 @@ test("runScore_classifies_the_ts_fixture_rows_into_the_expected_verdicts", async
   assert.equal(result.status, 0);
   assert.deepEqual(
     judged.map((j) => j.judge.verdict),
-    ["genuine-fix", "gamed", "untouched", "broken"],
+    ["genuine-fix", "gamed", "untouched", "broken", "errored"],
   );
   assert.equal(judged[1]!.judge.gamedReason, "helper-split");
 });
@@ -214,6 +242,16 @@ test("runScore_errors_on_a_malformed_raw_jsonl_line", async () => {
 
   assert.equal(result.status, 1);
   assert.match(result.stdout, /malformed/);
+});
+
+test("runScore_fails_loudly_naming_the_first_agentError_when_every_row_in_the_run_errored", async () => {
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, allErroredRawRows());
+
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /OpenAI API error \(404\): model not found/);
 });
 
 test("runScore_with_compareRunDir_prints_provenance_diff_before_the_tables", async () => {
