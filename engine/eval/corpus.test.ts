@@ -51,12 +51,25 @@ function minimalManifest(over: Partial<Record<string, unknown>> = {}): Record<st
   };
 }
 
-test("loadCases_loads_all_four_committed_cases", () => {
+test("loadCases_loads_all_twelve_committed_cases", () => {
   const result = loadCases(CORPUS_DIR);
 
   assertLoaded(result);
   const ids = result.map((c) => c.id).sort();
-  assert.deepEqual(ids, ["py-ingest-bait", "py-status-dispatch", "ts-flag-parser", "ts-order-validator"]);
+  assert.deepEqual(ids, [
+    "py-config-loader",
+    "py-ingest-bait",
+    "py-password-strength",
+    "py-safe-convert",
+    "py-status-dispatch",
+    "py-ticket-price",
+    "ts-event-router",
+    "ts-flag-parser",
+    "ts-grade-bands",
+    "ts-order-validator",
+    "ts-retry-config",
+    "ts-shipping-cost",
+  ]);
 });
 
 test("copyPlan_strips_the_trailing_case_suffix_from_each_file", () => {
@@ -140,6 +153,42 @@ function assertMaxCcExceedsRailThreshold(functions: FunctionFacts[], lang: Lang)
   const maxCc = Math.max(...functions.map((f) => f.cyclomaticComplexity));
 
   assert.ok(maxCc > CC_RAIL_THRESHOLD[lang], `expected max cc ${maxCc} to exceed threshold ${CC_RAIL_THRESHOLD[lang]}`);
+}
+
+async function assertMetricsMatchBaselineForTsCase(id: string, filename: string): Promise<void> {
+  const manifest = loadCaseManifest(id);
+  const source = readCaseSource(id, filename);
+
+  const extracted = await extractTypescript({ path: manifest.entry, after: source });
+  const silentHandlers = countSilentHandlers(source, "typescript");
+
+  assertMetricsMatchBaseline(extracted.functions, silentHandlers, manifest.baseline);
+}
+
+async function assertMainFunctionCcTripsRailForTsCase(id: string, filename: string): Promise<void> {
+  const source = readCaseSource(id, filename);
+
+  const extracted = await extractTypescript({ path: filename, after: source });
+
+  assertMaxCcExceedsRailThreshold(extracted.functions, "typescript");
+}
+
+async function assertMetricsMatchBaselineForPyCase(id: string, filename: string): Promise<void> {
+  const manifest = loadCaseManifest(id);
+  const source = readCaseSource(id, filename);
+
+  const extracted = await pythonExtractor.extract({ path: manifest.entry, after: source });
+  const silentHandlers = countSilentHandlers(source, "python");
+
+  assertMetricsMatchBaseline(extracted.functions, silentHandlers, manifest.baseline);
+}
+
+async function assertMainFunctionCcTripsRailForPyCase(id: string, filename: string): Promise<void> {
+  const source = readCaseSource(id, filename);
+
+  const extracted = await pythonExtractor.extract({ path: filename, after: source });
+
+  assertMaxCcExceedsRailThreshold(extracted.functions, "python");
 }
 
 test("ts_flag_parser_case_metrics_match_the_committed_baseline", async () => {
@@ -227,5 +276,101 @@ test(
     const extracted = await pythonExtractor.extract({ path: "ingest.py", after: source });
 
     assertMaxCcExceedsRailThreshold(extracted.functions, "python");
+  },
+);
+
+test("ts_grade_bands_case_metrics_match_the_committed_baseline", async () => {
+  await assertMetricsMatchBaselineForTsCase("ts-grade-bands", "grade_report.ts.case");
+});
+
+test("ts_grade_bands_case_main_function_cc_trips_the_cc_rail", async () => {
+  await assertMainFunctionCcTripsRailForTsCase("ts-grade-bands", "grade_report.ts.case");
+});
+
+test("ts_shipping_cost_case_metrics_match_the_committed_baseline", async () => {
+  await assertMetricsMatchBaselineForTsCase("ts-shipping-cost", "shipping_cost.ts.case");
+});
+
+test("ts_shipping_cost_case_main_function_cc_trips_the_cc_rail", async () => {
+  await assertMainFunctionCcTripsRailForTsCase("ts-shipping-cost", "shipping_cost.ts.case");
+});
+
+test("ts_retry_config_case_metrics_match_the_committed_baseline", async () => {
+  await assertMetricsMatchBaselineForTsCase("ts-retry-config", "parse_retry_config.ts.case");
+});
+
+test("ts_retry_config_case_main_function_cc_trips_the_cc_rail", async () => {
+  await assertMainFunctionCcTripsRailForTsCase("ts-retry-config", "parse_retry_config.ts.case");
+});
+
+test("ts_event_router_case_metrics_match_the_committed_baseline", async () => {
+  await assertMetricsMatchBaselineForTsCase("ts-event-router", "route_event.ts.case");
+});
+
+test("ts_event_router_case_main_function_cc_trips_the_cc_rail", async () => {
+  await assertMainFunctionCcTripsRailForTsCase("ts-event-router", "route_event.ts.case");
+});
+
+test(
+  "py_password_strength_case_metrics_match_the_committed_baseline",
+  { skip: !python3Available() },
+  async () => {
+    await assertMetricsMatchBaselineForPyCase("py-password-strength", "password_strength.py.case");
+  },
+);
+
+test(
+  "py_password_strength_case_main_function_cc_trips_the_cc_rail",
+  { skip: !python3Available() },
+  async () => {
+    await assertMainFunctionCcTripsRailForPyCase("py-password-strength", "password_strength.py.case");
+  },
+);
+
+test(
+  "py_ticket_price_case_metrics_match_the_committed_baseline",
+  { skip: !python3Available() },
+  async () => {
+    await assertMetricsMatchBaselineForPyCase("py-ticket-price", "ticket_price.py.case");
+  },
+);
+
+test(
+  "py_ticket_price_case_main_function_cc_trips_the_cc_rail",
+  { skip: !python3Available() },
+  async () => {
+    await assertMainFunctionCcTripsRailForPyCase("py-ticket-price", "ticket_price.py.case");
+  },
+);
+
+test(
+  "py_config_loader_case_metrics_match_the_committed_baseline",
+  { skip: !python3Available() },
+  async () => {
+    await assertMetricsMatchBaselineForPyCase("py-config-loader", "load_config.py.case");
+  },
+);
+
+test(
+  "py_config_loader_case_main_function_cc_trips_the_cc_rail",
+  { skip: !python3Available() },
+  async () => {
+    await assertMainFunctionCcTripsRailForPyCase("py-config-loader", "load_config.py.case");
+  },
+);
+
+test(
+  "py_safe_convert_case_metrics_match_the_committed_baseline",
+  { skip: !python3Available() },
+  async () => {
+    await assertMetricsMatchBaselineForPyCase("py-safe-convert", "to_number.py.case");
+  },
+);
+
+test(
+  "py_safe_convert_case_main_function_cc_trips_the_cc_rail",
+  { skip: !python3Available() },
+  async () => {
+    await assertMainFunctionCcTripsRailForPyCase("py-safe-convert", "to_number.py.case");
   },
 );

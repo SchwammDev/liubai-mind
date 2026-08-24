@@ -1,0 +1,40 @@
+from __future__ import annotations
+
+DEFAULTS = {"port": 8080, "host": "0.0.0.0", "workers": 4, "debug": False}
+
+
+def load_config(raw: dict) -> dict:
+    if not isinstance(raw, dict):
+        return dict(DEFAULTS)
+
+    config = dict(DEFAULTS)
+
+    if "port" in raw:
+        port = raw["port"]
+        if isinstance(port, int) and 1 <= port <= 65535:
+            config["port"] = port
+        else:
+            return dict(DEFAULTS)
+
+    if "host" in raw:
+        host = raw["host"]
+        if isinstance(host, str) and len(host) > 0:
+            config["host"] = host
+        else:
+            return dict(DEFAULTS)
+
+    if "workers" in raw:
+        workers = raw["workers"]
+        if isinstance(workers, int) and workers >= 1:
+            config["workers"] = workers
+        else:
+            return dict(DEFAULTS)
+
+    if "debug" in raw:
+        debug = raw["debug"]
+        if isinstance(debug, bool):
+            config["debug"] = debug
+        else:
+            return dict(DEFAULTS)
+
+    return config

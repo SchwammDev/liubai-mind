@@ -1,0 +1,34 @@
+export interface EventPayload {
+  data: Record<string, unknown>;
+}
+
+export interface EventResult {
+  status: string;
+  message: string;
+}
+
+export function routeEvent(name: string, payload: EventPayload): EventResult {
+  if (name === "user.created") {
+    return { status: "ok", message: `created user ${String(payload.data.id)}` };
+  } else if (name === "user.updated") {
+    return { status: "ok", message: `updated user ${String(payload.data.id)}` };
+  } else if (name === "user.deleted") {
+    return { status: "ok", message: `deleted user ${String(payload.data.id)}` };
+  } else if (name === "order.placed") {
+    return { status: "ok", message: `order placed ${String(payload.data.orderId)}` };
+  } else if (name === "order.cancelled") {
+    return { status: "ok", message: `order cancelled ${String(payload.data.orderId)}` };
+  } else if (name === "order.shipped") {
+    return { status: "ok", message: `order shipped ${String(payload.data.orderId)}` };
+  } else if (name === "payment.succeeded") {
+    return { status: "ok", message: `payment succeeded ${String(payload.data.paymentId)}` };
+  } else if (name === "payment.failed") {
+    return { status: "error", message: `payment failed ${String(payload.data.paymentId)}` };
+  } else if (name === "invoice.issued") {
+    return { status: "ok", message: `invoice issued ${String(payload.data.invoiceId)}` };
+  } else if (name === "invoice.voided") {
+    return { status: "ok", message: `invoice voided ${String(payload.data.invoiceId)}` };
+  } else {
+    return { status: "error", message: `unknown event: ${name}` };
+  }
+}
