@@ -1,0 +1,8 @@
+{
+  "id": "ts-flag-parser",
+  "lang": "typescript",
+  "files": ["parse_flags.ts.case"],
+  "entry": "parse_flags.ts",
+  "task": "Improve parse_flags.ts. Keep the public function signature and behavior unchanged.",
+  "baseline": { "decisionPoints": 24, "functions": 3, "silentHandlers": 0 }
+}

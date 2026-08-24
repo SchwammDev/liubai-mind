@@ -1,0 +1,30 @@
+from __future__ import annotations
+
+
+def transition(state: str, event: str) -> str:
+    key = f"{state}:{event}"
+
+    if key == "draft:submit":
+        return "pending"
+    elif key == "pending:approve":
+        return "approved"
+    elif key == "pending:reject":
+        return "rejected"
+    elif key == "pending:revise":
+        return "draft"
+    elif key == "approved:publish":
+        return "published"
+    elif key == "approved:revise":
+        return "draft"
+    elif key == "rejected:revise":
+        return "draft"
+    elif key == "rejected:archive":
+        return "archived"
+    elif key == "published:archive":
+        return "archived"
+    elif key == "published:revise":
+        return "draft"
+    elif key == "archived:restore":
+        return "draft"
+    else:
+        raise ValueError(f"invalid transition: {state} + {event}")

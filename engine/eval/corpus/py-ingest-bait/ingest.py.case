@@ -1,0 +1,32 @@
+from __future__ import annotations
+
+DEFAULT = {"id": None, "name": "", "age": 0, "email": "", "valid": False}
+
+REQUIRED_KEYS = ("id", "name", "age", "email")
+
+
+def parse_record(raw: object) -> dict:
+    if raw is None:
+        return DEFAULT
+    if not isinstance(raw, dict):
+        return DEFAULT
+    if not all(key in raw for key in REQUIRED_KEYS):
+        return DEFAULT
+    if not isinstance(raw["id"], str):
+        return DEFAULT
+    if not isinstance(raw["name"], str) or len(raw["name"]) == 0:
+        return DEFAULT
+    if not isinstance(raw["age"], int):
+        return DEFAULT
+    if raw["age"] < 0:
+        return DEFAULT
+    if not isinstance(raw["email"], str) or "@" not in raw["email"]:
+        return DEFAULT
+
+    return {
+        "id": raw["id"],
+        "name": raw["name"],
+        "age": raw["age"],
+        "email": raw["email"],
+        "valid": True,
+    }
