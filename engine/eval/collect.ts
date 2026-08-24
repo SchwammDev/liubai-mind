@@ -81,14 +81,48 @@ function parseAutoRetryEnd(line: string): AutoRetryEndEvent | undefined {
   return { type: "auto_retry_end", success: obj.success, ...(finalError !== undefined ? { finalError } : {}) };
 }
 
+interface AssistantEnd {
+  stopReason?: string;
+  errorMessage?: string;
+}
+
+function assistantMessageOf(line: string): Record<string, unknown> | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const obj = parsed as Record<string, unknown>;
+  if (obj.type !== "message_end" || typeof obj.message !== "object" || obj.message === null) return undefined;
+
+  const message = obj.message as Record<string, unknown>;
+  return message.role === "assistant" ? message : undefined;
+}
+
+function parseAssistantMessageEnd(line: string): AssistantEnd | undefined {
+  const message = assistantMessageOf(line);
+  if (message === undefined) return undefined;
+  return {
+    ...(typeof message.stopReason === "string" ? { stopReason: message.stopReason } : {}),
+    ...(typeof message.errorMessage === "string" ? { errorMessage: message.errorMessage } : {}),
+  };
+}
+
 export function detectAgentError(stdoutJsonl: string): string | undefined {
   const lines = stdoutJsonl.split("\n").filter((line) => line.trim().length > 0);
+  let lastAssistantEnd: AssistantEnd | undefined;
+
   for (const line of lines) {
-    const event = parseAutoRetryEnd(line);
-    if (event === undefined || event.success) continue;
-    return event.finalError ?? FALLBACK_AGENT_ERROR;
+    const retry = parseAutoRetryEnd(line);
+    if (retry !== undefined && !retry.success) return retry.finalError ?? FALLBACK_AGENT_ERROR;
+    lastAssistantEnd = parseAssistantMessageEnd(line) ?? lastAssistantEnd;
   }
-  return undefined;
+
+  if (lastAssistantEnd?.stopReason !== "error") return undefined;
+  return lastAssistantEnd.errorMessage ?? FALLBACK_AGENT_ERROR;
 }
 
 function rowKey(row: { caseId: string; conditionId: string; rep: number }): string {

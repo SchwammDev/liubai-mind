@@ -358,6 +358,41 @@ test("detectAgentError_returns_undefined_when_every_auto_retry_end_event_succeed
   assert.equal(agentError, undefined);
 });
 
+function messageEndLine(stopReason: string, errorMessage?: string, role = "assistant"): string {
+  const message = { role, stopReason, ...(errorMessage !== undefined ? { errorMessage } : {}) };
+  return `${JSON.stringify({ type: "message_end", message })}\n`;
+}
+
+test("detectAgentError_reports_a_session_whose_last_assistant_message_ended_in_error", () => {
+  const stdoutJsonl =
+    messageEndLine("stop") +
+    messageEndLine("error", "OpenAI API error (404): incompatible model") +
+    `${JSON.stringify({ type: "agent_settled" })}\n`;
+
+  const agentError = detectAgentError(stdoutJsonl);
+
+  assert.equal(agentError, "OpenAI API error (404): incompatible model");
+});
+
+test("detectAgentError_ignores_a_transient_error_message_that_a_later_assistant_message_recovered_from", () => {
+  const stdoutJsonl =
+    messageEndLine("error", "ECONNRESET") +
+    autoRetryEndLine({ success: true, attempt: 2 }) +
+    messageEndLine("stop");
+
+  const agentError = detectAgentError(stdoutJsonl);
+
+  assert.equal(agentError, undefined);
+});
+
+test("detectAgentError_ignores_error_shaped_user_messages", () => {
+  const stdoutJsonl = messageEndLine("error", "not from the assistant", "user") + messageEndLine("stop");
+
+  const agentError = detectAgentError(stdoutJsonl);
+
+  assert.equal(agentError, undefined);
+});
+
 test("detectAgentError_returns_undefined_for_empty_stdout", () => {
   assert.equal(detectAgentError(""), undefined);
 });
