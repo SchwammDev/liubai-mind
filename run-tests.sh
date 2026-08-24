@@ -16,7 +16,7 @@ COV_SNAP="$ROOT/coverage/snapshot.json"
 
 args=("$@")
 ts_args=("${args[@]}")
-[ ${#args[@]} -eq 0 ] && ts_args=("$TS_DIR"/*.test.ts "$ROOT/extensions/subagent"/*.test.ts "$ROOT/engine"/*.test.ts)
+[ ${#args[@]} -eq 0 ] && ts_args=("$TS_DIR"/*.test.ts "$ROOT/extensions/subagent"/*.test.ts "$ROOT/engine"/*.test.ts "$ROOT/engine/eval"/*.test.ts)
 
 status=0
 
