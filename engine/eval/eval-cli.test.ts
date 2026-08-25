@@ -152,6 +152,7 @@ test("runEval_routes_score_to_the_score_dependency_with_corpus_dir", async () =>
 
   assert.equal(calls[0]?.corpusDir, join(REPO_ROOT, "engine", "eval", "corpus"));
   assert.equal(calls[0]?.runDir, join(REPO_ROOT, "engine", "eval", "runs", "baseline"));
+  assert.equal(calls[0]?.repoRoot, REPO_ROOT);
   assert.equal(result.stdout, "table");
 });
 

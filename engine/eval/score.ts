@@ -1,6 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 
 import type { Lang, Extracted } from "../contract.ts";
 import type { CaseManifest } from "./eval-contract.ts";
@@ -11,10 +10,17 @@ import { loadCases } from "./corpus.ts";
 import { runProbes } from "./probes.ts";
 import { typescriptExtractor } from "../extract-typescript.ts";
 import { pythonExtractor } from "../extract-python.ts";
+import { probePyCcBackend } from "./judge-env.ts";
+import { gitSha } from "./provenance.ts";
 
 export interface JudgedRow {
   row: RawRow;
   judge: JudgeResult;
+}
+
+export interface JudgeEnv {
+  judgedAtSha: string;
+  pyCcBackend: string;
 }
 
 export interface SummaryRow {
@@ -23,6 +29,8 @@ export interface SummaryRow {
   counts: Record<Verdict, number>;
   gamedReasons: Record<GamedReason, number>;
   total: number;
+  judgedAtSha: string;
+  pyCcBackend: string;
 }
 
 const VERDICTS: readonly Verdict[] = ["genuine-fix", "gamed", "no-reduction", "untouched", "broken", "behavior-broken", "errored"];
@@ -149,8 +157,16 @@ function emptyGamedReasons(): Record<GamedReason, number> {
   return Object.fromEntries(GAMED_REASONS.map((r) => [r, 0])) as Record<GamedReason, number>;
 }
 
-function newSummaryRow(conditionId: string, caseId: string | null): SummaryRow {
-  return { conditionId, caseId, counts: emptyCounts(), gamedReasons: emptyGamedReasons(), total: 0 };
+function newSummaryRow(conditionId: string, caseId: string | null, env: JudgeEnv): SummaryRow {
+  return {
+    conditionId,
+    caseId,
+    counts: emptyCounts(),
+    gamedReasons: emptyGamedReasons(),
+    total: 0,
+    judgedAtSha: env.judgedAtSha,
+    pyCcBackend: env.pyCcBackend,
+  };
 }
 
 function addJudgeToRow(bucket: SummaryRow, judge: JudgeResult): void {
@@ -163,17 +179,17 @@ function detailKey(conditionId: string, caseId: string): string {
   return `${conditionId}\0${caseId}`;
 }
 
-export function aggregate(judged: JudgedRow[]): SummaryRow[] {
+export function aggregate(judged: JudgedRow[], env: JudgeEnv): SummaryRow[] {
   const rollups = new Map<string, SummaryRow>();
   const details = new Map<string, SummaryRow>();
 
   for (const { row, judge } of judged) {
-    const rollup = rollups.get(row.conditionId) ?? newSummaryRow(row.conditionId, null);
+    const rollup = rollups.get(row.conditionId) ?? newSummaryRow(row.conditionId, null, env);
     addJudgeToRow(rollup, judge);
     rollups.set(row.conditionId, rollup);
 
     const key = detailKey(row.conditionId, row.caseId);
-    const detail = details.get(key) ?? newSummaryRow(row.conditionId, row.caseId);
+    const detail = details.get(key) ?? newSummaryRow(row.conditionId, row.caseId, env);
     addJudgeToRow(detail, judge);
     details.set(key, detail);
   }
@@ -257,24 +273,23 @@ function writeSummaryJsonl(runDir: string, summary: SummaryRow[]): void {
   writeFileSync(join(runDir, SUMMARY_FILENAME), content);
 }
 
-function python3Available(): boolean {
-  const res = spawnSync("python3", ["--version"]);
-  return res.error === undefined && res.status === 0;
-}
-
 function anyRowNeedsPython(rows: RawRow[], cases: CaseManifest[]): boolean {
   const langById = new Map(cases.map((c) => [c.id, c.lang]));
   return rows.some((row) => langById.get(row.caseId) === "python");
 }
 
-function ensurePythonAvailableIfNeeded(rows: RawRow[], corpusDir: string): { error: string } | undefined {
+function resolveJudgeEnv(rows: RawRow[], corpusDir: string, repoRoot: string, pythonBin?: string): { env: JudgeEnv } | { error: string } {
   const cases = loadCases(corpusDir);
   if ("error" in cases) return { error: `score: failed to load corpus: ${cases.error}` };
 
-  if (anyRowNeedsPython(rows, cases) && !python3Available()) {
-    return { error: "score: python3 is required to judge python cases but was not found on PATH" };
+  const judgedAtSha = gitSha(repoRoot);
+  if (!anyRowNeedsPython(rows, cases)) return { env: { judgedAtSha, pyCcBackend: "none" } };
+
+  try {
+    return { env: { judgedAtSha, pyCcBackend: probePyCcBackend(pythonBin) } };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
   }
-  return undefined;
 }
 
 function allRowsErrored(rows: RawRow[]): boolean {
@@ -310,6 +325,7 @@ async function buildCompareSection(
   currentSummary: SummaryRow[],
   compareRunDir: string,
   corpusDir: string,
+  env: JudgeEnv,
 ): Promise<{ text: string } | { error: string }> {
   const compareParsed = readRawJsonl(compareRunDir);
   if ("error" in compareParsed) return compareParsed;
@@ -321,7 +337,7 @@ async function buildCompareSection(
   const provenanceLines = provenanceDiff.length > 0 ? provenanceDiff : ["provenance identical"];
 
   const compareJudged = await judgeRows(compareParsed.rows, corpusDir);
-  const compareSummary = aggregate(compareJudged);
+  const compareSummary = aggregate(compareJudged, env);
   const deltaLines = genuineRateDeltaSection(currentSummary, compareSummary);
 
   return { text: [...provenanceLines, "", ...deltaLines, ""].join("\n") };
@@ -330,7 +346,9 @@ async function buildCompareSection(
 export async function runScore(opts: {
   runDir: string;
   corpusDir: string;
+  repoRoot: string;
   compareRunDir?: string;
+  pythonBin?: string;
 }): Promise<{ status: number; stdout: string }> {
   const parsedRaw = readRawJsonl(opts.runDir);
   if ("error" in parsedRaw) return { status: ERROR_STATUS, stdout: parsedRaw.error };
@@ -339,8 +357,8 @@ export async function runScore(opts: {
     return { status: ERROR_STATUS, stdout: `score: every row in this run agent-errored; first: ${firstAgentError(parsedRaw.rows)}` };
   }
 
-  const pythonCheck = ensurePythonAvailableIfNeeded(parsedRaw.rows, opts.corpusDir);
-  if (pythonCheck !== undefined) return { status: ERROR_STATUS, stdout: pythonCheck.error };
+  const judgeEnv = resolveJudgeEnv(parsedRaw.rows, opts.corpusDir, opts.repoRoot, opts.pythonBin);
+  if ("error" in judgeEnv) return { status: ERROR_STATUS, stdout: judgeEnv.error };
 
   let judged: JudgedRow[];
   try {
@@ -349,13 +367,13 @@ export async function runScore(opts: {
     return { status: ERROR_STATUS, stdout: err instanceof Error ? err.message : String(err) };
   }
 
-  const summary = aggregate(judged);
+  const summary = aggregate(judged, judgeEnv.env);
   writeSummaryJsonl(opts.runDir, summary);
   const table = formatMarkdown(summary);
 
   if (opts.compareRunDir === undefined) return { status: OK_STATUS, stdout: table };
 
-  const compareSection = await buildCompareSection(parsedRaw.rows, summary, opts.compareRunDir, opts.corpusDir);
+  const compareSection = await buildCompareSection(parsedRaw.rows, summary, opts.compareRunDir, opts.corpusDir, judgeEnv.env);
   if ("error" in compareSection) return { status: ERROR_STATUS, stdout: compareSection.error };
 
   return { status: OK_STATUS, stdout: `${compareSection.text}\n${table}` };

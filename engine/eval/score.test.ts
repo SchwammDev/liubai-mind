@@ -1,22 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 
 import { judgeRows, aggregate, formatMarkdown, compareProvenance, runScore } from "./score.ts";
-import type { SummaryRow } from "./score.ts";
+import type { SummaryRow, JudgeEnv } from "./score.ts";
 import type { RawRow, Metrics, Verdict, GamedReason, Provenance, JudgeResult } from "./eval-contract.ts";
 import type { JudgedRow } from "./score.ts";
+import { venvPythonAvailable } from "./judge-env.ts";
+import { gitSha } from "./provenance.ts";
 
 const CORPUS_DIR = join(import.meta.dirname, "corpus");
 const FIXTURE_PATH = join(import.meta.dirname, "fixtures", "raw-smoke.jsonl");
-
-function python3Available(): boolean {
-  const res = spawnSync("python3", ["--version"]);
-  return res.error === undefined && res.status === 0;
-}
+const REPO_ROOT = join(import.meta.dirname, "..", "..");
 
 function readFixtureRows(): RawRow[] {
   const text = readFileSync(FIXTURE_PATH, "utf8");
@@ -98,6 +95,10 @@ function allErroredRawRows(): RawRow[] {
   ];
 }
 
+function judgeEnv(over: Partial<JudgeEnv> = {}): JudgeEnv {
+  return { judgedAtSha: "fixture-sha", pyCcBackend: "lizard 1.0.0", ...over };
+}
+
 function summaryRow(conditionId: string, caseId: string | null, counts: Partial<Record<Verdict, number>>, total: number): SummaryRow {
   return {
     conditionId,
@@ -105,6 +106,7 @@ function summaryRow(conditionId: string, caseId: string | null, counts: Partial<
     counts: { ...emptyVerdictCounts(), ...counts },
     gamedReasons: { "helper-split": 0, "silent-handler": 0 },
     total,
+    ...judgeEnv(),
   };
 }
 
@@ -132,7 +134,7 @@ test("aggregate_rolls_up_verdict_counts_per_condition", () => {
     judgedRow("control", "case-a", "untouched"),
   ];
 
-  const summary = aggregate(judged);
+  const summary = aggregate(judged, judgeEnv());
 
   assertRollupCounts(summary, "rails-default", { total: 2, genuineFix: 1, gamed: 1, helperSplit: 1 });
 });
@@ -144,7 +146,7 @@ test("aggregate_emits_a_row_per_condition_and_case_pair", () => {
     judgedRow("rails-default", "case-b", "broken"),
   ];
 
-  const summary = aggregate(judged);
+  const summary = aggregate(judged, judgeEnv());
 
   assertDetailTotals(summary, [["case-a", 2], ["case-b", 1]]);
 });
@@ -152,7 +154,7 @@ test("aggregate_emits_a_row_per_condition_and_case_pair", () => {
 test("aggregate_counts_a_behavior_broken_verdict", () => {
   const judged = [judgedRow("rails-default", "case-a", "behavior-broken")];
 
-  const summary = aggregate(judged);
+  const summary = aggregate(judged, judgeEnv());
 
   const rollup = summary.find((r) => r.conditionId === "rails-default" && r.caseId === null)!;
   assert.equal(rollup.counts["behavior-broken"], 1);
@@ -214,7 +216,7 @@ test("runScore_classifies_the_ts_fixture_rows_into_the_expected_verdicts", async
   const runDir = tempRunDir();
   writeRawJsonl(runDir, rows);
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
   const judged = await judgeRows(rows, CORPUS_DIR);
 
   assert.equal(result.status, 0);
@@ -227,7 +229,7 @@ test("runScore_classifies_the_ts_fixture_rows_into_the_expected_verdicts", async
 
 test(
   "runScore_classifies_the_python_fixture_row_as_gamed_via_silent_handler",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     const rows = readFixtureRows().filter((row) => row.caseId === "py-ingest-bait");
 
@@ -262,7 +264,7 @@ test("runScore_writes_summary_jsonl_beside_raw_jsonl", async () => {
   const runDir = tempRunDir();
   writeRawJsonl(runDir, rows);
 
-  await runScore({ runDir, corpusDir: CORPUS_DIR });
+  await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
 
   const summaryLines = readFileSync(join(runDir, "summary.jsonl"), "utf8").trim().split("\n");
   const parsed = summaryLines.map((line) => JSON.parse(line) as SummaryRow);
@@ -273,7 +275,7 @@ test("runScore_errors_on_a_malformed_raw_jsonl_line", async () => {
   const runDir = tempRunDir();
   writeFileSync(join(runDir, "raw.jsonl"), '{"caseId": "ts-flag-parser"\n');
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
 
   assert.equal(result.status, 1);
   assert.match(result.stdout, /malformed/);
@@ -283,7 +285,7 @@ test("runScore_fails_loudly_naming_the_first_agentError_when_every_row_in_the_ru
   const runDir = tempRunDir();
   writeRawJsonl(runDir, allErroredRawRows());
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
 
   assert.equal(result.status, 1);
   assert.match(result.stdout, /OpenAI API error \(404\): model not found/);
@@ -296,11 +298,78 @@ test("runScore_with_compareRunDir_prints_provenance_diff_before_the_tables", asy
   const runB = tempRunDir();
   writeRawJsonl(runB, [rows[1]!]);
 
-  const result = await runScore({ runDir: runA, corpusDir: CORPUS_DIR, compareRunDir: runB });
+  const result = await runScore({ runDir: runA, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, compareRunDir: runB });
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /model differs: claude-rails-default vs claude-control/);
   const diffIndex = result.stdout.indexOf("model differs");
   const tableIndex = result.stdout.indexOf("| condition |");
   assert.ok(diffIndex >= 0 && tableIndex > diffIndex);
+});
+
+function readSummaryRows(runDir: string): SummaryRow[] {
+  const summaryLines = readFileSync(join(runDir, "summary.jsonl"), "utf8").trim().split("\n");
+  return summaryLines.map((line) => JSON.parse(line) as SummaryRow);
+}
+
+test("aggregate_stamps_every_row_with_the_judging_sha_and_backend_it_was_given", () => {
+  const judged = [judgedRow("rails-default", "case-a", "genuine-fix")];
+  const env = judgeEnv({ judgedAtSha: "deadbee", pyCcBackend: "lizard 9.9.9" });
+
+  const summary = aggregate(judged, env);
+
+  assert.ok(summary.every((row) => row.judgedAtSha === "deadbee" && row.pyCcBackend === "lizard 9.9.9"));
+});
+
+test("runScore_stamps_summary_rows_with_the_git_sha_of_the_judging_checkout", async () => {
+  const rows = tsOnlyRows(readFixtureRows());
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, rows);
+
+  await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+  const parsed = readSummaryRows(runDir);
+  assert.ok(parsed.every((row) => row.judgedAtSha === gitSha(REPO_ROOT)));
+});
+
+test("runScore_records_none_as_the_py_cc_backend_when_the_run_has_no_python_case", async () => {
+  const rows = tsOnlyRows(readFixtureRows());
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, rows);
+
+  await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+  const parsed = readSummaryRows(runDir);
+  assert.ok(parsed.every((row) => row.pyCcBackend === "none"));
+});
+
+test(
+  "runScore_records_the_lizard_backend_that_judged_a_python_run",
+  { skip: !venvPythonAvailable() },
+  async () => {
+    const rows = readFixtureRows().filter((row) => row.caseId === "py-ingest-bait");
+    const runDir = tempRunDir();
+    writeRawJsonl(runDir, rows);
+
+    await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+    const parsed = readSummaryRows(runDir);
+    assert.ok(parsed.every((row) => /^lizard \d+\.\d+/.test(row.pyCcBackend)));
+  },
+);
+
+function assertScoreFailedBeforeWritingATable(result: { status: number; stdout: string }, runDir: string): void {
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /venv missing/);
+  assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
+}
+
+test("runScore_fails_the_run_with_an_actionable_message_when_the_py_cc_backend_probe_is_broken", async () => {
+  const rows = readFixtureRows().filter((row) => row.caseId === "py-ingest-bait");
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, rows);
+
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, pythonBin: "/nonexistent/python" });
+
+  assertScoreFailedBeforeWritingATable(result, runDir);
 });

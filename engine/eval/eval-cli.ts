@@ -179,6 +179,7 @@ async function runScoreCmd(
   const result = await score({
     runDir: join(runsRoot, parsed.run),
     corpusDir: join(repoRoot, "engine", "eval", "corpus"),
+    repoRoot,
     ...(parsed.compare !== undefined ? { compareRunDir: join(runsRoot, parsed.compare) } : {}),
   });
 
