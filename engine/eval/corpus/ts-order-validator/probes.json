@@ -4,13 +4,424 @@
       {
         "id": "order-1",
         "customerId": "cust-1",
-        "items": [{ "sku": "sku-1", "quantity": 1, "unitPrice": 100 }],
-        "shippingAddress": { "line1": "123 Main St", "city": "Springfield", "postalCode": "12345", "country": "US" },
-        "billingAddress": { "line1": "123 Main St", "city": "Springfield", "postalCode": "12345", "country": "US" },
+        "items": [
+          {
+            "sku": "sku-1",
+            "quantity": 1,
+            "unitPrice": 100
+          }
+        ],
+        "shippingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "billingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
         "totalCents": 100,
         "currency": "USD"
       }
     ],
-    "returns": { "valid": true, "errors": [] }
+    "returns": {
+      "valid": true,
+      "errors": []
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "",
+        "customerId": "cust-1",
+        "items": [
+          {
+            "sku": "sku-1",
+            "quantity": 1,
+            "unitPrice": 100
+          }
+        ],
+        "shippingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "billingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "totalCents": 100,
+        "currency": "USD"
+      }
+    ],
+    "returns": {
+      "valid": false,
+      "errors": [
+        "order id is required"
+      ]
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "order-1",
+        "customerId": "",
+        "items": [
+          {
+            "sku": "sku-1",
+            "quantity": 1,
+            "unitPrice": 100
+          }
+        ],
+        "shippingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "billingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "totalCents": 100,
+        "currency": "USD"
+      }
+    ],
+    "returns": {
+      "valid": false,
+      "errors": [
+        "customer id is required"
+      ]
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "order-1",
+        "customerId": "cust-1",
+        "items": [],
+        "shippingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "billingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "totalCents": 100,
+        "currency": "USD"
+      }
+    ],
+    "returns": {
+      "valid": false,
+      "errors": [
+        "order must contain at least one item"
+      ]
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "order-1",
+        "customerId": "cust-1",
+        "items": [
+          {
+            "sku": "sku-x",
+            "quantity": -1,
+            "unitPrice": 10
+          }
+        ],
+        "shippingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "billingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "totalCents": 100,
+        "currency": "USD"
+      }
+    ],
+    "returns": {
+      "valid": false,
+      "errors": [
+        "item sku-x has a non-positive quantity"
+      ]
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "order-1",
+        "customerId": "cust-1",
+        "items": [
+          {
+            "sku": "sku-1",
+            "quantity": 1,
+            "unitPrice": 100
+          }
+        ],
+        "shippingAddress": null,
+        "billingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "totalCents": 100,
+        "currency": "USD"
+      }
+    ],
+    "returns": {
+      "valid": false,
+      "errors": [
+        "shipping address is required"
+      ]
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "order-1",
+        "customerId": "cust-1",
+        "items": [
+          {
+            "sku": "sku-1",
+            "quantity": 1,
+            "unitPrice": 100
+          }
+        ],
+        "shippingAddress": {
+          "line1": "1 A St",
+          "city": "X",
+          "postalCode": "",
+          "country": "US"
+        },
+        "billingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "totalCents": 100,
+        "currency": "USD"
+      }
+    ],
+    "returns": {
+      "valid": false,
+      "errors": [
+        "shipping postal code is required"
+      ]
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "order-1",
+        "customerId": "cust-1",
+        "items": [
+          {
+            "sku": "sku-1",
+            "quantity": 1,
+            "unitPrice": 100
+          }
+        ],
+        "shippingAddress": {
+          "line1": "1 A St",
+          "city": "X",
+          "postalCode": "   ",
+          "country": "US"
+        },
+        "billingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "totalCents": 100,
+        "currency": "USD"
+      }
+    ],
+    "returns": {
+      "valid": false,
+      "errors": [
+        "shipping postal code is required"
+      ]
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "order-1",
+        "customerId": "cust-1",
+        "items": [
+          {
+            "sku": "sku-1",
+            "quantity": 1,
+            "unitPrice": 100
+          }
+        ],
+        "shippingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "billingAddress": null,
+        "totalCents": 100,
+        "currency": "USD"
+      }
+    ],
+    "returns": {
+      "valid": false,
+      "errors": [
+        "billing address is required"
+      ]
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "order-1",
+        "customerId": "cust-1",
+        "items": [
+          {
+            "sku": "sku-1",
+            "quantity": 1,
+            "unitPrice": 100
+          }
+        ],
+        "shippingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "billingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "totalCents": 0,
+        "currency": "USD"
+      }
+    ],
+    "returns": {
+      "valid": false,
+      "errors": [
+        "order total must be positive"
+      ]
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "order-1",
+        "customerId": "cust-1",
+        "items": [
+          {
+            "sku": "sku-1",
+            "quantity": 1,
+            "unitPrice": 100
+          }
+        ],
+        "shippingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "billingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "totalCents": 100,
+        "currency": "EUR"
+      }
+    ],
+    "returns": {
+      "valid": true,
+      "errors": []
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "order-1",
+        "customerId": "cust-1",
+        "items": [
+          {
+            "sku": "sku-1",
+            "quantity": 1,
+            "unitPrice": 100
+          }
+        ],
+        "shippingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "billingAddress": {
+          "line1": "123 Main St",
+          "city": "Springfield",
+          "postalCode": "12345",
+          "country": "US"
+        },
+        "totalCents": 100,
+        "currency": "GBP"
+      }
+    ],
+    "returns": {
+      "valid": false,
+      "errors": [
+        "unsupported currency: GBP"
+      ]
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "",
+        "customerId": "",
+        "items": [],
+        "shippingAddress": null,
+        "billingAddress": null,
+        "totalCents": 0,
+        "currency": "JPY"
+      }
+    ],
+    "returns": {
+      "valid": false,
+      "errors": [
+        "order id is required",
+        "customer id is required",
+        "order must contain at least one item",
+        "shipping address is required",
+        "billing address is required",
+        "order total must be positive",
+        "unsupported currency: JPY"
+      ]
+    }
   }
 ]

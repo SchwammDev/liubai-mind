@@ -1,6 +1,158 @@
 [
   {
-    "args": [{ "score": 95, "absences": 5, "extraCredit": 0 }],
-    "returns": { "letter": "A", "modifier": "none" }
+    "args": [
+      {
+        "score": 98,
+        "absences": 0,
+        "extraCredit": 0
+      }
+    ],
+    "returns": {
+      "letter": "A+",
+      "modifier": "none"
+    }
+  },
+  {
+    "args": [
+      {
+        "score": 95,
+        "absences": 5,
+        "extraCredit": 0
+      }
+    ],
+    "returns": {
+      "letter": "A",
+      "modifier": "none"
+    }
+  },
+  {
+    "args": [
+      {
+        "score": 91,
+        "absences": 0,
+        "extraCredit": 5
+      }
+    ],
+    "returns": {
+      "letter": "A-",
+      "modifier": "honors"
+    }
+  },
+  {
+    "args": [
+      {
+        "score": 88,
+        "absences": 0,
+        "extraCredit": 0
+      }
+    ],
+    "returns": {
+      "letter": "B+",
+      "modifier": "none"
+    }
+  },
+  {
+    "args": [
+      {
+        "score": 85,
+        "absences": 0,
+        "extraCredit": 0
+      }
+    ],
+    "returns": {
+      "letter": "B",
+      "modifier": "none"
+    }
+  },
+  {
+    "args": [
+      {
+        "score": 75,
+        "absences": 0,
+        "extraCredit": 0
+      }
+    ],
+    "returns": {
+      "letter": "C",
+      "modifier": "none"
+    }
+  },
+  {
+    "args": [
+      {
+        "score": 65,
+        "absences": 0,
+        "extraCredit": 0
+      }
+    ],
+    "returns": {
+      "letter": "D",
+      "modifier": "none"
+    }
+  },
+  {
+    "args": [
+      {
+        "score": 50,
+        "absences": 0,
+        "extraCredit": 0
+      }
+    ],
+    "returns": {
+      "letter": "F",
+      "modifier": "none"
+    }
+  },
+  {
+    "args": [
+      {
+        "score": 98,
+        "absences": 25,
+        "extraCredit": 0
+      }
+    ],
+    "returns": {
+      "letter": "F",
+      "modifier": "attendance-failure"
+    }
+  },
+  {
+    "args": [
+      {
+        "score": 85,
+        "absences": 0,
+        "extraCredit": 10
+      }
+    ],
+    "returns": {
+      "letter": "B",
+      "modifier": "none"
+    }
+  },
+  {
+    "args": [
+      {
+        "score": 98,
+        "absences": 20,
+        "extraCredit": 0
+      }
+    ],
+    "returns": {
+      "letter": "A+",
+      "modifier": "none"
+    }
+  },
+  {
+    "args": [
+      {
+        "score": 90,
+        "absences": 0,
+        "extraCredit": 5
+      }
+    ],
+    "returns": {
+      "letter": "A-",
+      "modifier": "honors"
+    }
   }
 ]
