@@ -8,6 +8,8 @@ import { decisionPoints, classifyVerdict } from "./judge.ts";
 import { countSilentHandlers } from "./silent-handlers.ts";
 import { loadCases, declaredFiles } from "./corpus.ts";
 import { runProbes } from "./probes.ts";
+import { scanReferences } from "./references.ts";
+import { sourceParses } from "./parse-check.ts";
 import { typescriptExtractor } from "../extract-typescript.ts";
 import { pythonExtractor } from "../extract-python.ts";
 import { probePyCcBackend } from "./judge-env.ts";
@@ -54,6 +56,12 @@ function probeLang(lang: Lang): "typescript" | "python" {
   throw new Error(`score: unsupported lang for probe running: ${lang}`);
 }
 
+function referenceLang(lang: Lang): "typescript" | "python" {
+  if (lang === "typescript") return "typescript";
+  if (lang === "python") return "python";
+  throw new Error(`score: unsupported lang for reference scanning: ${lang}`);
+}
+
 async function extractFunctions(lang: Lang, path: string, after: string): Promise<Extracted> {
   if (lang === "typescript") return await typescriptExtractor.extract({ path, after });
   if (lang === "python") return await pythonExtractor.extract({ path, after });
@@ -72,6 +80,28 @@ async function computeMetrics(lang: Lang, path: string, source: string | undefin
     silentHandlers: countSilentHandlers(source, silentHandlerLang(lang)),
     parsed: true,
   };
+}
+
+function addMetrics(a: Metrics, b: Metrics): Metrics {
+  return {
+    decisionPoints: a.decisionPoints + b.decisionPoints,
+    nFunctions: a.nFunctions + b.nFunctions,
+    silentHandlers: a.silentHandlers + b.silentHandlers,
+    parsed: a.parsed && b.parsed,
+  };
+}
+
+async function aggregateAfterMetrics(lang: Lang, paths: string[], files: Record<string, string>): Promise<Metrics> {
+  let total: Metrics = { decisionPoints: 0, nFunctions: 0, silentHandlers: 0, parsed: true };
+
+  for (const path of paths) {
+    const source = files[path];
+    if (source === undefined) return BROKEN_METRICS;
+    if (!sourceParses(source, referenceLang(lang))) return { ...total, parsed: false };
+    total = addMetrics(total, await computeMetrics(lang, path, source));
+  }
+
+  return total;
 }
 
 function entryChangedFor(before: string, after: string | undefined): boolean {
@@ -95,12 +125,28 @@ function createdFilesOf(kase: CaseManifest, files: Record<string, string>): stri
     .sort();
 }
 
+function droppedHitFor(candidate: string, dropped: string[]): string | undefined {
+  return dropped.find((d) => d === candidate || (d.endsWith("/") && candidate.startsWith(d)));
+}
+
+function assertNoDroppedReferences(row: RawRow, unresolved: string[]): void {
+  const dropped = row.snapshotDropped ?? [];
+  for (const candidate of unresolved) {
+    const hit = droppedHitFor(candidate, dropped);
+    if (hit === undefined) continue;
+    throw new Error(
+      `score: ${row.conditionId}/${row.caseId}#${row.rep} references ${candidate} which the snapshot dropped (${hit}); row cannot be judged`,
+    );
+  }
+}
+
 function buildJudgeResult(
   before: Metrics,
   after: Metrics,
   entryChanged: boolean,
   probesPassed: boolean | undefined,
   createdFiles: string[],
+  referencedFiles: string[],
 ): JudgeResult {
   const { verdict, gamedReason } = classifyVerdict({ before, after, entryChanged, ...(probesPassed !== undefined ? { probesPassed } : {}) });
   return {
@@ -108,13 +154,14 @@ function buildJudgeResult(
     before,
     after,
     createdFiles,
+    referencedFiles,
     ...(gamedReason !== undefined ? { gamedReason } : {}),
     ...(probesPassed !== undefined ? { probesPassed } : {}),
   };
 }
 
 function erroredJudgeResult(): JudgeResult {
-  return { verdict: "errored", before: BROKEN_METRICS, after: BROKEN_METRICS, createdFiles: [] };
+  return { verdict: "errored", before: BROKEN_METRICS, after: BROKEN_METRICS, createdFiles: [], referencedFiles: [] };
 }
 
 function shouldRunProbes(entryChanged: boolean, after: Metrics, afterSource: string | undefined): afterSource is string {
@@ -142,12 +189,15 @@ async function judgeRow(row: RawRow, cases: CaseManifest[], corpusDir: string): 
   const entryChanged = entryChangedFor(beforeSource, afterSource);
 
   const before = await computeMetrics(kase.lang, kase.entry, beforeSource);
-  const after = await computeMetrics(kase.lang, kase.entry, afterSource);
+
+  const createdFiles = createdFilesOf(kase, row.files);
+  const scan = scanReferences({ lang: referenceLang(kase.lang), entry: kase.entry, files: row.files, created: createdFiles });
+  assertNoDroppedReferences(row, scan.unresolved);
+  const after = await aggregateAfterMetrics(kase.lang, [kase.entry, ...scan.referenced], row.files);
 
   const probesPassed = shouldRunProbes(entryChanged, after, afterSource) ? runCaseProbes(kase, afterSource, row.files) : undefined;
-  const createdFiles = createdFilesOf(kase, row.files);
 
-  const judge = buildJudgeResult(before, after, entryChanged, probesPassed, createdFiles);
+  const judge = buildJudgeResult(before, after, entryChanged, probesPassed, createdFiles, scan.referenced);
   return { row, judge };
 }
 

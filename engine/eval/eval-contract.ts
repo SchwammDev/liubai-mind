@@ -41,6 +41,7 @@ export interface JudgeResult {
   gamedReason?: GamedReason;
   probesPassed?: boolean;
   createdFiles: string[];
+  referencedFiles: string[];
   before: Metrics;
   after: Metrics;
 }
