@@ -207,7 +207,6 @@ const PROVENANCE_FIELDS: readonly ProvenanceField[] = [
   { label: "model", value: (p) => p.model },
   { label: "phrasing pack", value: (p) => (p.phrasingPackHash === null ? "none" : p.phrasingPackHash.slice(0, 8)) },
   { label: "liubai sha", value: (p) => p.liubaiSha },
-  { label: "python cc backend", value: (p) => p.pyCcBackend ?? "none" },
 ];
 
 function distinctValues(items: Provenance[], value: (p: Provenance) => string): string[] {

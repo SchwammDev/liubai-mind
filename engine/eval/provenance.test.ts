@@ -89,18 +89,3 @@ test("buildProvenance_passes_model_condition_and_timestamp_through_unchanged", (
   assert.equal(provenance.model, "claude-test");
   assert.equal(provenance.collectedAt, "2026-08-24T00:00:00.000Z");
 });
-
-test("buildProvenance_carries_the_optional_python_cc_backend_through", () => {
-  const repo = tempGitRepo();
-
-  const provenance = buildProvenance({
-    conditionId: "control",
-    packBytes: null,
-    repoRoot: repo,
-    model: "claude-test",
-    now: "2026-08-24T00:00:00.000Z",
-    pyCcBackend: "lizard",
-  });
-
-  assert.equal(provenance.pyCcBackend, "lizard");
-});
