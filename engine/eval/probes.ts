@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { Probe } from "./eval-contract.ts";
+import { PYTHON_BIN } from "../extract-python.ts";
 
 export interface ProbeFailure {
   index: number;
@@ -68,7 +69,7 @@ function spawnRunner(lang: ProbeRunInput["lang"], payload: string, timeoutMs: nu
   if (lang === "typescript") {
     return spawnSync(process.execPath, ["--experimental-strip-types", TS_RUNNER_PATH], opts);
   }
-  return spawnSync("python3", [PY_RUNNER_PATH], opts);
+  return spawnSync(PYTHON_BIN, [PY_RUNNER_PATH], opts);
 }
 
 function didTimeOut(res: SpawnResult): boolean {

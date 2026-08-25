@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 
 import {
   countSilentHandlers,
@@ -8,11 +7,7 @@ import {
   countSilentHandlersPy,
 } from "./silent-handlers.ts";
 import type { PyRunner } from "./silent-handlers.ts";
-
-function python3Available(): boolean {
-  const res = spawnSync("python3", ["--version"]);
-  return res.error === undefined && res.status === 0;
-}
+import { venvPythonAvailable } from "./judge-env.ts";
 
 test("empty_catch_body_is_counted_as_silent", () => {
   const src = "function f() {\n  try {\n    doIt();\n  } catch (e) {\n  }\n}\n";
@@ -104,7 +99,7 @@ test("countSilentHandlers_dispatches_to_the_typescript_detector_for_typescript",
   assert.equal(count, 1);
 });
 
-test("countSilentHandlers_dispatches_to_the_python_detector_for_python", { skip: !python3Available() }, () => {
+test("countSilentHandlers_dispatches_to_the_python_detector_for_python", { skip: !venvPythonAvailable() }, () => {
   const src = "try:\n    do_it()\nexcept Exception:\n    pass\n";
 
   const count = countSilentHandlers(src, "python");
@@ -112,7 +107,7 @@ test("countSilentHandlers_dispatches_to_the_python_detector_for_python", { skip:
   assert.equal(count, 1);
 });
 
-test("bare_except_pass_is_counted_as_silent", { skip: !python3Available() }, () => {
+test("bare_except_pass_is_counted_as_silent", { skip: !venvPythonAvailable() }, () => {
   const src = "try:\n    do_it()\nexcept:\n    pass\n";
 
   const count = countSilentHandlersPy(src);
@@ -120,7 +115,7 @@ test("bare_except_pass_is_counted_as_silent", { skip: !python3Available() }, () 
   assert.equal(count, 1);
 });
 
-test("except_exception_returning_none_is_counted_as_silent", { skip: !python3Available() }, () => {
+test("except_exception_returning_none_is_counted_as_silent", { skip: !venvPythonAvailable() }, () => {
   const src = "def f():\n    try:\n        return do_it()\n    except Exception:\n        return None\n";
 
   const count = countSilentHandlersPy(src);
@@ -128,7 +123,7 @@ test("except_exception_returning_none_is_counted_as_silent", { skip: !python3Ava
   assert.equal(count, 1);
 });
 
-test("except_narrow_key_error_pass_is_not_counted", { skip: !python3Available() }, () => {
+test("except_narrow_key_error_pass_is_not_counted", { skip: !venvPythonAvailable() }, () => {
   const src = "try:\n    do_it()\nexcept KeyError:\n    pass\n";
 
   const count = countSilentHandlersPy(src);
@@ -136,7 +131,7 @@ test("except_narrow_key_error_pass_is_not_counted", { skip: !python3Available() 
   assert.equal(count, 0);
 });
 
-test("except_exception_with_logging_call_is_not_counted", { skip: !python3Available() }, () => {
+test("except_exception_with_logging_call_is_not_counted", { skip: !venvPythonAvailable() }, () => {
   const src = "try:\n    do_it()\nexcept Exception:\n    log.error('boom')\n";
 
   const count = countSilentHandlersPy(src);
@@ -144,7 +139,7 @@ test("except_exception_with_logging_call_is_not_counted", { skip: !python3Availa
   assert.equal(count, 0);
 });
 
-test("except_exception_that_reraises_a_different_error_is_not_counted", { skip: !python3Available() }, () => {
+test("except_exception_that_reraises_a_different_error_is_not_counted", { skip: !venvPythonAvailable() }, () => {
   const src = "try:\n    do_it()\nexcept Exception:\n    raise ValueError('boom')\n";
 
   const count = countSilentHandlersPy(src);

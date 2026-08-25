@@ -3,16 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 
 import { runProbes } from "./probes.ts";
 import type { ProbeOutcome, ProbeRunInput } from "./probes.ts";
 import type { Probe } from "./eval-contract.ts";
-
-function python3Available(): boolean {
-  const res = spawnSync("python3", ["--version"]);
-  return res.error === undefined && res.status === 0;
-}
+import { venvPythonAvailable } from "./judge-env.ts";
 
 function tsProbeOutcome(entrySymbol: string, source: string, probes: Probe[], opts: Partial<ProbeRunInput> = {}): ProbeOutcome {
   return runProbes({ lang: "typescript", entryFilename: `${entrySymbol}.ts`, source, entrySymbol, probes, ...opts });
@@ -124,7 +119,7 @@ test("runProbes_times_out_a_hanging_source_as_failed", () => {
   assertFailedWithReason(outcome, /timed out after 1000ms/);
 });
 
-test("runProbes_python_passes_on_a_matching_return", { skip: !python3Available() }, () => {
+test("runProbes_python_passes_on_a_matching_return", { skip: !venvPythonAvailable() }, () => {
   const source = ["def double(n):", "    return n * 2", ""].join("\n");
 
   const outcome = pyProbeOutcome("double", source, [{ args: [3], returns: 6 }]);
@@ -132,7 +127,7 @@ test("runProbes_python_passes_on_a_matching_return", { skip: !python3Available()
   assertPassed(outcome);
 });
 
-test("runProbes_python_bool_does_not_equal_int_one", { skip: !python3Available() }, () => {
+test("runProbes_python_bool_does_not_equal_int_one", { skip: !venvPythonAvailable() }, () => {
   const source = "def flag(n):\n    if n == 0:\n        return 1\n    return True\n";
   const probes: Probe[] = [{ args: [0], returns: true }, { args: [1], returns: 1 }];
 
@@ -141,7 +136,7 @@ test("runProbes_python_bool_does_not_equal_int_one", { skip: !python3Available()
   assertFailedAtIndices(outcome, [0, 1]);
 });
 
-test("runProbes_python_int_expected_matches_float_return", { skip: !python3Available() }, () => {
+test("runProbes_python_int_expected_matches_float_return", { skip: !venvPythonAvailable() }, () => {
   const source = ["def price(_ignored):", "    return 18.0", ""].join("\n");
 
   const outcome = pyProbeOutcome("price", source, [{ args: [0], returns: 18 }]);
@@ -149,7 +144,7 @@ test("runProbes_python_int_expected_matches_float_return", { skip: !python3Avail
   assertPassed(outcome);
 });
 
-test("runProbes_python_matches_a_raised_message_exactly", { skip: !python3Available() }, () => {
+test("runProbes_python_matches_a_raised_message_exactly", { skip: !venvPythonAvailable() }, () => {
   const source = "def validate(n):\n    if n < 0:\n        raise ValueError('n must be non-negative')\n    return n\n";
 
   const outcome = pyProbeOutcome("validate", source, [{ args: [-1], throws: "n must be non-negative" }]);
@@ -157,7 +152,7 @@ test("runProbes_python_matches_a_raised_message_exactly", { skip: !python3Availa
   assertPassed(outcome);
 });
 
-test("runProbes_python_leaves_a_shared_module_dict_unmutated_across_probes", { skip: !python3Available() }, () => {
+test("runProbes_python_leaves_a_shared_module_dict_unmutated_across_probes", { skip: !venvPythonAvailable() }, () => {
   const source = "SHARED = {'a': 1, 'b': 2}\n\ndef get_shared(_ignored):\n    return SHARED\n";
   const probes: Probe[] = [{ args: [1], returns: { a: 1, b: 2 } }, { args: [2], returns: { a: 1, b: 2 } }];
 
@@ -166,7 +161,7 @@ test("runProbes_python_leaves_a_shared_module_dict_unmutated_across_probes", { s
   assertPassed(outcome);
 });
 
-test("runProbes_python_writes_trace_lines_when_the_trace_env_var_is_set", { skip: !python3Available() }, () => {
+test("runProbes_python_writes_trace_lines_when_the_trace_env_var_is_set", { skip: !venvPythonAvailable() }, () => {
   const source = "def classify(n):\n    if n > 0:\n        return 'positive'\n    return 'non-positive'\n";
 
   assertTraceRun("classify", source, [{ args: [1], returns: "positive" }]);

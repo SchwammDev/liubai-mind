@@ -1,16 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 
 import { entrySpan, runProbesWithCoverage } from "./probe-coverage.ts";
 import type { AdequacyResult } from "./probe-coverage.ts";
 import type { Probe } from "./eval-contract.ts";
 import type { ProbeRunInput } from "./probes.ts";
-
-function python3Available(): boolean {
-  const res = spawnSync("python3", ["--version"]);
-  return res.error === undefined && res.status === 0;
-}
+import { venvPythonAvailable } from "./judge-env.ts";
 
 const TWO_FUNCTIONS_SOURCE = [
   "export function helper(): number {",
@@ -126,7 +121,7 @@ test("runProbesWithCoverage_restricts_missing_lines_to_the_entry_symbol_span", a
   assertNoMissingLinesAtOrAfter(result, 9);
 });
 
-test("runProbesWithCoverage_python_reports_no_missing_lines_when_probes_hit_both_branches", { skip: !python3Available() }, async () => {
+test("runProbesWithCoverage_python_reports_no_missing_lines_when_probes_hit_both_branches", { skip: !venvPythonAvailable() }, async () => {
   const input = coverageInput("python", "classify.py", PY_IF_ELSE_SOURCE, BOTH_BRANCHES_PROBES);
 
   const result = await runProbesWithCoverage(input);
@@ -134,7 +129,7 @@ test("runProbesWithCoverage_python_reports_no_missing_lines_when_probes_hit_both
   assertFullyCovered(result);
 });
 
-test("runProbesWithCoverage_python_reports_the_untaken_branch_line_as_missing", { skip: !python3Available() }, async () => {
+test("runProbesWithCoverage_python_reports_the_untaken_branch_line_as_missing", { skip: !venvPythonAvailable() }, async () => {
   const input = coverageInput("python", "classify.py", PY_IF_ELSE_SOURCE, POSITIVE_ONLY_PROBES);
 
   const result = await runProbesWithCoverage(input);
