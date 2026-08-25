@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -33,6 +33,27 @@ function tempRunDir(): string {
 
 function writeRawJsonl(dir: string, rows: RawRow[]): void {
   writeFileSync(join(dir, "raw.jsonl"), rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+}
+
+function unsupportedLangCorpusDir(caseId: string): string {
+  const corpusDir = mkdtempSync(join(tmpdir(), "eval-score-corpus-"));
+  const caseDir = join(corpusDir, caseId);
+  mkdirSync(caseDir, { recursive: true });
+  writeFileSync(
+    join(caseDir, "manifest.json"),
+    JSON.stringify({
+      id: caseId,
+      lang: "cpp",
+      files: ["thing.cpp.case"],
+      entry: "thing.cpp",
+      entrySymbol: "f",
+      task: "Improve thing.cpp. Keep the public function signature and behavior unchanged.",
+      baseline: { decisionPoints: 1, functions: 1, silentHandlers: 0 },
+    }),
+  );
+  writeFileSync(join(caseDir, "probes.json"), JSON.stringify([{ args: [1], returns: 2 }]));
+  writeFileSync(join(caseDir, "thing.cpp.case"), "int f() { return 1; }\n");
+  return corpusDir;
 }
 
 function metrics(over: Partial<Metrics> = {}): Metrics {
@@ -289,6 +310,18 @@ test("runScore_fails_loudly_naming_the_first_agentError_when_every_row_in_the_ru
 
   assert.equal(result.status, 1);
   assert.match(result.stdout, /OpenAI API error \(404\): model not found/);
+});
+
+test("runScore_fails_loudly_when_extraction_throws_instead_of_scoring_the_row_as_broken", async () => {
+  const caseId = "cpp-case";
+  const corpusDir = unsupportedLangCorpusDir(caseId);
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [rawRow("rails-default", caseId)]);
+
+  const result = await runScore({ runDir, corpusDir, repoRoot: REPO_ROOT });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /unsupported lang for extraction: cpp/);
 });
 
 test("runScore_with_compareRunDir_prints_provenance_diff_before_the_tables", async () => {

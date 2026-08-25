@@ -64,17 +64,13 @@ const BROKEN_METRICS: Metrics = { decisionPoints: 0, nFunctions: 0, silentHandle
 async function computeMetrics(lang: Lang, path: string, source: string | undefined): Promise<Metrics> {
   if (source === undefined) return BROKEN_METRICS;
 
-  try {
-    const extracted = await extractFunctions(lang, path, source);
-    return {
-      decisionPoints: decisionPoints(extracted.functions),
-      nFunctions: extracted.functions.length,
-      silentHandlers: countSilentHandlers(source, silentHandlerLang(lang)),
-      parsed: true,
-    };
-  } catch {
-    return BROKEN_METRICS;
-  }
+  const extracted = await extractFunctions(lang, path, source);
+  return {
+    decisionPoints: decisionPoints(extracted.functions),
+    nFunctions: extracted.functions.length,
+    silentHandlers: countSilentHandlers(source, silentHandlerLang(lang)),
+    parsed: true,
+  };
 }
 
 function entryChangedFor(before: string, after: string | undefined): boolean {
