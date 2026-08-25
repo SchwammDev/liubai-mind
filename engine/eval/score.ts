@@ -106,13 +106,14 @@ function shouldRunProbes(entryChanged: boolean, after: Metrics, afterSource: str
   return entryChanged && after.parsed && afterSource !== undefined;
 }
 
-function runCaseProbes(kase: CaseManifest, afterSource: string): boolean {
+function runCaseProbes(kase: CaseManifest, afterSource: string, files: Record<string, string>): boolean {
   const outcome = runProbes({
     lang: probeLang(kase.lang),
     entryFilename: kase.entry,
     source: afterSource,
     entrySymbol: kase.entrySymbol,
     probes: kase.probes,
+    files,
   });
   return outcome.passed;
 }
@@ -128,7 +129,7 @@ async function judgeRow(row: RawRow, cases: CaseManifest[], corpusDir: string): 
   const before = await computeMetrics(kase.lang, kase.entry, beforeSource);
   const after = await computeMetrics(kase.lang, kase.entry, afterSource);
 
-  const probesPassed = shouldRunProbes(entryChanged, after, afterSource) ? runCaseProbes(kase, afterSource) : undefined;
+  const probesPassed = shouldRunProbes(entryChanged, after, afterSource) ? runCaseProbes(kase, afterSource, row.files) : undefined;
 
   const judge = buildJudgeResult(before, after, entryChanged, probesPassed);
   return { row, judge };

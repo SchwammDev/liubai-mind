@@ -56,6 +56,34 @@ function unsupportedLangCorpusDir(caseId: string): string {
   return corpusDir;
 }
 
+function importingCorpusDir(caseId: string): string {
+  const corpusDir = mkdtempSync(join(tmpdir(), "eval-score-corpus-"));
+  const caseDir = join(corpusDir, caseId);
+  mkdirSync(caseDir, { recursive: true });
+  writeFileSync(
+    join(caseDir, "manifest.json"),
+    JSON.stringify({
+      id: caseId,
+      lang: "typescript",
+      files: ["thing.ts.case"],
+      entry: "thing.ts",
+      entrySymbol: "f",
+      task: "Improve thing.ts. Keep the public function signature and behavior unchanged.",
+      baseline: { decisionPoints: 1, functions: 1, silentHandlers: 0 },
+    }),
+  );
+  writeFileSync(join(caseDir, "probes.json"), JSON.stringify([{ args: [1], returns: 2 }]));
+  writeFileSync(join(caseDir, "thing.ts.case"), "export function f(x: number): number {\n  if (x > 0) {\n    return x;\n  }\n  return -x;\n}\n");
+  return corpusDir;
+}
+
+function importingRowFiles(): Record<string, string> {
+  return {
+    "thing.ts": 'import { inc } from "./helper_mod.ts";\n\nexport function f(x: number): number {\n  if (x > 0) {\n    return inc(x);\n  }\n  return -x;\n}\n',
+    "helper_mod.ts": "export function inc(x: number): number {\n  return x + 1;\n}\n",
+  };
+}
+
 function metrics(over: Partial<Metrics> = {}): Metrics {
   return { decisionPoints: 4, nFunctions: 1, silentHandlers: 0, parsed: true, ...over };
 }
@@ -278,6 +306,16 @@ test("judgeRows_skips_probes_for_an_unparseable_after_source", async () => {
   const judged = await judgeRows(tsOnlyRows(readFixtureRows()), CORPUS_DIR);
 
   assertProbesPassedFor(findJudgedRow(judged, "rails-default", "ts-flag-parser", 2), "broken", undefined);
+});
+
+test("judgeRows_runs_probes_against_the_full_row_file_snapshot", async () => {
+  const caseId = "ts-import-case";
+  const corpusDir = importingCorpusDir(caseId);
+  const row = rawRow("rails-default", caseId, { files: importingRowFiles() });
+
+  const judged = await judgeRows([row], corpusDir);
+
+  assert.equal(judged[0]!.judge.probesPassed, true);
 });
 
 test("runScore_writes_summary_jsonl_beside_raw_jsonl", async () => {

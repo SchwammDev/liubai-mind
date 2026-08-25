@@ -1,7 +1,7 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 import type { Probe } from "./eval-contract.ts";
 import { PYTHON_BIN } from "../extract-python.ts";
@@ -24,6 +24,7 @@ export interface ProbeRunInput {
   probes: Probe[];
   timeoutMs?: number;
   env?: Record<string, string>;
+  files?: Record<string, string>;
 }
 
 interface ProbeResultOk {
@@ -117,8 +118,25 @@ function outcomeFromUnparseableExit(res: SpawnResult): ProbeOutcome {
   return { passed: false, failures: [{ index: 0, reason }] };
 }
 
+function assertSandboxKey(key: string): void {
+  if (isAbsolute(key) || key.split("/").includes("..")) {
+    throw new Error(`probe sandbox: unsafe file path: ${key}`);
+  }
+}
+
+function materializeFiles(workDir: string, files: Record<string, string>): void {
+  for (const [key, content] of Object.entries(files)) {
+    assertSandboxKey(key);
+    const filePath = join(workDir, key);
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, content);
+  }
+}
+
 export function runProbesInDir(workDir: string, input: ProbeRunInput): ProbeOutcome {
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  if (input.files !== undefined) materializeFiles(workDir, input.files);
+
   const sourcePath = join(workDir, input.entryFilename);
   writeFileSync(sourcePath, input.source);
 
