@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { CommentFacts, Extracted, Extractor, FunctionFacts } from "./contract.ts";
 
 const SCRIPT_PATH = join(import.meta.dirname, "extract-python.py");
-const PYTHON_BIN = join(import.meta.dirname, ".venv", "bin", "python");
+export const PYTHON_BIN = join(import.meta.dirname, ".venv", "bin", "python");
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
