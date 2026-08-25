@@ -58,6 +58,7 @@ export interface RawRow {
   rep: number;
   provenance: Provenance;
   files: Record<string, string>;
+  snapshotDropped?: string[];
   exitCode: number;
   timedOut: boolean;
   durationMs: number;
