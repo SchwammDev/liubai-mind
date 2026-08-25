@@ -1,10 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { probePyCcBackend, venvPythonAvailable } from "./judge-env.ts";
+import { PYTHON_BIN } from "../extract-python.ts";
 
 function withTempDir<T>(fn: (dir: string) => T): T {
   const dir = mkdtempSync(join(tmpdir(), "judge-env-"));
@@ -22,6 +24,22 @@ function stubScript(dir: string, contents: string, mode = 0o755): string {
   return path;
 }
 
+function pinnedLizardVersion(): string {
+  const path = join(import.meta.dirname, "..", "requirements.txt");
+  if (!existsSync(path)) {
+    throw new Error(`judge-env test: missing ${path}; pin lizard there`);
+  }
+
+  const line = readFileSync(path, "utf8")
+    .split("\n")
+    .find((entry) => entry.startsWith("lizard=="));
+  if (line === undefined) {
+    throw new Error(`judge-env test: no lizard== pin found in ${path}`);
+  }
+
+  return line.trim();
+}
+
 function thrownMessage(fn: () => unknown): string {
   try {
     fn();
@@ -35,6 +53,20 @@ test("probePyCcBackend_returns_the_lizard_version_string_when_the_venv_python_ha
   const version = probePyCcBackend();
 
   assert.match(version, /^lizard \d+\.\d+/);
+});
+
+test("the_venv_backend_matches_the_pin_in_requirements_txt", { skip: !venvPythonAvailable() }, () => {
+  const pinned = pinnedLizardVersion().replace("==", " ");
+
+  const version = probePyCcBackend();
+
+  assert.equal(version, pinned);
+});
+
+test("the_venv_interpreter_is_python_3_12", { skip: !venvPythonAvailable() }, () => {
+  const res = spawnSync(PYTHON_BIN, ["-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"], { encoding: "utf8" });
+
+  assert.equal(res.stdout.trim(), "3.12");
 });
 
 test("probePyCcBackend_throws_a_setup_hint_when_the_python_binary_does_not_exist", () => {
