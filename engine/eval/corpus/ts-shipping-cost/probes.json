@@ -1,6 +1,167 @@
 [
   {
-    "args": [{ "zone": "domestic", "weightKg": 3, "priority": false, "fragile": false }],
+    "args": [
+      {
+        "zone": "domestic",
+        "weightKg": 1,
+        "priority": false,
+        "fragile": false
+      }
+    ],
+    "returns": 4
+  },
+  {
+    "args": [
+      {
+        "zone": "domestic",
+        "weightKg": 3,
+        "priority": false,
+        "fragile": false
+      }
+    ],
     "returns": 7
+  },
+  {
+    "args": [
+      {
+        "zone": "domestic",
+        "weightKg": 15,
+        "priority": false,
+        "fragile": false
+      }
+    ],
+    "returns": 12
+  },
+  {
+    "args": [
+      {
+        "zone": "domestic",
+        "weightKg": 25,
+        "priority": false,
+        "fragile": false
+      }
+    ],
+    "returns": 20
+  },
+  {
+    "args": [
+      {
+        "zone": "regional",
+        "weightKg": 1,
+        "priority": false,
+        "fragile": false
+      }
+    ],
+    "returns": 9
+  },
+  {
+    "args": [
+      {
+        "zone": "regional",
+        "weightKg": 4,
+        "priority": false,
+        "fragile": false
+      }
+    ],
+    "returns": 15
+  },
+  {
+    "args": [
+      {
+        "zone": "regional",
+        "weightKg": 18,
+        "priority": false,
+        "fragile": false
+      }
+    ],
+    "returns": 25
+  },
+  {
+    "args": [
+      {
+        "zone": "regional",
+        "weightKg": 30,
+        "priority": false,
+        "fragile": false
+      }
+    ],
+    "returns": 40
+  },
+  {
+    "args": [
+      {
+        "zone": "international",
+        "weightKg": 1,
+        "priority": false,
+        "fragile": false
+      }
+    ],
+    "returns": 18
+  },
+  {
+    "args": [
+      {
+        "zone": "international",
+        "weightKg": 4,
+        "priority": false,
+        "fragile": false
+      }
+    ],
+    "returns": 30
+  },
+  {
+    "args": [
+      {
+        "zone": "international",
+        "weightKg": 10,
+        "priority": false,
+        "fragile": false
+      }
+    ],
+    "returns": 55
+  },
+  {
+    "args": [
+      {
+        "zone": "domestic",
+        "weightKg": 3,
+        "priority": true,
+        "fragile": false
+      }
+    ],
+    "returns": 14
+  },
+  {
+    "args": [
+      {
+        "zone": "domestic",
+        "weightKg": 10,
+        "priority": false,
+        "fragile": true
+      }
+    ],
+    "returns": 18
+  },
+  {
+    "args": [
+      {
+        "zone": "domestic",
+        "weightKg": 3,
+        "priority": false,
+        "fragile": true
+      }
+    ],
+    "returns": 7
+  },
+  {
+    "args": [
+      {
+        "zone": "domestic",
+        "weightKg": 10,
+        "priority": true,
+        "fragile": true
+      }
+    ],
+    "returns": 30
   }
 ]

@@ -1,6 +1,166 @@
 [
   {
-    "args": ["user.created", { "data": { "id": "u1" } }],
-    "returns": { "status": "ok", "message": "created user u1" }
+    "args": [
+      "user.created",
+      {
+        "data": {
+          "id": "u1"
+        }
+      }
+    ],
+    "returns": {
+      "status": "ok",
+      "message": "created user u1"
+    }
+  },
+  {
+    "args": [
+      "user.updated",
+      {
+        "data": {
+          "id": "u2"
+        }
+      }
+    ],
+    "returns": {
+      "status": "ok",
+      "message": "updated user u2"
+    }
+  },
+  {
+    "args": [
+      "user.deleted",
+      {
+        "data": {
+          "id": "u3"
+        }
+      }
+    ],
+    "returns": {
+      "status": "ok",
+      "message": "deleted user u3"
+    }
+  },
+  {
+    "args": [
+      "order.placed",
+      {
+        "data": {
+          "orderId": "o1"
+        }
+      }
+    ],
+    "returns": {
+      "status": "ok",
+      "message": "order placed o1"
+    }
+  },
+  {
+    "args": [
+      "order.cancelled",
+      {
+        "data": {
+          "orderId": "o2"
+        }
+      }
+    ],
+    "returns": {
+      "status": "ok",
+      "message": "order cancelled o2"
+    }
+  },
+  {
+    "args": [
+      "order.shipped",
+      {
+        "data": {
+          "orderId": "o3"
+        }
+      }
+    ],
+    "returns": {
+      "status": "ok",
+      "message": "order shipped o3"
+    }
+  },
+  {
+    "args": [
+      "payment.succeeded",
+      {
+        "data": {
+          "paymentId": "p1"
+        }
+      }
+    ],
+    "returns": {
+      "status": "ok",
+      "message": "payment succeeded p1"
+    }
+  },
+  {
+    "args": [
+      "payment.failed",
+      {
+        "data": {
+          "paymentId": "p2"
+        }
+      }
+    ],
+    "returns": {
+      "status": "error",
+      "message": "payment failed p2"
+    }
+  },
+  {
+    "args": [
+      "invoice.issued",
+      {
+        "data": {
+          "invoiceId": "i1"
+        }
+      }
+    ],
+    "returns": {
+      "status": "ok",
+      "message": "invoice issued i1"
+    }
+  },
+  {
+    "args": [
+      "invoice.voided",
+      {
+        "data": {
+          "invoiceId": "i2"
+        }
+      }
+    ],
+    "returns": {
+      "status": "ok",
+      "message": "invoice voided i2"
+    }
+  },
+  {
+    "args": [
+      "widget.exploded",
+      {
+        "data": {}
+      }
+    ],
+    "returns": {
+      "status": "error",
+      "message": "unknown event: widget.exploded"
+    }
+  },
+  {
+    "args": [
+      "user.created",
+      {
+        "data": {}
+      }
+    ],
+    "returns": {
+      "status": "ok",
+      "message": "created user undefined"
+    }
   }
 ]

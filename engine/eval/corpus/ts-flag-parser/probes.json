@@ -1,11 +1,422 @@
 [
   {
-    "args": [["--verbose", "--format", "json"]],
+    "args": [
+      []
+    ],
+    "returns": {
+      "verbose": false,
+      "quiet": false,
+      "outputPath": null,
+      "format": "text",
+      "maxRetries": 3,
+      "timeoutMs": 30000,
+      "dryRun": false,
+      "force": false,
+      "logLevel": "info",
+      "configPath": null,
+      "parallelism": 1,
+      "color": true,
+      "strict": false
+    }
+  },
+  {
+    "args": [
+      [
+        "--verbose"
+      ]
+    ],
     "returns": {
       "verbose": true,
       "quiet": false,
       "outputPath": null,
+      "format": "text",
+      "maxRetries": 3,
+      "timeoutMs": 30000,
+      "dryRun": false,
+      "force": false,
+      "logLevel": "info",
+      "configPath": null,
+      "parallelism": 1,
+      "color": true,
+      "strict": false
+    }
+  },
+  {
+    "args": [
+      [
+        "--quiet"
+      ]
+    ],
+    "returns": {
+      "verbose": false,
+      "quiet": true,
+      "outputPath": null,
+      "format": "text",
+      "maxRetries": 3,
+      "timeoutMs": 30000,
+      "dryRun": false,
+      "force": false,
+      "logLevel": "info",
+      "configPath": null,
+      "parallelism": 1,
+      "color": true,
+      "strict": false
+    }
+  },
+  {
+    "args": [
+      [
+        "--dry-run"
+      ]
+    ],
+    "returns": {
+      "verbose": false,
+      "quiet": false,
+      "outputPath": null,
+      "format": "text",
+      "maxRetries": 3,
+      "timeoutMs": 30000,
+      "dryRun": true,
+      "force": false,
+      "logLevel": "info",
+      "configPath": null,
+      "parallelism": 1,
+      "color": true,
+      "strict": false
+    }
+  },
+  {
+    "args": [
+      [
+        "--force"
+      ]
+    ],
+    "returns": {
+      "verbose": false,
+      "quiet": false,
+      "outputPath": null,
+      "format": "text",
+      "maxRetries": 3,
+      "timeoutMs": 30000,
+      "dryRun": false,
+      "force": true,
+      "logLevel": "info",
+      "configPath": null,
+      "parallelism": 1,
+      "color": true,
+      "strict": false
+    }
+  },
+  {
+    "args": [
+      [
+        "--no-color"
+      ]
+    ],
+    "returns": {
+      "verbose": false,
+      "quiet": false,
+      "outputPath": null,
+      "format": "text",
+      "maxRetries": 3,
+      "timeoutMs": 30000,
+      "dryRun": false,
+      "force": false,
+      "logLevel": "info",
+      "configPath": null,
+      "parallelism": 1,
+      "color": false,
+      "strict": false
+    }
+  },
+  {
+    "args": [
+      [
+        "--strict"
+      ]
+    ],
+    "returns": {
+      "verbose": false,
+      "quiet": false,
+      "outputPath": null,
+      "format": "text",
+      "maxRetries": 3,
+      "timeoutMs": 30000,
+      "dryRun": false,
+      "force": false,
+      "logLevel": "info",
+      "configPath": null,
+      "parallelism": 1,
+      "color": true,
+      "strict": true
+    }
+  },
+  {
+    "args": [
+      [
+        "--output",
+        "/tmp/out.txt"
+      ]
+    ],
+    "returns": {
+      "verbose": false,
+      "quiet": false,
+      "outputPath": "/tmp/out.txt",
+      "format": "text",
+      "maxRetries": 3,
+      "timeoutMs": 30000,
+      "dryRun": false,
+      "force": false,
+      "logLevel": "info",
+      "configPath": null,
+      "parallelism": 1,
+      "color": true,
+      "strict": false
+    }
+  },
+  {
+    "args": [
+      [
+        "--output"
+      ]
+    ],
+    "throws": "--output requires a path"
+  },
+  {
+    "args": [
+      [
+        "--config",
+        "/etc/app.conf"
+      ]
+    ],
+    "returns": {
+      "verbose": false,
+      "quiet": false,
+      "outputPath": null,
+      "format": "text",
+      "maxRetries": 3,
+      "timeoutMs": 30000,
+      "dryRun": false,
+      "force": false,
+      "logLevel": "info",
+      "configPath": "/etc/app.conf",
+      "parallelism": 1,
+      "color": true,
+      "strict": false
+    }
+  },
+  {
+    "args": [
+      [
+        "--config"
+      ]
+    ],
+    "throws": "--config requires a path"
+  },
+  {
+    "args": [
+      [
+        "--format",
+        "json"
+      ]
+    ],
+    "returns": {
+      "verbose": false,
+      "quiet": false,
+      "outputPath": null,
       "format": "json",
+      "maxRetries": 3,
+      "timeoutMs": 30000,
+      "dryRun": false,
+      "force": false,
+      "logLevel": "info",
+      "configPath": null,
+      "parallelism": 1,
+      "color": true,
+      "strict": false
+    }
+  },
+  {
+    "args": [
+      [
+        "--format",
+        "xml"
+      ]
+    ],
+    "throws": "unsupported format: xml"
+  },
+  {
+    "args": [
+      [
+        "--log-level",
+        "debug"
+      ]
+    ],
+    "returns": {
+      "verbose": false,
+      "quiet": false,
+      "outputPath": null,
+      "format": "text",
+      "maxRetries": 3,
+      "timeoutMs": 30000,
+      "dryRun": false,
+      "force": false,
+      "logLevel": "debug",
+      "configPath": null,
+      "parallelism": 1,
+      "color": true,
+      "strict": false
+    }
+  },
+  {
+    "args": [
+      [
+        "--log-level",
+        "verbose"
+      ]
+    ],
+    "throws": "unsupported log level: verbose"
+  },
+  {
+    "args": [
+      [
+        "--retries",
+        "7"
+      ]
+    ],
+    "returns": {
+      "verbose": false,
+      "quiet": false,
+      "outputPath": null,
+      "format": "text",
+      "maxRetries": 7,
+      "timeoutMs": 30000,
+      "dryRun": false,
+      "force": false,
+      "logLevel": "info",
+      "configPath": null,
+      "parallelism": 1,
+      "color": true,
+      "strict": false
+    }
+  },
+  {
+    "args": [
+      [
+        "--retries",
+        "abc"
+      ]
+    ],
+    "throws": "--retries must be an integer"
+  },
+  {
+    "args": [
+      [
+        "--timeout",
+        "5000"
+      ]
+    ],
+    "returns": {
+      "verbose": false,
+      "quiet": false,
+      "outputPath": null,
+      "format": "text",
+      "maxRetries": 3,
+      "timeoutMs": 5000,
+      "dryRun": false,
+      "force": false,
+      "logLevel": "info",
+      "configPath": null,
+      "parallelism": 1,
+      "color": true,
+      "strict": false
+    }
+  },
+  {
+    "args": [
+      [
+        "--timeout",
+        "abc"
+      ]
+    ],
+    "throws": "--timeout must be an integer"
+  },
+  {
+    "args": [
+      [
+        "--parallel",
+        "4"
+      ]
+    ],
+    "returns": {
+      "verbose": false,
+      "quiet": false,
+      "outputPath": null,
+      "format": "text",
+      "maxRetries": 3,
+      "timeoutMs": 30000,
+      "dryRun": false,
+      "force": false,
+      "logLevel": "info",
+      "configPath": null,
+      "parallelism": 4,
+      "color": true,
+      "strict": false
+    }
+  },
+  {
+    "args": [
+      [
+        "--parallel",
+        "abc"
+      ]
+    ],
+    "throws": "--parallel must be an integer"
+  },
+  {
+    "args": [
+      [
+        "--bogus"
+      ]
+    ],
+    "throws": "unknown flag: --bogus"
+  },
+  {
+    "args": [
+      [
+        "-v",
+        "-f"
+      ]
+    ],
+    "returns": {
+      "verbose": true,
+      "quiet": false,
+      "outputPath": null,
+      "format": "text",
+      "maxRetries": 3,
+      "timeoutMs": 30000,
+      "dryRun": false,
+      "force": true,
+      "logLevel": "info",
+      "configPath": null,
+      "parallelism": 1,
+      "color": true,
+      "strict": false
+    }
+  },
+  {
+    "args": [
+      [
+        "-o",
+        "out.txt",
+        "-q"
+      ]
+    ],
+    "returns": {
+      "verbose": false,
+      "quiet": true,
+      "outputPath": "out.txt",
+      "format": "text",
       "maxRetries": 3,
       "timeoutMs": 30000,
       "dryRun": false,

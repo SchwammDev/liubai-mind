@@ -13,6 +13,8 @@ import { typescriptExtractor } from "../extract-typescript.ts";
 import { pythonExtractor } from "../extract-python.ts";
 import type { FunctionFacts, Lang } from "../contract.ts";
 import { DEFAULT_POLICY, RULE } from "../policy.ts";
+import { runProbesWithCoverage } from "./probe-coverage.ts";
+import type { ProbeFailure, ProbeOutcome } from "./probes.ts";
 
 const CORPUS_DIR = join(import.meta.dirname, "corpus");
 const CC_RAIL_THRESHOLD = DEFAULT_POLICY[RULE.cc].threshold!;
@@ -239,6 +241,42 @@ function loadCaseManifest(id: string): CaseManifest {
 
 function readCaseSource(id: string, filename: string): string {
   return readFileSync(join(CORPUS_DIR, id, filename), "utf8");
+}
+
+function asProbeableLang(lang: Lang): "typescript" | "python" {
+  if (lang !== "typescript" && lang !== "python") {
+    throw new Error(`asProbeableLang: probes are not runnable for lang "${lang}"`);
+  }
+  return lang;
+}
+
+function describeProbeFailure(failure: ProbeFailure): string {
+  return `probe ${failure.index}: ${failure.reason}`;
+}
+
+function assertProbesPassed(outcome: ProbeOutcome): void {
+  const reasons = outcome.failures.map(describeProbeFailure).join("; ");
+  assert.equal(outcome.passed, true, `probes did not pass: ${reasons}`);
+}
+
+function assertEntrySymbolFullyCovered(missingInSpan: number[]): void {
+  assert.deepEqual(missingInSpan, [], `entry symbol has uncovered lines: ${missingInSpan.join(", ")}`);
+}
+
+async function assertProbesAdequateForCase(id: string): Promise<void> {
+  const manifest = loadCaseManifest(id);
+  const source = readCaseSource(id, `${manifest.entry}.case`);
+
+  const { outcome, missingInSpan } = await runProbesWithCoverage({
+    lang: asProbeableLang(manifest.lang),
+    entryFilename: manifest.entry,
+    source,
+    entrySymbol: manifest.entrySymbol,
+    probes: manifest.probes,
+  });
+
+  assertProbesPassed(outcome);
+  assertEntrySymbolFullyCovered(missingInSpan);
 }
 
 function assertMetricsMatchBaseline(
@@ -480,3 +518,27 @@ test(
     await assertMainFunctionCcTripsRailForPyCase("py-safe-convert", "to_number.py.case");
   },
 );
+
+test("ts_flag_parser_probes_pass_and_fully_cover_the_entry_symbol", async () => {
+  await assertProbesAdequateForCase("ts-flag-parser");
+});
+
+test("ts_order_validator_probes_pass_and_fully_cover_the_entry_symbol", async () => {
+  await assertProbesAdequateForCase("ts-order-validator");
+});
+
+test("ts_grade_bands_probes_pass_and_fully_cover_the_entry_symbol", async () => {
+  await assertProbesAdequateForCase("ts-grade-bands");
+});
+
+test("ts_shipping_cost_probes_pass_and_fully_cover_the_entry_symbol", async () => {
+  await assertProbesAdequateForCase("ts-shipping-cost");
+});
+
+test("ts_retry_config_probes_pass_and_fully_cover_the_entry_symbol", async () => {
+  await assertProbesAdequateForCase("ts-retry-config");
+});
+
+test("ts_event_router_probes_pass_and_fully_cover_the_entry_symbol", async () => {
+  await assertProbesAdequateForCase("ts-event-router");
+});

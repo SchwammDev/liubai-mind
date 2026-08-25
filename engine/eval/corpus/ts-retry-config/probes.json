@@ -1,6 +1,146 @@
 [
   {
-    "args": [{ "maxAttempts": "5", "backoffMs": "500", "jitter": "false", "mode": "linear" }],
-    "returns": { "maxAttempts": 5, "backoffMs": 500, "jitter": false, "mode": "linear" }
+    "args": [
+      {}
+    ],
+    "returns": {
+      "maxAttempts": 3,
+      "backoffMs": 200,
+      "jitter": true,
+      "mode": "exponential"
+    }
+  },
+  {
+    "args": [
+      {
+        "maxAttempts": "5"
+      }
+    ],
+    "returns": {
+      "maxAttempts": 5,
+      "backoffMs": 200,
+      "jitter": true,
+      "mode": "exponential"
+    }
+  },
+  {
+    "args": [
+      {
+        "maxAttempts": "abc"
+      }
+    ],
+    "returns": {
+      "maxAttempts": 3,
+      "backoffMs": 200,
+      "jitter": true,
+      "mode": "exponential"
+    }
+  },
+  {
+    "args": [
+      {
+        "backoffMs": "500"
+      }
+    ],
+    "returns": {
+      "maxAttempts": 3,
+      "backoffMs": 500,
+      "jitter": true,
+      "mode": "exponential"
+    }
+  },
+  {
+    "args": [
+      {
+        "backoffMs": "fast"
+      }
+    ],
+    "returns": {
+      "maxAttempts": 3,
+      "backoffMs": 200,
+      "jitter": true,
+      "mode": "exponential"
+    }
+  },
+  {
+    "args": [
+      {
+        "jitter": "true"
+      }
+    ],
+    "returns": {
+      "maxAttempts": 3,
+      "backoffMs": 200,
+      "jitter": true,
+      "mode": "exponential"
+    }
+  },
+  {
+    "args": [
+      {
+        "jitter": "false"
+      }
+    ],
+    "returns": {
+      "maxAttempts": 3,
+      "backoffMs": 200,
+      "jitter": false,
+      "mode": "exponential"
+    }
+  },
+  {
+    "args": [
+      {
+        "jitter": "maybe"
+      }
+    ],
+    "returns": {
+      "maxAttempts": 3,
+      "backoffMs": 200,
+      "jitter": true,
+      "mode": "exponential"
+    }
+  },
+  {
+    "args": [
+      {
+        "mode": "linear"
+      }
+    ],
+    "returns": {
+      "maxAttempts": 3,
+      "backoffMs": 200,
+      "jitter": true,
+      "mode": "linear"
+    }
+  },
+  {
+    "args": [
+      {
+        "mode": "adaptive"
+      }
+    ],
+    "returns": {
+      "maxAttempts": 3,
+      "backoffMs": 200,
+      "jitter": true,
+      "mode": "exponential"
+    }
+  },
+  {
+    "args": [
+      {
+        "maxAttempts": "5",
+        "backoffMs": "500",
+        "jitter": "false",
+        "mode": "linear"
+      }
+    ],
+    "returns": {
+      "maxAttempts": 5,
+      "backoffMs": 500,
+      "jitter": false,
+      "mode": "linear"
+    }
   }
 ]
