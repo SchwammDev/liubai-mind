@@ -3,6 +3,7 @@
   "lang": "python",
   "files": ["ingest.py.case"],
   "entry": "ingest.py",
+  "entrySymbol": "parse_record",
   "task": "Improve ingest.py. Keep the public function signature and behavior unchanged.",
   "baseline": { "decisionPoints": 11, "functions": 1, "silentHandlers": 0 }
 }

@@ -3,6 +3,7 @@
   "lang": "typescript",
   "files": ["parse_retry_config.ts.case"],
   "entry": "parse_retry_config.ts",
+  "entrySymbol": "parseRetryConfig",
   "task": "Improve parse_retry_config.ts. Keep the public function signature and behavior unchanged.",
   "baseline": { "decisionPoints": 13, "functions": 1, "silentHandlers": 0 }
 }

@@ -1,0 +1,6 @@
+[
+  {
+    "args": ["draft", "submit"],
+    "returns": "pending"
+  }
+]

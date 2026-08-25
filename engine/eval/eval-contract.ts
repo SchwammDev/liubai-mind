@@ -6,13 +6,17 @@ export interface ConditionManifest {
   phrasingPack?: string;
 }
 
+export type Probe = { args: unknown[]; returns: unknown } | { args: unknown[]; throws: string };
+
 export interface CaseManifest {
   id: string;
   lang: Lang;
   files: string[];
   entry: string;
+  entrySymbol: string;
   task: string;
   baseline: BaselineMetrics;
+  probes: Probe[];
 }
 
 export interface BaselineMetrics {

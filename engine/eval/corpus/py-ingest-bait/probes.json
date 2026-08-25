@@ -1,0 +1,6 @@
+[
+  {
+    "args": [{ "id": "abc123", "name": "Alice", "age": 30, "email": "alice@example.com" }],
+    "returns": { "id": "abc123", "name": "Alice", "age": 30, "email": "alice@example.com", "valid": true }
+  }
+]

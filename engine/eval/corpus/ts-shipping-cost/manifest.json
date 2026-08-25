@@ -3,6 +3,7 @@
   "lang": "typescript",
   "files": ["shipping_cost.ts.case"],
   "entry": "shipping_cost.ts",
+  "entrySymbol": "shippingCost",
   "task": "Improve shipping_cost.ts. Keep the public function signature and behavior unchanged.",
   "baseline": { "decisionPoints": 13, "functions": 1, "silentHandlers": 0 }
 }

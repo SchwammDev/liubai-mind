@@ -1,0 +1,6 @@
+[
+  {
+    "args": [{ "port": 9090, "host": "example.com", "workers": 8, "debug": true }],
+    "returns": { "port": 9090, "host": "example.com", "workers": 8, "debug": true }
+  }
+]

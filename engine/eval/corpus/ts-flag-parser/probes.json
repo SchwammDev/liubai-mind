@@ -1,0 +1,20 @@
+[
+  {
+    "args": [["--verbose", "--format", "json"]],
+    "returns": {
+      "verbose": true,
+      "quiet": false,
+      "outputPath": null,
+      "format": "json",
+      "maxRetries": 3,
+      "timeoutMs": 30000,
+      "dryRun": false,
+      "force": false,
+      "logLevel": "info",
+      "configPath": null,
+      "parallelism": 1,
+      "color": true,
+      "strict": false
+    }
+  }
+]

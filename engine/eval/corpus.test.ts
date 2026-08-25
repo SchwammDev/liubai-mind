@@ -29,10 +29,23 @@ function tempCorpusDir(): string {
   return mkdtempSync(join(tmpdir(), "eval-corpus-"));
 }
 
-function writeCase(corpusDir: string, id: string, manifest: object, files: Record<string, string>): string {
+function defaultProbes(): unknown[] {
+  return [{ args: [1], returns: 2 }];
+}
+
+function writeCase(
+  corpusDir: string,
+  id: string,
+  manifest: object,
+  files: Record<string, string>,
+  probes: unknown[] | null = defaultProbes(),
+): string {
   const caseDir = join(corpusDir, id);
   mkdirSync(caseDir, { recursive: true });
   writeFileSync(join(caseDir, "manifest.json"), JSON.stringify(manifest));
+  if (probes !== null) {
+    writeFileSync(join(caseDir, "probes.json"), JSON.stringify(probes));
+  }
   for (const [name, content] of Object.entries(files)) {
     writeFileSync(join(caseDir, name), content);
   }
@@ -45,6 +58,7 @@ function minimalManifest(over: Partial<Record<string, unknown>> = {}): Record<st
     lang: "typescript",
     files: ["thing.ts.case"],
     entry: "thing.ts",
+    entrySymbol: "f",
     task: "Improve thing.ts. Keep the public function signature and behavior unchanged.",
     baseline: { decisionPoints: 1, functions: 1, silentHandlers: 0 },
     ...over,
@@ -72,21 +86,38 @@ test("loadCases_loads_all_twelve_committed_cases", () => {
   ]);
 });
 
-test("copyPlan_strips_the_trailing_case_suffix_from_each_file", () => {
-  const kase: CaseManifest = {
+function minimalCaseManifest(over: Partial<CaseManifest> = {}): CaseManifest {
+  return {
     id: "case-a",
     lang: "typescript",
     files: ["parse_flags.ts.case"],
     entry: "parse_flags.ts",
+    entrySymbol: "parseFlags",
     task: "Improve parse_flags.ts. Keep the public function signature and behavior unchanged.",
     baseline: { decisionPoints: 1, functions: 1, silentHandlers: 0 },
+    probes: [{ args: [[]], returns: {} }],
+    ...over,
   };
+}
+
+test("copyPlan_strips_the_trailing_case_suffix_from_each_file", () => {
+  const kase = minimalCaseManifest();
 
   const plan = copyPlan("/repo/corpus/case-a", kase, "/work/dir");
 
   assert.deepEqual(plan, [
     { from: "/repo/corpus/case-a/parse_flags.ts.case", to: "/work/dir/parse_flags.ts" },
   ]);
+});
+
+test("copyPlan_never_copies_manifest_or_probes_json", () => {
+  const kase = minimalCaseManifest();
+
+  const plan = copyPlan("/repo/corpus/case-a", kase, "/work/dir");
+
+  const copiedBasenames = plan.map((p) => p.from.split("/").pop());
+  assert.equal(copiedBasenames.includes("manifest.json"), false);
+  assert.equal(copiedBasenames.includes("probes.json"), false);
 });
 
 test("loadCases_rejects_a_manifest_whose_entry_matches_no_file", () => {
@@ -107,6 +138,81 @@ test("loadCases_rejects_a_manifest_whose_declared_file_is_missing_on_disk", () =
 
   assertRejected(result);
   assert.match(result.error, /missing-source/);
+});
+
+function minimalFiles(): Record<string, string> {
+  return { "thing.ts.case": "export function f() {}\n" };
+}
+
+test("loadCases_rejects_a_manifest_missing_entrySymbol", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "no-entry-symbol", minimalManifest({ entrySymbol: undefined }), minimalFiles());
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /no-entry-symbol/);
+});
+
+test("loadCases_rejects_a_case_without_probes_json", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "no-probes", minimalManifest(), minimalFiles(), null);
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /no-probes/);
+});
+
+test("loadCases_rejects_a_probe_with_both_returns_and_throws", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "probe-both", minimalManifest(), minimalFiles(), [{ args: [], returns: 1, throws: "boom" }]);
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /probe-both/);
+});
+
+test("loadCases_rejects_a_probe_with_neither_returns_nor_throws", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "probe-neither", minimalManifest(), minimalFiles(), [{ args: [] }]);
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /probe-neither/);
+});
+
+test("loadCases_rejects_an_empty_probes_array", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "probe-empty", minimalManifest(), minimalFiles(), []);
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /probe-empty/);
+});
+
+test("loadCases_rejects_a_probe_whose_throws_is_not_a_string", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "probe-throws-not-string", minimalManifest(), minimalFiles(), [{ args: [], throws: 42 }]);
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /probe-throws-not-string/);
+});
+
+test("loadCases_merges_probes_from_probes_json_into_the_manifest", () => {
+  const dir = tempCorpusDir();
+  const probes = [{ args: [1, 2], returns: 3 }];
+  writeCase(dir, "probe-merge", minimalManifest(), minimalFiles(), probes);
+
+  const result = loadCases(dir);
+
+  assertLoaded(result);
+  assert.deepEqual(result[0]?.probes, probes);
 });
 
 test("loadCases_filters_to_the_requested_ids", () => {
