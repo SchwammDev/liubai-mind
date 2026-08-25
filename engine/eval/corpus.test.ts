@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 
 import { loadCases, copyPlan } from "./corpus.ts";
 import type { CaseManifest, BaselineMetrics } from "./eval-contract.ts";
@@ -16,6 +15,7 @@ import { DEFAULT_POLICY, RULE } from "../policy.ts";
 import { runProbesWithCoverage } from "./probe-coverage.ts";
 import { runProbes } from "./probes.ts";
 import type { ProbeFailure, ProbeOutcome } from "./probes.ts";
+import { venvPythonAvailable } from "./judge-env.ts";
 
 const CORPUS_DIR = join(import.meta.dirname, "corpus");
 const FIXTURES_DIR = join(import.meta.dirname, "fixtures");
@@ -230,11 +230,6 @@ test("loadCases_filters_to_the_requested_ids", () => {
   assert.deepEqual(result.map((c) => c.id), ["case-b"]);
 });
 
-function python3Available(): boolean {
-  const res = spawnSync("python3", ["--version"]);
-  return res.error === undefined && res.status === 0;
-}
-
 function loadCaseManifest(id: string): CaseManifest {
   const result = loadCases(CORPUS_DIR, [id]);
   assertLoaded(result);
@@ -398,7 +393,7 @@ test("ts_order_validator_case_main_function_cc_trips_the_cc_rail", async () => {
 
 test(
   "py_status_dispatch_case_metrics_match_the_committed_baseline",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     const manifest = loadCaseManifest("py-status-dispatch");
     const source = readCaseSource("py-status-dispatch", "status.py.case");
@@ -412,7 +407,7 @@ test(
 
 test(
   "py_status_dispatch_case_main_function_cc_trips_the_cc_rail",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     const source = readCaseSource("py-status-dispatch", "status.py.case");
 
@@ -424,7 +419,7 @@ test(
 
 test(
   "py_ingest_bait_case_metrics_match_the_committed_baseline",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     const manifest = loadCaseManifest("py-ingest-bait");
     const source = readCaseSource("py-ingest-bait", "ingest.py.case");
@@ -438,7 +433,7 @@ test(
 
 test(
   "py_ingest_bait_case_main_function_cc_trips_the_cc_rail",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     const source = readCaseSource("py-ingest-bait", "ingest.py.case");
 
@@ -482,7 +477,7 @@ test("ts_event_router_case_main_function_cc_trips_the_cc_rail", async () => {
 
 test(
   "py_password_strength_case_metrics_match_the_committed_baseline",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     await assertMetricsMatchBaselineForPyCase("py-password-strength", "password_strength.py.case");
   },
@@ -490,7 +485,7 @@ test(
 
 test(
   "py_password_strength_case_main_function_cc_trips_the_cc_rail",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     await assertMainFunctionCcTripsRailForPyCase("py-password-strength", "password_strength.py.case");
   },
@@ -498,7 +493,7 @@ test(
 
 test(
   "py_ticket_price_case_metrics_match_the_committed_baseline",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     await assertMetricsMatchBaselineForPyCase("py-ticket-price", "ticket_price.py.case");
   },
@@ -506,7 +501,7 @@ test(
 
 test(
   "py_ticket_price_case_main_function_cc_trips_the_cc_rail",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     await assertMainFunctionCcTripsRailForPyCase("py-ticket-price", "ticket_price.py.case");
   },
@@ -514,7 +509,7 @@ test(
 
 test(
   "py_config_loader_case_metrics_match_the_committed_baseline",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     await assertMetricsMatchBaselineForPyCase("py-config-loader", "load_config.py.case");
   },
@@ -522,7 +517,7 @@ test(
 
 test(
   "py_config_loader_case_main_function_cc_trips_the_cc_rail",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     await assertMainFunctionCcTripsRailForPyCase("py-config-loader", "load_config.py.case");
   },
@@ -530,7 +525,7 @@ test(
 
 test(
   "py_safe_convert_case_metrics_match_the_committed_baseline",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     await assertMetricsMatchBaselineForPyCase("py-safe-convert", "to_number.py.case");
   },
@@ -538,7 +533,7 @@ test(
 
 test(
   "py_safe_convert_case_main_function_cc_trips_the_cc_rail",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     await assertMainFunctionCcTripsRailForPyCase("py-safe-convert", "to_number.py.case");
   },
@@ -570,7 +565,7 @@ test("ts_event_router_probes_pass_and_fully_cover_the_entry_symbol", async () =>
 
 test(
   "py_config_loader_probes_pass_and_fully_cover_the_entry_symbol",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     await assertProbesAdequateForCase("py-config-loader");
   },
@@ -578,7 +573,7 @@ test(
 
 test(
   "py_ingest_bait_probes_pass_and_fully_cover_the_entry_symbol",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     await assertProbesAdequateForCase("py-ingest-bait");
   },
@@ -586,7 +581,7 @@ test(
 
 test(
   "py_password_strength_probes_pass_and_fully_cover_the_entry_symbol",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     await assertProbesAdequateForCase("py-password-strength");
   },
@@ -594,7 +589,7 @@ test(
 
 test(
   "py_safe_convert_probes_pass_and_fully_cover_the_entry_symbol",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     await assertProbesAdequateForCase("py-safe-convert");
   },
@@ -602,7 +597,7 @@ test(
 
 test(
   "py_status_dispatch_probes_pass_and_fully_cover_the_entry_symbol",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     await assertProbesAdequateForCase("py-status-dispatch");
   },
@@ -612,7 +607,7 @@ const TICKET_PRICE_UNREACHABLE_CLAMP_LINE = 28;
 
 test(
   "py_ticket_price_probes_fully_cover_the_entry_symbol_except_the_unreachable_clamp",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   async () => {
     await assertProbesAdequateForCase("py-ticket-price", [TICKET_PRICE_UNREACHABLE_CLAMP_LINE]);
   },
@@ -620,7 +615,7 @@ test(
 
 test(
   "py_ingest_bait_probes_reject_the_validation_gutting_rewrite",
-  { skip: !python3Available() },
+  { skip: !venvPythonAvailable() },
   () => {
     assertProbesRejectFixture("py-ingest-bait", "py-ingest-bait-gamed.py");
   },

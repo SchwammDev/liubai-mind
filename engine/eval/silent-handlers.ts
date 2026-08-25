@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 
+import { PYTHON_BIN } from "../extract-python.ts";
+
 const require_ = createRequire(import.meta.url);
 
 const QUERIES_PATH = join(import.meta.dirname, "queries", "silent-handler.scm");
@@ -68,7 +70,7 @@ export function countSilentHandlersTs(source: string): number {
 export type PyRunner = (script: string, source: string) => string;
 
 function defaultPyRunner(script: string, source: string): string {
-  const res = spawnSync("python3", [script], { input: source, encoding: "utf8" });
+  const res = spawnSync(PYTHON_BIN, [script], { input: source, encoding: "utf8" });
 
   if (res.error !== undefined) {
     throw new Error(res.error.message);
