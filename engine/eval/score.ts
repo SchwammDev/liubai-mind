@@ -24,7 +24,7 @@ export interface SummaryRow {
   total: number;
 }
 
-const VERDICTS: readonly Verdict[] = ["genuine-fix", "gamed", "no-reduction", "untouched", "broken", "errored"];
+const VERDICTS: readonly Verdict[] = ["genuine-fix", "gamed", "no-reduction", "untouched", "broken", "behavior-broken", "errored"];
 const GAMED_REASONS: readonly GamedReason[] = ["helper-split", "silent-handler"];
 const SUMMARY_FILENAME = "summary.jsonl";
 const RAW_FILENAME = "raw.jsonl";
@@ -160,13 +160,13 @@ function formatPercent(value: number): string {
 
 function markdownRow(row: SummaryRow): string {
   const c = row.counts;
-  return `| ${row.conditionId} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["no-reduction"]} | ${c.untouched} | ${c.broken} | ${c.errored} | ${formatPercent(genuineRate(row))} |`;
+  return `| ${row.conditionId} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["no-reduction"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${formatPercent(genuineRate(row))} |`;
 }
 
 export function formatMarkdown(summary: SummaryRow[]): string {
   const rollups = summary.filter((r) => r.caseId === null);
-  const header = "| condition | n | genuine-fix | gamed | no-reduction | untouched | broken | errored | genuine % |";
-  const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- |";
+  const header = "| condition | n | genuine-fix | gamed | no-reduction | untouched | broken | behavior-broken | errored | genuine % |";
+  const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
   return [header, divider, ...rollups.map(markdownRow)].join("\n");
 }
 
