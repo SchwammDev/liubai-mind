@@ -160,7 +160,9 @@ type TSNode = {
   parent: TSNode | null;
 };
 
-type TreeRootLike = { rootNode: TSNode; hasError?: () => boolean };
+type RootNode = TSNode & { hasError: boolean | (() => boolean) };
+
+type TreeRootLike = { rootNode: RootNode };
 
 function loadLanguage(ext: string): unknown {
   const ts = require_("tree-sitter-typescript");
@@ -259,14 +261,18 @@ function loadLanguageForPath(path: string): unknown {
   return loadLanguage(ext);
 }
 
+function rootHasError(root: RootNode): boolean {
+  const he = root.hasError;
+  return typeof he === "function" ? he.call(root) : he === true;
+}
+
 function parseSource(language: unknown, src: string): TreeRootLike | null {
   const ParserCtor = getParser();
   const parser = new ParserCtor();
   parser.setLanguage(language);
   const tree = parser.parse(src) as unknown as TreeRootLike;
-  const root = tree;
-  if (typeof root.hasError === "function" ? root.hasError() : false) return null;
-  return root;
+  if (rootHasError(tree.rootNode)) return null;
+  return tree;
 }
 
 function beforeFunctionRegions(language: unknown, before: string | undefined): BeforeFunctions {
