@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, appendFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, appendFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,6 +8,7 @@ import { runCollect, detectAgentError } from "./collect.ts";
 import type { CollectOpts } from "./collect.ts";
 import type { RunSpec, RunOutcome, PiSpawner } from "./spawner.ts";
 import { gitSha } from "./provenance.ts";
+import { SNAPSHOT_FILE_CAP_BYTES } from "./snapshot.ts";
 import type { RawRow } from "./eval-contract.ts";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
@@ -110,6 +111,24 @@ function fixedOutcomeSpawner(outcome: RunOutcome): PiSpawner {
 function mutatingSpawner(filename: string, content: string): PiSpawner {
   return async (spec) => {
     writeFileSync(join(spec.cwd, filename), content);
+    return { exitCode: 0, stdoutJsonl: "", timedOut: false };
+  };
+}
+
+function binaryFilesUnderDirSpawner(dirName: string, filenames: string[]): PiSpawner {
+  return async (spec) => {
+    const dirPath = join(spec.cwd, dirName);
+    mkdirSync(dirPath, { recursive: true });
+    for (const filename of filenames) {
+      writeFileSync(join(dirPath, filename), Buffer.from([0, 1, 2]));
+    }
+    return { exitCode: 0, stdoutJsonl: "", timedOut: false };
+  };
+}
+
+function deletingSpawner(filename: string): PiSpawner {
+  return async (spec) => {
+    rmSync(join(spec.cwd, filename));
     return { exitCode: 0, stdoutJsonl: "", timedOut: false };
   };
 }
@@ -434,4 +453,56 @@ test("runCollect_rejects_a_non_positive_parallel_value_with_a_load_error", async
   assert.equal(result.status, 1);
   assert.equal(calls.length, 0);
   assert.match(result.stderr, /parallel/);
+});
+
+function assertBothDeclaredAndExtraFileCaptured(files: Record<string, string>, extraFilename: string, extraContent: string): void {
+  assert.equal("parse_flags.ts" in files, true);
+  assert.equal(files[extraFilename], extraContent);
+}
+
+test("runCollect_captures_files_the_agent_created_beside_the_declared_ones", async () => {
+  const helperSource = "export function helper() { return 1; }\n";
+  const spawner = mutatingSpawner("helpers.ts", helperSource);
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+
+  await runCollect(opts);
+
+  assertBothDeclaredAndExtraFileCaptured(firstRow(opts.runDir).files, "helpers.ts", helperSource);
+});
+
+test("runCollect_records_dropped_extras_in_snapshotDropped_at_directory_granularity", async () => {
+  const spawner = binaryFilesUnderDirSpawner("junk", ["a.bin", "b.bin"]);
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+
+  await runCollect(opts);
+
+  assert.deepEqual(firstRow(opts.runDir).snapshotDropped, ["junk/"]);
+});
+
+test("runCollect_leaves_snapshotDropped_absent_when_nothing_is_dropped", async () => {
+  const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+
+  await runCollect(opts);
+
+  assert.equal("snapshotDropped" in firstRow(opts.runDir), false);
+});
+
+test("runCollect_captures_a_declared_file_whole_even_past_the_extra_file_cap", async () => {
+  const oversizedSource = "a".repeat(SNAPSHOT_FILE_CAP_BYTES + 1);
+  const spawner = mutatingSpawner("parse_flags.ts", oversizedSource);
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+
+  await runCollect(opts);
+
+  assert.equal(firstRow(opts.runDir).files["parse_flags.ts"], oversizedSource);
+});
+
+test("runCollect_omits_a_declared_file_the_agent_deleted", async () => {
+  const spawner = deletingSpawner("parse_flags.ts");
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+
+  await runCollect(opts);
+
+  assert.equal("parse_flags.ts" in firstRow(opts.runDir).files, false);
 });

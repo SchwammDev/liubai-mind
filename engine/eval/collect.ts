@@ -8,6 +8,8 @@ import { loadCases, copyPlan } from "./corpus.ts";
 import { buildProvenance } from "./provenance.ts";
 import { defaultPiSpawner } from "./spawner.ts";
 import type { PiSpawner, RunOutcome } from "./spawner.ts";
+import { snapshotExtras } from "./snapshot.ts";
+import type { WorkDirSnapshot } from "./snapshot.ts";
 
 export interface CollectOpts {
   repoRoot: string;
@@ -179,6 +181,12 @@ function readFinalFiles(workDir: string, plan: { to: string }[]): Record<string,
   return files;
 }
 
+function snapshotWorkDir(workDir: string, plan: { to: string }[]): WorkDirSnapshot {
+  const declared = new Set(plan.map(({ to }) => relative(workDir, to)));
+  const extras = snapshotExtras(workDir, declared);
+  return { files: { ...readFinalFiles(workDir, plan), ...extras.files }, dropped: extras.dropped };
+}
+
 function failureMessage(item: WorkItem, err: unknown): string {
   const reason = err instanceof Error ? err.message : String(err);
   return `${item.kase.id}/${item.condition.id}/${item.rep}: ${reason}`;
@@ -207,7 +215,7 @@ function buildRawRow(
   packPath: string | undefined,
   outcome: RunOutcome,
   durationMs: number,
-  files: Record<string, string>,
+  snapshot: WorkDirSnapshot,
 ): RawRow {
   const packBytes = packPath === undefined ? null : readFileSync(packPath, "utf8");
   const provenance = buildProvenance({
@@ -225,7 +233,8 @@ function buildRawRow(
     conditionId: item.condition.id,
     rep: item.rep,
     provenance,
-    files,
+    files: snapshot.files,
+    ...(snapshot.dropped.length > 0 ? { snapshotDropped: snapshot.dropped } : {}),
     exitCode: outcome.exitCode,
     timedOut: outcome.timedOut,
     durationMs,
@@ -241,8 +250,8 @@ async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult>
 
   try {
     const { outcome, durationMs } = await spawnForItem(ctx, item, workDir, env);
-    const files = readFinalFiles(workDir, plan);
-    const row = buildRawRow(ctx, item, packPath, outcome, durationMs, files);
+    const snapshot = snapshotWorkDir(workDir, plan);
+    const row = buildRawRow(ctx, item, packPath, outcome, durationMs, snapshot);
     return { row, stdoutJsonl: outcome.stdoutJsonl };
   } catch (err) {
     return { failure: failureMessage(item, err) };
