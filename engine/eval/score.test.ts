@@ -78,7 +78,7 @@ function judgedRow(conditionId: string, caseId: string, verdict: Verdict, gamedR
 }
 
 function emptyVerdictCounts(): Record<Verdict, number> {
-  return { "genuine-fix": 0, gamed: 0, "no-reduction": 0, untouched: 0, broken: 0, errored: 0 };
+  return { "genuine-fix": 0, gamed: 0, "no-reduction": 0, untouched: 0, broken: 0, "behavior-broken": 0, errored: 0 };
 }
 
 function erroredRawRow(conditionId: string, caseId: string, agentError: string, rep: number): RawRow {
@@ -143,6 +143,15 @@ test("aggregate_emits_a_row_per_condition_and_case_pair", () => {
   assertDetailTotals(summary, [["case-a", 2], ["case-b", 1]]);
 });
 
+test("aggregate_counts_a_behavior_broken_verdict", () => {
+  const judged = [judgedRow("rails-default", "case-a", "behavior-broken")];
+
+  const summary = aggregate(judged);
+
+  const rollup = summary.find((r) => r.conditionId === "rails-default" && r.caseId === null)!;
+  assert.equal(rollup.counts["behavior-broken"], 1);
+});
+
 test("formatMarkdown_renders_one_line_per_condition_with_counts_and_genuine_rate", () => {
   const summary: SummaryRow[] = [
     summaryRow("rails-default", null, { "genuine-fix": 3, gamed: 1 }, 4),
@@ -152,17 +161,18 @@ test("formatMarkdown_renders_one_line_per_condition_with_counts_and_genuine_rate
 
   const table = formatMarkdown(summary);
 
-  assertConditionLine(table, "rails-default", "4 \\| 3 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 75\\.0%");
-  assertConditionLine(table, "control", "2 \\| 0 \\| 0 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0\\.0%");
+  assertConditionLine(table, "rails-default", "4 \\| 3 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 75\\.0%");
+  assertConditionLine(table, "control", "2 \\| 0 \\| 0 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0\\.0%");
   assert.equal(table.split("\n").length, 4);
 });
 
-test("formatMarkdown_renders_the_errored_column_between_broken_and_genuine_percent", () => {
-  const summary: SummaryRow[] = [summaryRow("rails-default", null, { broken: 1, errored: 2 }, 3)];
+test("formatMarkdown_renders_the_behavior_broken_column_between_broken_and_errored", () => {
+  const summary: SummaryRow[] = [summaryRow("rails-default", null, { broken: 1, "behavior-broken": 3, errored: 2 }, 6)];
 
   const table = formatMarkdown(summary);
 
-  assertConditionLine(table, "rails-default", "3 \\| 0 \\| 0 \\| 0 \\| 0 \\| 1 \\| 2 \\| 0\\.0%");
+  assert.match(table, /\| broken \| behavior-broken \| errored \|/);
+  assertConditionLine(table, "rails-default", "6 \\| 0 \\| 0 \\| 0 \\| 0 \\| 1 \\| 3 \\| 2 \\| 0\\.0%");
 });
 
 test("compareProvenance_lists_differing_fields_between_two_runs", () => {

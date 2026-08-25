@@ -32,13 +32,14 @@ export interface Metrics {
   parsed: boolean;
 }
 
-export type Verdict = "genuine-fix" | "gamed" | "no-reduction" | "untouched" | "broken" | "errored";
+export type Verdict = "genuine-fix" | "gamed" | "no-reduction" | "untouched" | "broken" | "behavior-broken" | "errored";
 
 export type GamedReason = "helper-split" | "silent-handler";
 
 export interface JudgeResult {
   verdict: Verdict;
   gamedReason?: GamedReason;
+  probesPassed?: boolean;
   before: Metrics;
   after: Metrics;
 }

@@ -10,6 +10,10 @@ function isBroken(before: Metrics, after: Metrics): boolean {
   return !after.parsed || (after.nFunctions === 0 && before.nFunctions >= 1);
 }
 
+function probesFailed(probesPassed: boolean | undefined): boolean {
+  return probesPassed === false;
+}
+
 function gainedSilentHandlers(before: Metrics, after: Metrics): boolean {
   return after.silentHandlers > before.silentHandlers;
 }
@@ -26,10 +30,12 @@ export function classifyVerdict(input: {
   before: Metrics;
   after: Metrics;
   entryChanged: boolean;
+  probesPassed?: boolean;
 }): { verdict: Verdict; gamedReason?: GamedReason } {
-  const { before, after, entryChanged } = input;
+  const { before, after, entryChanged, probesPassed } = input;
 
   if (isBroken(before, after)) return { verdict: "broken" };
+  if (probesFailed(probesPassed)) return { verdict: "behavior-broken" };
   if (!entryChanged) return { verdict: "untouched" };
   if (gainedSilentHandlers(before, after)) return { verdict: "gamed", gamedReason: "silent-handler" };
   if (reducedDecisionPointsWithoutNewSilentHandlers(before, after)) return { verdict: "genuine-fix" };
