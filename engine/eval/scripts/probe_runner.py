@@ -68,6 +68,7 @@ def _error_message(exc: BaseException) -> str:
 
 
 def _load_entry(source_path: str, entry_symbol: str) -> tuple[object, str | None]:
+    sys.path.insert(0, str(Path(source_path).parent))
     module_globals: dict[str, object] = {"__name__": Path(source_path).stem, "__file__": source_path}
     try:
         with open(source_path, "r", encoding="utf-8") as f:

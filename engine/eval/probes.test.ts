@@ -167,6 +167,59 @@ test("runProbes_python_writes_trace_lines_when_the_trace_env_var_is_set", { skip
   assertTraceRun("classify", source, [{ args: [1], returns: "positive" }]);
 });
 
+test("runProbes_materializes_sandbox_files_beside_the_entry_for_ts_imports", () => {
+  const source = 'import { FACTOR } from "./helpers.ts";\nexport function double(n: number): number {\n  return n * FACTOR;\n}\n';
+  const files = { "helpers.ts": "export const FACTOR = 2;\n" };
+
+  const outcome = tsProbeOutcome("double", source, [{ args: [3], returns: 6 }], { files });
+
+  assertPassed(outcome);
+});
+
+test("runProbes_creates_directories_for_nested_sandbox_files", () => {
+  const source = 'import { FACTOR } from "./lib/helpers.ts";\nexport function double(n: number): number {\n  return n * FACTOR;\n}\n';
+  const files = { "lib/helpers.ts": "export const FACTOR = 2;\n" };
+
+  const outcome = tsProbeOutcome("double", source, [{ args: [3], returns: 6 }], { files });
+
+  assertPassed(outcome);
+});
+
+test("runProbes_lets_the_entry_source_win_a_filename_collision_with_a_sandbox_file", () => {
+  const source = "export function double(n: number): number {\n  return n * 2;\n}\n";
+  const files = { "double.ts": "export function double(): number {\n  return 0;\n}\n" };
+
+  const outcome = tsProbeOutcome("double", source, [{ args: [3], returns: 6 }], { files });
+
+  assertPassed(outcome);
+});
+
+test("runProbes_throws_on_a_sandbox_path_that_escapes_the_workdir", () => {
+  const source = "export function double(n: number): number {\n  return n * 2;\n}\n";
+  const probes: Probe[] = [{ args: [3], returns: 6 }];
+
+  assert.throws(() => tsProbeOutcome("double", source, probes, { files: { "../evil.ts": "" } }), /unsafe file path/);
+  assert.throws(() => tsProbeOutcome("double", source, probes, { files: { "/tmp/evil.ts": "" } }), /unsafe file path/);
+});
+
+test("runProbes_ts_fails_as_load_error_when_the_import_specifier_is_extensionless", () => {
+  const source = 'import { FACTOR } from "./helpers";\nexport function double(n: number): number {\n  return n * FACTOR;\n}\n';
+  const files = { "helpers.ts": "export const FACTOR = 2;\n" };
+
+  const outcome = tsProbeOutcome("double", source, [{ args: [3], returns: 6 }], { files });
+
+  assertFailedWithReason(outcome, /helpers/);
+});
+
+test("runProbes_python_imports_a_sandbox_helper_module", { skip: !venvPythonAvailable() }, () => {
+  const source = "import helpers\n\n\ndef double(n):\n    return n * helpers.factor()\n";
+  const files = { "helpers.py": "def factor():\n    return 2\n" };
+
+  const outcome = pyProbeOutcome("double", source, [{ args: [3], returns: 6 }], { files });
+
+  assertPassed(outcome);
+});
+
 function assertTraceCoversExecutedLines(tracePath: string): void {
   const trace: { executed: number[]; executable: number[] } = JSON.parse(readFileSync(tracePath, "utf8"));
   assert.ok(trace.executed.length > 0);
