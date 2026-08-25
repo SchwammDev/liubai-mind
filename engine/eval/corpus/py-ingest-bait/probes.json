@@ -1,6 +1,144 @@
 [
   {
-    "args": [{ "id": "abc123", "name": "Alice", "age": 30, "email": "alice@example.com" }],
-    "returns": { "id": "abc123", "name": "Alice", "age": 30, "email": "alice@example.com", "valid": true }
+    "args": [
+      null
+    ],
+    "returns": {
+      "id": null,
+      "name": "",
+      "age": 0,
+      "email": "",
+      "valid": false
+    }
+  },
+  {
+    "args": [
+      5
+    ],
+    "returns": {
+      "id": null,
+      "name": "",
+      "age": 0,
+      "email": "",
+      "valid": false
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "a1",
+        "name": "Ada",
+        "age": 36
+      }
+    ],
+    "returns": {
+      "id": null,
+      "name": "",
+      "age": 0,
+      "email": "",
+      "valid": false
+    }
+  },
+  {
+    "args": [
+      {
+        "id": 5,
+        "name": "Ada",
+        "age": 36,
+        "email": "ada@x.io"
+      }
+    ],
+    "returns": {
+      "id": null,
+      "name": "",
+      "age": 0,
+      "email": "",
+      "valid": false
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "a1",
+        "name": "",
+        "age": 36,
+        "email": "ada@x.io"
+      }
+    ],
+    "returns": {
+      "id": null,
+      "name": "",
+      "age": 0,
+      "email": "",
+      "valid": false
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "a1",
+        "name": "Ada",
+        "age": "36",
+        "email": "ada@x.io"
+      }
+    ],
+    "returns": {
+      "id": null,
+      "name": "",
+      "age": 0,
+      "email": "",
+      "valid": false
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "a1",
+        "name": "Ada",
+        "age": -1,
+        "email": "ada@x.io"
+      }
+    ],
+    "returns": {
+      "id": null,
+      "name": "",
+      "age": 0,
+      "email": "",
+      "valid": false
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "a1",
+        "name": "Ada",
+        "age": 36,
+        "email": "adax.io"
+      }
+    ],
+    "returns": {
+      "id": null,
+      "name": "",
+      "age": 0,
+      "email": "",
+      "valid": false
+    }
+  },
+  {
+    "args": [
+      {
+        "id": "a1",
+        "name": "Ada",
+        "age": 36,
+        "email": "ada@x.io"
+      }
+    ],
+    "returns": {
+      "id": "a1",
+      "name": "Ada",
+      "age": 36,
+      "email": "ada@x.io",
+      "valid": true
+    }
   }
 ]

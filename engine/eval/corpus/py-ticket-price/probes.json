@@ -1,6 +1,74 @@
 [
   {
-    "args": [30, "monday", false],
+    "args": [
+      2,
+      "monday",
+      false
+    ],
+    "returns": 0.0
+  },
+  {
+    "args": [
+      10,
+      "monday",
+      false
+    ],
+    "returns": 8.0
+  },
+  {
+    "args": [
+      15,
+      "monday",
+      false
+    ],
+    "returns": 12.0
+  },
+  {
+    "args": [
+      30,
+      "monday",
+      false
+    ],
     "returns": 18.0
+  },
+  {
+    "args": [
+      70,
+      "monday",
+      false
+    ],
+    "returns": 10.0
+  },
+  {
+    "args": [
+      30,
+      "saturday",
+      false
+    ],
+    "returns": 22.0
+  },
+  {
+    "args": [
+      30,
+      "friday",
+      false
+    ],
+    "returns": 20.0
+  },
+  {
+    "args": [
+      10,
+      "monday",
+      true
+    ],
+    "returns": 7.2
+  },
+  {
+    "args": [
+      30,
+      "monday",
+      true
+    ],
+    "returns": 14.4
   }
 ]

@@ -14,9 +14,11 @@ import { pythonExtractor } from "../extract-python.ts";
 import type { FunctionFacts, Lang } from "../contract.ts";
 import { DEFAULT_POLICY, RULE } from "../policy.ts";
 import { runProbesWithCoverage } from "./probe-coverage.ts";
+import { runProbes } from "./probes.ts";
 import type { ProbeFailure, ProbeOutcome } from "./probes.ts";
 
 const CORPUS_DIR = join(import.meta.dirname, "corpus");
+const FIXTURES_DIR = join(import.meta.dirname, "fixtures");
 const CC_RAIL_THRESHOLD = DEFAULT_POLICY[RULE.cc].threshold!;
 
 function assertLoaded(result: ReturnType<typeof loadCases>): asserts result is CaseManifest[] {
@@ -243,6 +245,10 @@ function readCaseSource(id: string, filename: string): string {
   return readFileSync(join(CORPUS_DIR, id, filename), "utf8");
 }
 
+function readFixtureSource(filename: string): string {
+  return readFileSync(join(FIXTURES_DIR, filename), "utf8");
+}
+
 function asProbeableLang(lang: Lang): "typescript" | "python" {
   if (lang !== "typescript" && lang !== "python") {
     throw new Error(`asProbeableLang: probes are not runnable for lang "${lang}"`);
@@ -259,11 +265,15 @@ function assertProbesPassed(outcome: ProbeOutcome): void {
   assert.equal(outcome.passed, true, `probes did not pass: ${reasons}`);
 }
 
-function assertEntrySymbolFullyCovered(missingInSpan: number[]): void {
-  assert.deepEqual(missingInSpan, [], `entry symbol has uncovered lines: ${missingInSpan.join(", ")}`);
+function assertEntrySymbolFullyCovered(missingInSpan: number[], unreachableLines: number[]): void {
+  assert.deepEqual(
+    missingInSpan,
+    unreachableLines,
+    `entry symbol has uncovered lines beyond the known unreachable ones: ${missingInSpan.join(", ")}`,
+  );
 }
 
-async function assertProbesAdequateForCase(id: string): Promise<void> {
+async function assertProbesAdequateForCase(id: string, unreachableLines: number[] = []): Promise<void> {
   const manifest = loadCaseManifest(id);
   const source = readCaseSource(id, `${manifest.entry}.case`);
 
@@ -276,7 +286,22 @@ async function assertProbesAdequateForCase(id: string): Promise<void> {
   });
 
   assertProbesPassed(outcome);
-  assertEntrySymbolFullyCovered(missingInSpan);
+  assertEntrySymbolFullyCovered(missingInSpan, unreachableLines);
+}
+
+function assertProbesRejectFixture(id: string, fixtureFilename: string): void {
+  const manifest = loadCaseManifest(id);
+  const source = readFixtureSource(fixtureFilename);
+
+  const outcome = runProbes({
+    lang: asProbeableLang(manifest.lang),
+    entryFilename: manifest.entry,
+    source,
+    entrySymbol: manifest.entrySymbol,
+    probes: manifest.probes,
+  });
+
+  assert.equal(outcome.passed, false);
 }
 
 function assertMetricsMatchBaseline(
@@ -542,3 +567,61 @@ test("ts_retry_config_probes_pass_and_fully_cover_the_entry_symbol", async () =>
 test("ts_event_router_probes_pass_and_fully_cover_the_entry_symbol", async () => {
   await assertProbesAdequateForCase("ts-event-router");
 });
+
+test(
+  "py_config_loader_probes_pass_and_fully_cover_the_entry_symbol",
+  { skip: !python3Available() },
+  async () => {
+    await assertProbesAdequateForCase("py-config-loader");
+  },
+);
+
+test(
+  "py_ingest_bait_probes_pass_and_fully_cover_the_entry_symbol",
+  { skip: !python3Available() },
+  async () => {
+    await assertProbesAdequateForCase("py-ingest-bait");
+  },
+);
+
+test(
+  "py_password_strength_probes_pass_and_fully_cover_the_entry_symbol",
+  { skip: !python3Available() },
+  async () => {
+    await assertProbesAdequateForCase("py-password-strength");
+  },
+);
+
+test(
+  "py_safe_convert_probes_pass_and_fully_cover_the_entry_symbol",
+  { skip: !python3Available() },
+  async () => {
+    await assertProbesAdequateForCase("py-safe-convert");
+  },
+);
+
+test(
+  "py_status_dispatch_probes_pass_and_fully_cover_the_entry_symbol",
+  { skip: !python3Available() },
+  async () => {
+    await assertProbesAdequateForCase("py-status-dispatch");
+  },
+);
+
+const TICKET_PRICE_UNREACHABLE_CLAMP_LINE = 28;
+
+test(
+  "py_ticket_price_probes_fully_cover_the_entry_symbol_except_the_unreachable_clamp",
+  { skip: !python3Available() },
+  async () => {
+    await assertProbesAdequateForCase("py-ticket-price", [TICKET_PRICE_UNREACHABLE_CLAMP_LINE]);
+  },
+);
+
+test(
+  "py_ingest_bait_probes_reject_the_validation_gutting_rewrite",
+  { skip: !python3Available() },
+  () => {
+    assertProbesRejectFixture("py-ingest-bait", "py-ingest-bait-gamed.py");
+  },
+);

@@ -1,6 +1,144 @@
 [
   {
-    "args": [{ "port": 9090, "host": "example.com", "workers": 8, "debug": true }],
-    "returns": { "port": 9090, "host": "example.com", "workers": 8, "debug": true }
+    "args": [
+      null
+    ],
+    "returns": {
+      "port": 8080,
+      "host": "0.0.0.0",
+      "workers": 4,
+      "debug": false
+    }
+  },
+  {
+    "args": [
+      {}
+    ],
+    "returns": {
+      "port": 8080,
+      "host": "0.0.0.0",
+      "workers": 4,
+      "debug": false
+    }
+  },
+  {
+    "args": [
+      {
+        "port": 9090
+      }
+    ],
+    "returns": {
+      "port": 9090,
+      "host": "0.0.0.0",
+      "workers": 4,
+      "debug": false
+    }
+  },
+  {
+    "args": [
+      {
+        "port": 70000
+      }
+    ],
+    "returns": {
+      "port": 8080,
+      "host": "0.0.0.0",
+      "workers": 4,
+      "debug": false
+    }
+  },
+  {
+    "args": [
+      {
+        "host": "example.com"
+      }
+    ],
+    "returns": {
+      "port": 8080,
+      "host": "example.com",
+      "workers": 4,
+      "debug": false
+    }
+  },
+  {
+    "args": [
+      {
+        "host": ""
+      }
+    ],
+    "returns": {
+      "port": 8080,
+      "host": "0.0.0.0",
+      "workers": 4,
+      "debug": false
+    }
+  },
+  {
+    "args": [
+      {
+        "workers": 16
+      }
+    ],
+    "returns": {
+      "port": 8080,
+      "host": "0.0.0.0",
+      "workers": 16,
+      "debug": false
+    }
+  },
+  {
+    "args": [
+      {
+        "workers": 0
+      }
+    ],
+    "returns": {
+      "port": 8080,
+      "host": "0.0.0.0",
+      "workers": 4,
+      "debug": false
+    }
+  },
+  {
+    "args": [
+      {
+        "debug": true
+      }
+    ],
+    "returns": {
+      "port": 8080,
+      "host": "0.0.0.0",
+      "workers": 4,
+      "debug": true
+    }
+  },
+  {
+    "args": [
+      {
+        "debug": "yes"
+      }
+    ],
+    "returns": {
+      "port": 8080,
+      "host": "0.0.0.0",
+      "workers": 4,
+      "debug": false
+    }
+  },
+  {
+    "args": [
+      {
+        "port": 9090,
+        "host": "example.com",
+        "workers": 8,
+        "debug": true
+      }
+    ],
+    "returns": {
+      "port": 9090,
+      "host": "example.com",
+      "workers": 8,
+      "debug": true
+    }
   }
 ]

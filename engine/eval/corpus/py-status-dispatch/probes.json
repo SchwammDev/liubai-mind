@@ -1,6 +1,86 @@
 [
   {
-    "args": ["draft", "submit"],
+    "args": [
+      "draft",
+      "submit"
+    ],
     "returns": "pending"
+  },
+  {
+    "args": [
+      "pending",
+      "approve"
+    ],
+    "returns": "approved"
+  },
+  {
+    "args": [
+      "pending",
+      "reject"
+    ],
+    "returns": "rejected"
+  },
+  {
+    "args": [
+      "pending",
+      "revise"
+    ],
+    "returns": "draft"
+  },
+  {
+    "args": [
+      "approved",
+      "publish"
+    ],
+    "returns": "published"
+  },
+  {
+    "args": [
+      "approved",
+      "revise"
+    ],
+    "returns": "draft"
+  },
+  {
+    "args": [
+      "rejected",
+      "revise"
+    ],
+    "returns": "draft"
+  },
+  {
+    "args": [
+      "rejected",
+      "archive"
+    ],
+    "returns": "archived"
+  },
+  {
+    "args": [
+      "published",
+      "archive"
+    ],
+    "returns": "archived"
+  },
+  {
+    "args": [
+      "published",
+      "revise"
+    ],
+    "returns": "draft"
+  },
+  {
+    "args": [
+      "archived",
+      "restore"
+    ],
+    "returns": "draft"
+  },
+  {
+    "args": [
+      "draft",
+      "archive"
+    ],
+    "throws": "invalid transition: draft + archive"
   }
 ]
