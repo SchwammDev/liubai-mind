@@ -23,7 +23,6 @@ export function buildProvenance(input: {
   repoRoot: string;
   model: string;
   now: string;
-  pyCcBackend?: string;
 }): Provenance {
   return {
     conditionId: input.conditionId,
@@ -31,6 +30,5 @@ export function buildProvenance(input: {
     liubaiSha: gitSha(input.repoRoot),
     model: input.model,
     collectedAt: input.now,
-    ...(input.pyCcBackend !== undefined ? { pyCcBackend: input.pyCcBackend } : {}),
   };
 }

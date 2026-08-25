@@ -50,7 +50,6 @@ export interface Provenance {
   liubaiSha: string;
   model: string;
   collectedAt: string;
-  pyCcBackend?: string;
 }
 
 export interface RawRow {
