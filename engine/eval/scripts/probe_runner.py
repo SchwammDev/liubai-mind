@@ -118,15 +118,12 @@ def _run_all_probes(fn: object, probes: list[dict]) -> list[dict]:
     return [_run_probe(fn, probe, i + 1) for i, probe in enumerate(probes)]
 
 
-def _run_traced(fn: object, probes: list[dict], source_path: str, trace_out_path: str) -> list[dict]:
-    tracer = trace.Trace(count=1, trace=0)
-    results = tracer.runfunc(_run_all_probes, fn, probes)
+def _write_trace(tracer: trace.Trace, source_path: str, trace_out_path: str) -> None:
     counts = tracer.results().counts
     executed = sorted({line for (filename, line) in counts if filename == source_path})
     executable = sorted(trace._find_executable_linenos(source_path))
     with open(trace_out_path, "w", encoding="utf-8") as f:
         json.dump({"executed": executed, "executable": executable}, f)
-    return results
 
 
 def _print_sentinel(payload: dict) -> None:
@@ -139,16 +136,18 @@ def main() -> None:
     entry_symbol = payload["entrySymbol"]
     probes = payload["probes"]
 
-    fn, load_error = _load_entry(source_path, entry_symbol)
+    trace_out_path = environ.get("LIUBAI_PROBE_TRACE_OUT")
+    tracer = trace.Trace(count=1, trace=0) if trace_out_path else None
+    run = tracer.runfunc if tracer is not None else lambda f, *args: f(*args)
+
+    fn, load_error = run(_load_entry, source_path, entry_symbol)
     if load_error is not None:
         _print_sentinel({"loadError": load_error})
         return
 
-    trace_out_path = environ.get("LIUBAI_PROBE_TRACE_OUT")
-    if trace_out_path:
-        results = _run_traced(fn, probes, source_path, trace_out_path)
-    else:
-        results = _run_all_probes(fn, probes)
+    results = run(_run_all_probes, fn, probes)
+    if tracer is not None:
+        _write_trace(tracer, source_path, trace_out_path)
 
     _print_sentinel({"results": results})
 
