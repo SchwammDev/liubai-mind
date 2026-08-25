@@ -1,6 +1,32 @@
 [
   {
-    "args": ["Abcdef1!"],
+    "args": [
+      "Abcdef1!"
+    ],
     "returns": 5
+  },
+  {
+    "args": [
+      "aaa"
+    ],
+    "returns": 0
+  },
+  {
+    "args": [
+      "aaaa"
+    ],
+    "returns": 0
+  },
+  {
+    "args": [
+      "Sunshine123!"
+    ],
+    "returns": 6
+  },
+  {
+    "args": [
+      "Ab12"
+    ],
+    "returns": 3
   }
 ]

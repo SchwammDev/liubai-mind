@@ -1,6 +1,80 @@
 [
   {
-    "args": ["42.5"],
+    "args": [
+      42
+    ],
+    "returns": null
+  },
+  {
+    "args": [
+      "   "
+    ],
+    "returns": null
+  },
+  {
+    "args": [
+      "-"
+    ],
+    "returns": null
+  },
+  {
+    "args": [
+      "1.2.3"
+    ],
+    "returns": null
+  },
+  {
+    "args": [
+      ".5"
+    ],
+    "returns": null
+  },
+  {
+    "args": [
+      "5."
+    ],
+    "returns": null
+  },
+  {
+    "args": [
+      "1a.5"
+    ],
+    "returns": null
+  },
+  {
+    "args": [
+      "1.5b"
+    ],
+    "returns": null
+  },
+  {
+    "args": [
+      "12a"
+    ],
+    "returns": null
+  },
+  {
+    "args": [
+      "42"
+    ],
+    "returns": 42.0
+  },
+  {
+    "args": [
+      "42.5"
+    ],
     "returns": 42.5
+  },
+  {
+    "args": [
+      "+3.5"
+    ],
+    "returns": 3.5
+  },
+  {
+    "args": [
+      "-3.5"
+    ],
+    "returns": -3.5
   }
 ]
