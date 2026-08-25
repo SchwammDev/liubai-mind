@@ -68,11 +68,11 @@ installed_source() {
 ensure_lizard_venv() {
   local eng_dir="$1"
   local py="$eng_dir/.venv/bin/python"
-  if [ ! -x "$py" ]; then
+  if [ ! -x "$py" ] || ! "$py" -c 'import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)'; then
     rm -rf "$eng_dir/.venv"
-    uv venv "$eng_dir/.venv"
+    uv venv --python 3.12 "$eng_dir/.venv"
   fi
-  uv pip install --quiet --python "$py" lizard
+  uv pip install --quiet --python "$py" -r "$eng_dir/requirements.txt"
 }
 
 # Project tests and --dev mode reuse the installed venv so we don't carry a
