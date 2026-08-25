@@ -20,6 +20,14 @@ async function ccOf(src: string, name: string, path = "app/foo.ts"): Promise<num
   return findFn(ext, name).cyclomaticComplexity;
 }
 
+test("source_where_only_part_is_broken_extracts_nothing", async () => {
+  const src = "export function f(x: number): number { return x; }\n)))garbage(((\n";
+
+  const ext = await extractText("app/foo.ts", src);
+
+  assert.deepEqual(ext, { functions: [], comments: [] });
+});
+
 test("endLine_marks_the_last_line_of_the_function_node", async () => {
   const src = "function f() {\n  return 1;\n}\n";
   const fn = findFn(await extractText("app/foo.ts", src), "f");
