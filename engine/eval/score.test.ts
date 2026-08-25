@@ -113,11 +113,12 @@ function rawRow(conditionId: string, caseId: string, over: Partial<RawRow> = {})
   };
 }
 
-function judgedRow(conditionId: string, caseId: string, verdict: Verdict, gamedReason?: GamedReason): JudgedRow {
+function judgedRow(conditionId: string, caseId: string, verdict: Verdict, gamedReason?: GamedReason, createdFiles: string[] = []): JudgedRow {
   const judge: JudgeResult = {
     verdict,
     before: metrics(),
     after: metrics(),
+    createdFiles,
     ...(gamedReason !== undefined ? { gamedReason } : {}),
   };
   return { row: rawRow(conditionId, caseId), judge };
@@ -129,6 +130,15 @@ function emptyVerdictCounts(): Record<Verdict, number> {
 
 function erroredRawRow(conditionId: string, caseId: string, agentError: string, rep: number): RawRow {
   return rawRow(conditionId, caseId, { agentError, files: {}, exitCode: 1, rep });
+}
+
+function tsFlagParserEntrySource(): string {
+  return readFileSync(join(CORPUS_DIR, "ts-flag-parser", "parse_flags.ts.case"), "utf8");
+}
+
+function tsFlagParserRow(extraFiles: Record<string, string>, over: Partial<RawRow> = {}): RawRow {
+  const files = { "parse_flags.ts": tsFlagParserEntrySource(), ...extraFiles };
+  return rawRow("rails-default", "ts-flag-parser", { files, ...over });
 }
 
 function findJudgedRow(judged: JudgedRow[], conditionId: string, caseId: string, rep: number): JudgedRow {
@@ -155,6 +165,7 @@ function summaryRow(conditionId: string, caseId: string | null, counts: Partial<
     counts: { ...emptyVerdictCounts(), ...counts },
     gamedReasons: { "helper-split": 0, "silent-handler": 0 },
     total,
+    withCreatedFiles: 0,
     ...judgeEnv(),
   };
 }
@@ -165,6 +176,11 @@ function assertRollupCounts(summary: SummaryRow[], conditionId: string, expected
   assert.equal(rollup.counts["genuine-fix"], expected.genuineFix);
   assert.equal(rollup.counts.gamed, expected.gamed);
   assert.equal(rollup.gamedReasons["helper-split"], expected.helperSplit);
+}
+
+function assertWithCreatedFilesCount(summary: SummaryRow[], conditionId: string, expected: number): void {
+  const rollup = summary.find((r) => r.conditionId === conditionId && r.caseId === null)!;
+  assert.equal(rollup.withCreatedFiles, expected);
 }
 
 function assertDetailTotals(summary: SummaryRow[], expected: [string, number][]): void {
@@ -218,8 +234,8 @@ test("formatMarkdown_renders_one_line_per_condition_with_counts_and_genuine_rate
 
   const table = formatMarkdown(summary);
 
-  assertConditionLine(table, "rails-default", "4 \\| 3 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 75\\.0%");
-  assertConditionLine(table, "control", "2 \\| 0 \\| 0 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0\\.0%");
+  assertConditionLine(table, "rails-default", "4 \\| 3 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 75\\.0%");
+  assertConditionLine(table, "control", "2 \\| 0 \\| 0 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0\\.0%");
   assert.equal(table.split("\n").length, 4);
 });
 
@@ -229,7 +245,16 @@ test("formatMarkdown_renders_the_behavior_broken_column_between_broken_and_error
   const table = formatMarkdown(summary);
 
   assert.match(table, /\| broken \| behavior-broken \| errored \|/);
-  assertConditionLine(table, "rails-default", "6 \\| 0 \\| 0 \\| 0 \\| 0 \\| 1 \\| 3 \\| 2 \\| 0\\.0%");
+  assertConditionLine(table, "rails-default", "6 \\| 0 \\| 0 \\| 0 \\| 0 \\| 1 \\| 3 \\| 2 \\| 0 \\| 0\\.0%");
+});
+
+test("formatMarkdown_renders_the_created_files_column_between_errored_and_genuine_rate", () => {
+  const summary: SummaryRow[] = [{ ...summaryRow("rails-default", null, { "genuine-fix": 2 }, 3), withCreatedFiles: 2 }];
+
+  const table = formatMarkdown(summary);
+
+  assert.match(table, /\| errored \| created-files \| genuine % \|/);
+  assertConditionLine(table, "rails-default", "3 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 2 \\| 66\\.7%");
 });
 
 test("compareProvenance_lists_differing_fields_between_two_runs", () => {
@@ -318,6 +343,38 @@ test("judgeRows_runs_probes_against_the_full_row_file_snapshot", async () => {
   assert.equal(judged[0]!.judge.probesPassed, true);
 });
 
+test("judgeRows_lists_files_created_beyond_the_declared_set_sorted", async () => {
+  const row = tsFlagParserRow({ "notes.md": "notes", "a.txt": "a" });
+
+  const judged = await judgeRows([row], CORPUS_DIR);
+
+  assert.deepEqual(judged[0]!.judge.createdFiles, ["a.txt", "notes.md"]);
+});
+
+test("judgeRows_reports_empty_createdFiles_when_only_declared_files_are_present", async () => {
+  const row = tsFlagParserRow({});
+
+  const judged = await judgeRows([row], CORPUS_DIR);
+
+  assert.deepEqual(judged[0]!.judge.createdFiles, []);
+});
+
+test("judgeRows_does_not_count_snapshotDropped_paths_as_created_files", async () => {
+  const row = tsFlagParserRow({}, { snapshotDropped: ["junk/"] });
+
+  const judged = await judgeRows([row], CORPUS_DIR);
+
+  assert.deepEqual(judged[0]!.judge.createdFiles, []);
+});
+
+test("judgeRows_reports_empty_createdFiles_for_an_agent_errored_row", async () => {
+  const rows = [erroredRawRow("rails-default", "ts-flag-parser", "OpenAI API error (404): model not found", 1)];
+
+  const judged = await judgeRows(rows, CORPUS_DIR);
+
+  assert.deepEqual(judged[0]!.judge.createdFiles, []);
+});
+
 test("runScore_writes_summary_jsonl_beside_raw_jsonl", async () => {
   const rows = tsOnlyRows(readFixtureRows());
   const runDir = tempRunDir();
@@ -390,6 +447,28 @@ test("aggregate_stamps_every_row_with_the_judging_sha_and_backend_it_was_given",
   const summary = aggregate(judged, env);
 
   assert.ok(summary.every((row) => row.judgedAtSha === "deadbee" && row.pyCcBackend === "lizard 9.9.9"));
+});
+
+test("aggregate_counts_rows_with_created_files_into_withCreatedFiles", () => {
+  const judged = [
+    judgedRow("rails-default", "case-a", "genuine-fix", undefined, ["x.ts"]),
+    judgedRow("rails-default", "case-b", "genuine-fix"),
+  ];
+
+  const summary = aggregate(judged, judgeEnv());
+
+  assertWithCreatedFilesCount(summary, "rails-default", 1);
+});
+
+test("runScore_stamps_withCreatedFiles_into_summary_rows", async () => {
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [tsFlagParserRow({ "extra.txt": "x" })]);
+
+  await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+  const parsed = readSummaryRows(runDir);
+  const rollup = parsed.find((r) => r.conditionId === "rails-default" && r.caseId === null)!;
+  assert.equal(rollup.withCreatedFiles, 1);
 });
 
 test("runScore_stamps_summary_rows_with_the_git_sha_of_the_judging_checkout", async () => {
