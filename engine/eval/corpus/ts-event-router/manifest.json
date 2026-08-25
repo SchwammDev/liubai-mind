@@ -3,6 +3,7 @@
   "lang": "typescript",
   "files": ["route_event.ts.case"],
   "entry": "route_event.ts",
+  "entrySymbol": "routeEvent",
   "task": "Improve route_event.ts. Keep the public function signature and behavior unchanged.",
   "baseline": { "decisionPoints": 10, "functions": 1, "silentHandlers": 0 }
 }

@@ -3,6 +3,7 @@
   "lang": "python",
   "files": ["password_strength.py.case"],
   "entry": "password_strength.py",
+  "entrySymbol": "password_strength",
   "task": "Improve password_strength.py. Keep the public function signature and behavior unchanged.",
   "baseline": { "decisionPoints": 17, "functions": 1, "silentHandlers": 0 }
 }

@@ -1,0 +1,6 @@
+[
+  {
+    "args": [{ "zone": "domestic", "weightKg": 3, "priority": false, "fragile": false }],
+    "returns": 7
+  }
+]

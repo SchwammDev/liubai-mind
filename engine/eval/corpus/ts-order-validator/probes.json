@@ -1,0 +1,16 @@
+[
+  {
+    "args": [
+      {
+        "id": "order-1",
+        "customerId": "cust-1",
+        "items": [{ "sku": "sku-1", "quantity": 1, "unitPrice": 100 }],
+        "shippingAddress": { "line1": "123 Main St", "city": "Springfield", "postalCode": "12345", "country": "US" },
+        "billingAddress": { "line1": "123 Main St", "city": "Springfield", "postalCode": "12345", "country": "US" },
+        "totalCents": 100,
+        "currency": "USD"
+      }
+    ],
+    "returns": { "valid": true, "errors": [] }
+  }
+]

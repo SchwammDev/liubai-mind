@@ -1,0 +1,6 @@
+[
+  {
+    "args": ["user.created", { "data": { "id": "u1" } }],
+    "returns": { "status": "ok", "message": "created user u1" }
+  }
+]

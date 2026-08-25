@@ -3,6 +3,7 @@
   "lang": "python",
   "files": ["to_number.py.case"],
   "entry": "to_number.py",
+  "entrySymbol": "to_number",
   "task": "Improve to_number.py. Keep the public function signature and behavior unchanged.",
   "baseline": { "decisionPoints": 12, "functions": 1, "silentHandlers": 0 }
 }

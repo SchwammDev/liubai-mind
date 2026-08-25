@@ -1,0 +1,6 @@
+[
+  {
+    "args": [{ "maxAttempts": "5", "backoffMs": "500", "jitter": "false", "mode": "linear" }],
+    "returns": { "maxAttempts": 5, "backoffMs": 500, "jitter": false, "mode": "linear" }
+  }
+]
