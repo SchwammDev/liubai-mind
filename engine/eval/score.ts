@@ -8,6 +8,7 @@ import type { RawRow, Metrics, Verdict, GamedReason, JudgeResult, Provenance } f
 import { decisionPoints, classifyVerdict } from "./judge.ts";
 import { countSilentHandlers } from "./silent-handlers.ts";
 import { loadCases } from "./corpus.ts";
+import { runProbes } from "./probes.ts";
 import { typescriptExtractor } from "../extract-typescript.ts";
 import { pythonExtractor } from "../extract-python.ts";
 
@@ -36,6 +37,12 @@ function silentHandlerLang(lang: Lang): "typescript" | "python" {
   if (lang === "typescript") return "typescript";
   if (lang === "python") return "python";
   throw new Error(`score: unsupported lang for silent-handler detection: ${lang}`);
+}
+
+function probeLang(lang: Lang): "typescript" | "python" {
+  if (lang === "typescript") return "typescript";
+  if (lang === "python") return "python";
+  throw new Error(`score: unsupported lang for probe running: ${lang}`);
 }
 
 async function extractFunctions(lang: Lang, path: string, after: string): Promise<Extracted> {
@@ -76,13 +83,34 @@ function readBeforeSource(corpusDir: string, kase: CaseManifest): string {
   return readFileSync(join(corpusDir, kase.id, `${kase.entry}.case`), "utf8");
 }
 
-function buildJudgeResult(before: Metrics, after: Metrics, entryChanged: boolean): JudgeResult {
-  const { verdict, gamedReason } = classifyVerdict({ before, after, entryChanged });
-  return { verdict, before, after, ...(gamedReason !== undefined ? { gamedReason } : {}) };
+function buildJudgeResult(before: Metrics, after: Metrics, entryChanged: boolean, probesPassed: boolean | undefined): JudgeResult {
+  const { verdict, gamedReason } = classifyVerdict({ before, after, entryChanged, ...(probesPassed !== undefined ? { probesPassed } : {}) });
+  return {
+    verdict,
+    before,
+    after,
+    ...(gamedReason !== undefined ? { gamedReason } : {}),
+    ...(probesPassed !== undefined ? { probesPassed } : {}),
+  };
 }
 
 function erroredJudgeResult(): JudgeResult {
   return { verdict: "errored", before: BROKEN_METRICS, after: BROKEN_METRICS };
+}
+
+function shouldRunProbes(entryChanged: boolean, after: Metrics, afterSource: string | undefined): afterSource is string {
+  return entryChanged && after.parsed && afterSource !== undefined;
+}
+
+function runCaseProbes(kase: CaseManifest, afterSource: string): boolean {
+  const outcome = runProbes({
+    lang: probeLang(kase.lang),
+    entryFilename: kase.entry,
+    source: afterSource,
+    entrySymbol: kase.entrySymbol,
+    probes: kase.probes,
+  });
+  return outcome.passed;
 }
 
 async function judgeRow(row: RawRow, cases: CaseManifest[], corpusDir: string): Promise<JudgedRow> {
@@ -91,11 +119,14 @@ async function judgeRow(row: RawRow, cases: CaseManifest[], corpusDir: string): 
   const kase = findCase(cases, row.caseId);
   const beforeSource = readBeforeSource(corpusDir, kase);
   const afterSource = row.files[kase.entry];
+  const entryChanged = entryChangedFor(beforeSource, afterSource);
 
   const before = await computeMetrics(kase.lang, kase.entry, beforeSource);
   const after = await computeMetrics(kase.lang, kase.entry, afterSource);
 
-  const judge = buildJudgeResult(before, after, entryChangedFor(beforeSource, afterSource));
+  const probesPassed = shouldRunProbes(entryChanged, after, afterSource) ? runCaseProbes(kase, afterSource) : undefined;
+
+  const judge = buildJudgeResult(before, after, entryChanged, probesPassed);
   return { row, judge };
 }
 

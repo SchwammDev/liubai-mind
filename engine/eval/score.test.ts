@@ -85,6 +85,12 @@ function erroredRawRow(conditionId: string, caseId: string, agentError: string, 
   return rawRow(conditionId, caseId, { agentError, files: {}, exitCode: 1, rep });
 }
 
+function findJudgedRow(judged: JudgedRow[], conditionId: string, caseId: string, rep: number): JudgedRow {
+  const found = judged.find((j) => j.row.conditionId === conditionId && j.row.caseId === caseId && j.row.rep === rep);
+  if (found === undefined) throw new Error(`fixture row not found: ${conditionId}/${caseId}#${rep}`);
+  return found;
+}
+
 function allErroredRawRows(): RawRow[] {
   return [
     erroredRawRow("rails-default", "ts-flag-parser", "OpenAI API error (404): model not found", 1),
@@ -214,7 +220,7 @@ test("runScore_classifies_the_ts_fixture_rows_into_the_expected_verdicts", async
   assert.equal(result.status, 0);
   assert.deepEqual(
     judged.map((j) => j.judge.verdict),
-    ["genuine-fix", "gamed", "untouched", "broken", "errored"],
+    ["genuine-fix", "gamed", "untouched", "broken", "errored", "behavior-broken"],
   );
   assert.equal(judged[1]!.judge.gamedReason, "helper-split");
 });
@@ -231,6 +237,25 @@ test(
     assert.equal(judged[0]!.judge.gamedReason, "silent-handler");
   },
 );
+
+function assertProbesPassedFor(judged: JudgedRow, verdict: Verdict, expected: boolean | undefined): void {
+  assert.equal(judged.judge.verdict, verdict);
+  assert.equal(judged.judge.probesPassed, expected);
+}
+
+test("judgeRows_records_probesPassed_only_when_probes_ran", async () => {
+  const judged = await judgeRows(tsOnlyRows(readFixtureRows()), CORPUS_DIR);
+
+  assertProbesPassedFor(findJudgedRow(judged, "control", "ts-order-validator", 1), "untouched", undefined);
+  assertProbesPassedFor(findJudgedRow(judged, "rails-default", "ts-flag-parser", 1), "genuine-fix", true);
+  assertProbesPassedFor(judged.find((j) => j.judge.verdict === "behavior-broken")!, "behavior-broken", false);
+});
+
+test("judgeRows_skips_probes_for_an_unparseable_after_source", async () => {
+  const judged = await judgeRows(tsOnlyRows(readFixtureRows()), CORPUS_DIR);
+
+  assertProbesPassedFor(findJudgedRow(judged, "rails-default", "ts-flag-parser", 2), "broken", undefined);
+});
 
 test("runScore_writes_summary_jsonl_beside_raw_jsonl", async () => {
   const rows = tsOnlyRows(readFixtureRows());
