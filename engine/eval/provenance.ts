@@ -8,13 +8,15 @@ function runGit(repoRoot: string, args: string[]): string {
   return res.stdout.trim();
 }
 
-function isDirty(repoRoot: string): boolean {
-  return runGit(repoRoot, ["status", "--porcelain"]).length > 0;
+const RUN_OUTPUTS_PATHSPEC = ":(exclude)engine/eval/runs";
+
+function isDirtyOutsideRunOutputs(repoRoot: string): boolean {
+  return runGit(repoRoot, ["status", "--porcelain", "--", RUN_OUTPUTS_PATHSPEC]).length > 0;
 }
 
 export function gitSha(repoRoot: string): string {
   const sha = runGit(repoRoot, ["rev-parse", "--short", "HEAD"]);
-  return isDirty(repoRoot) ? `${sha}-dirty` : sha;
+  return isDirtyOutsideRunOutputs(repoRoot) ? `${sha}-dirty` : sha;
 }
 
 export function buildProvenance(input: {

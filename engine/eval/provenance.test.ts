@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -17,6 +17,16 @@ function tempGitRepo(): string {
   spawnSync("git", ["add", "file.txt"], { cwd: dir });
   spawnSync("git", ["commit", "-q", "-m", "initial"], { cwd: dir });
   return dir;
+}
+
+function commitEvalRunOutput(repo: string): string {
+  const runDir = join(repo, "engine", "eval", "runs", "baseline");
+  mkdirSync(runDir, { recursive: true });
+  const runFile = join(runDir, "summary.jsonl");
+  writeFileSync(runFile, "original\n");
+  spawnSync("git", ["add", "-A"], { cwd: repo });
+  spawnSync("git", ["commit", "-q", "-m", "run output"], { cwd: repo });
+  return runFile;
 }
 
 test("gitSha_returns_the_short_sha_of_head", () => {
@@ -39,6 +49,16 @@ test("gitSha_marks_a_dirty_tree_with_a_dirty_suffix", () => {
 
 test("gitSha_does_not_mark_a_clean_tree_as_dirty", () => {
   const repo = tempGitRepo();
+
+  const sha = gitSha(repo);
+
+  assert.doesNotMatch(sha, /-dirty$/);
+});
+
+test("gitSha_ignores_rewritten_eval_run_outputs_when_judging_dirtiness", () => {
+  const repo = tempGitRepo();
+  const runFile = commitEvalRunOutput(repo);
+  writeFileSync(runFile, "rescored\n");
 
   const sha = gitSha(repo);
 
