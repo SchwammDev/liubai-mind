@@ -16,6 +16,10 @@ function stripCaseSuffix(filename: string): string {
   return filename.slice(0, -".case".length);
 }
 
+export function declaredFiles(kase: CaseManifest): string[] {
+  return kase.files.map(stripCaseSuffix);
+}
+
 function validateFiles(files: unknown): { value: string[] } | { error: string } {
   if (!Array.isArray(files) || files.length === 0 || files.some((f) => typeof f !== "string")) {
     return { error: "files must be a non-empty string array" };

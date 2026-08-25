@@ -6,7 +6,7 @@ import type { CaseManifest } from "./eval-contract.ts";
 import type { RawRow, Metrics, Verdict, GamedReason, JudgeResult, Provenance } from "./eval-contract.ts";
 import { decisionPoints, classifyVerdict } from "./judge.ts";
 import { countSilentHandlers } from "./silent-handlers.ts";
-import { loadCases } from "./corpus.ts";
+import { loadCases, declaredFiles } from "./corpus.ts";
 import { runProbes } from "./probes.ts";
 import { typescriptExtractor } from "../extract-typescript.ts";
 import { pythonExtractor } from "../extract-python.ts";
@@ -29,6 +29,7 @@ export interface SummaryRow {
   counts: Record<Verdict, number>;
   gamedReasons: Record<GamedReason, number>;
   total: number;
+  withCreatedFiles: number;
   judgedAtSha: string;
   pyCcBackend: string;
 }
@@ -87,19 +88,33 @@ function readBeforeSource(corpusDir: string, kase: CaseManifest): string {
   return readFileSync(join(corpusDir, kase.id, `${kase.entry}.case`), "utf8");
 }
 
-function buildJudgeResult(before: Metrics, after: Metrics, entryChanged: boolean, probesPassed: boolean | undefined): JudgeResult {
+function createdFilesOf(kase: CaseManifest, files: Record<string, string>): string[] {
+  const declared = new Set(declaredFiles(kase));
+  return Object.keys(files)
+    .filter((path) => !declared.has(path))
+    .sort();
+}
+
+function buildJudgeResult(
+  before: Metrics,
+  after: Metrics,
+  entryChanged: boolean,
+  probesPassed: boolean | undefined,
+  createdFiles: string[],
+): JudgeResult {
   const { verdict, gamedReason } = classifyVerdict({ before, after, entryChanged, ...(probesPassed !== undefined ? { probesPassed } : {}) });
   return {
     verdict,
     before,
     after,
+    createdFiles,
     ...(gamedReason !== undefined ? { gamedReason } : {}),
     ...(probesPassed !== undefined ? { probesPassed } : {}),
   };
 }
 
 function erroredJudgeResult(): JudgeResult {
-  return { verdict: "errored", before: BROKEN_METRICS, after: BROKEN_METRICS };
+  return { verdict: "errored", before: BROKEN_METRICS, after: BROKEN_METRICS, createdFiles: [] };
 }
 
 function shouldRunProbes(entryChanged: boolean, after: Metrics, afterSource: string | undefined): afterSource is string {
@@ -130,8 +145,9 @@ async function judgeRow(row: RawRow, cases: CaseManifest[], corpusDir: string): 
   const after = await computeMetrics(kase.lang, kase.entry, afterSource);
 
   const probesPassed = shouldRunProbes(entryChanged, after, afterSource) ? runCaseProbes(kase, afterSource, row.files) : undefined;
+  const createdFiles = createdFilesOf(kase, row.files);
 
-  const judge = buildJudgeResult(before, after, entryChanged, probesPassed);
+  const judge = buildJudgeResult(before, after, entryChanged, probesPassed, createdFiles);
   return { row, judge };
 }
 
@@ -161,6 +177,7 @@ function newSummaryRow(conditionId: string, caseId: string | null, env: JudgeEnv
     counts: emptyCounts(),
     gamedReasons: emptyGamedReasons(),
     total: 0,
+    withCreatedFiles: 0,
     judgedAtSha: env.judgedAtSha,
     pyCcBackend: env.pyCcBackend,
   };
@@ -170,6 +187,7 @@ function addJudgeToRow(bucket: SummaryRow, judge: JudgeResult): void {
   bucket.counts[judge.verdict] += 1;
   bucket.total += 1;
   if (judge.gamedReason !== undefined) bucket.gamedReasons[judge.gamedReason] += 1;
+  if (judge.createdFiles.length > 0) bucket.withCreatedFiles += 1;
 }
 
 function detailKey(conditionId: string, caseId: string): string {
@@ -204,13 +222,13 @@ function formatPercent(value: number): string {
 
 function markdownRow(row: SummaryRow): string {
   const c = row.counts;
-  return `| ${row.conditionId} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["no-reduction"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${formatPercent(genuineRate(row))} |`;
+  return `| ${row.conditionId} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["no-reduction"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${row.withCreatedFiles} | ${formatPercent(genuineRate(row))} |`;
 }
 
 export function formatMarkdown(summary: SummaryRow[]): string {
   const rollups = summary.filter((r) => r.caseId === null);
-  const header = "| condition | n | genuine-fix | gamed | no-reduction | untouched | broken | behavior-broken | errored | genuine % |";
-  const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
+  const header = "| condition | n | genuine-fix | gamed | no-reduction | untouched | broken | behavior-broken | errored | created-files | genuine % |";
+  const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
   return [header, divider, ...rollups.map(markdownRow)].join("\n");
 }
 
