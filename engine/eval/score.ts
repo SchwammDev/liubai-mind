@@ -36,7 +36,7 @@ export interface SummaryRow {
   pyCcBackend: string;
 }
 
-const VERDICTS: readonly Verdict[] = ["genuine-fix", "gamed", "no-reduction", "untouched", "broken", "behavior-broken", "errored"];
+const VERDICTS: readonly Verdict[] = ["genuine-fix", "gamed", "bar-missed", "untouched", "broken", "behavior-broken", "errored"];
 const GAMED_REASONS: readonly GamedReason[] = ["helper-split", "silent-handler"];
 const SUMMARY_FILENAME = "summary.jsonl";
 const RAW_FILENAME = "raw.jsonl";
@@ -272,12 +272,12 @@ function formatPercent(value: number): string {
 
 function markdownRow(row: SummaryRow): string {
   const c = row.counts;
-  return `| ${row.conditionId} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["no-reduction"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${row.withCreatedFiles} | ${formatPercent(genuineRate(row))} |`;
+  return `| ${row.conditionId} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["bar-missed"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${row.withCreatedFiles} | ${formatPercent(genuineRate(row))} |`;
 }
 
 export function formatMarkdown(summary: SummaryRow[]): string {
   const rollups = summary.filter((r) => r.caseId === null);
-  const header = "| condition | n | genuine-fix | gamed | no-reduction | untouched | broken | behavior-broken | errored | created-files | genuine % |";
+  const header = "| condition | n | genuine-fix | gamed | bar-missed | untouched | broken | behavior-broken | errored | created-files | genuine % |";
   const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
   return [header, divider, ...rollups.map(markdownRow)].join("\n");
 }

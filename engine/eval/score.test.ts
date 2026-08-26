@@ -126,7 +126,7 @@ function judgedRow(conditionId: string, caseId: string, verdict: Verdict, gamedR
 }
 
 function emptyVerdictCounts(): Record<Verdict, number> {
-  return { "genuine-fix": 0, gamed: 0, "no-reduction": 0, untouched: 0, broken: 0, "behavior-broken": 0, errored: 0 };
+  return { "genuine-fix": 0, gamed: 0, "bar-missed": 0, untouched: 0, broken: 0, "behavior-broken": 0, errored: 0 };
 }
 
 function erroredRawRow(conditionId: string, caseId: string, agentError: string, rep: number): RawRow {
@@ -270,7 +270,7 @@ test("aggregate_counts_a_behavior_broken_verdict", () => {
 test("formatMarkdown_renders_one_line_per_condition_with_counts_and_genuine_rate", () => {
   const summary: SummaryRow[] = [
     summaryRow("rails-default", null, { "genuine-fix": 3, gamed: 1 }, 4),
-    summaryRow("control", null, { "no-reduction": 2 }, 2),
+    summaryRow("control", null, { "bar-missed": 2 }, 2),
     summaryRow("rails-default", "case-a", { "genuine-fix": 3 }, 3),
   ];
 
@@ -469,7 +469,7 @@ test("judgeRows_does_not_count_an_unreferenced_created_file_toward_after_metrics
 
   const judged = await judgeRows([row], CORPUS_DIR);
 
-  assert.equal(judged[0]!.judge.verdict, "no-reduction");
+  assert.equal(judged[0]!.judge.verdict, "bar-missed");
 });
 
 test("judgeRows_classifies_an_unparseable_referenced_file_as_broken", async () => {
@@ -492,7 +492,7 @@ test("judgeRows_ignores_an_unparseable_unreferenced_created_file", async () => {
 
   const judged = await judgeRows([row], CORPUS_DIR);
 
-  assertVerdictAndAfterParsed(judged[0]!, "no-reduction", true);
+  assertVerdictAndAfterParsed(judged[0]!, "bar-missed", true);
 });
 
 test("judgeRows_records_the_referenced_created_file_in_referencedFiles", async () => {

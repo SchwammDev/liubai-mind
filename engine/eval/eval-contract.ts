@@ -32,7 +32,7 @@ export interface Metrics {
   parsed: boolean;
 }
 
-export type Verdict = "genuine-fix" | "gamed" | "no-reduction" | "untouched" | "broken" | "behavior-broken" | "errored";
+export type Verdict = "genuine-fix" | "gamed" | "bar-missed" | "untouched" | "broken" | "behavior-broken" | "errored";
 
 export type GamedReason = "helper-split" | "silent-handler";
 

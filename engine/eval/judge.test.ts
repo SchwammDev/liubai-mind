@@ -161,22 +161,22 @@ test("classifyVerdict_reports_gamed_helper_split_when_decision_points_unchanged_
   assert.equal(result.gamedReason, "helper-split");
 });
 
-test("classifyVerdict_reports_no_reduction_when_nothing_meaningful_changed", () => {
+test("classifyVerdict_reports_bar_missed_when_nothing_meaningful_changed", () => {
   const result = classifyVerdict({
     before: metrics({ decisionPoints: 4, nFunctions: 1 }),
     after: metrics({ decisionPoints: 4, nFunctions: 1 }),
     entryChanged: true,
   });
 
-  assert.equal(result.verdict, "no-reduction");
+  assert.equal(result.verdict, "bar-missed");
 });
 
-test("classifyVerdict_reports_no_reduction_when_decision_points_increase", () => {
+test("classifyVerdict_reports_bar_missed_when_decision_points_increase", () => {
   const result = classifyVerdict({
     before: metrics({ decisionPoints: 4, nFunctions: 1 }),
     after: metrics({ decisionPoints: 6, nFunctions: 1 }),
     entryChanged: true,
   });
 
-  assert.equal(result.verdict, "no-reduction");
+  assert.equal(result.verdict, "bar-missed");
 });
