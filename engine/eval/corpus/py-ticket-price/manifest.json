@@ -5,5 +5,6 @@
   "entry": "ticket_price.py",
   "entrySymbol": "ticket_price",
   "task": "Improve ticket_price.py. Keep the public function signature and behavior unchanged.",
+  "tier": "easy",
   "baseline": { "decisionPoints": 10, "functions": 1, "silentHandlers": 0 }
 }

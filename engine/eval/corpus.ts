@@ -2,11 +2,28 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Lang } from "../contract.ts";
-import type { CaseManifest, BaselineMetrics, Probe } from "./eval-contract.ts";
+import type { CaseManifest, BaselineMetrics, Probe, Tier } from "./eval-contract.ts";
 
 type LoadResult = CaseManifest[] | { error: string };
 
 const KNOWN_LANGS: readonly Lang[] = ["python", "typescript", "cpp"];
+const KNOWN_TIERS: readonly Tier[] = ["easy", "hard"];
+const KNOWN_MANIFEST_KEYS = [
+  "id",
+  "lang",
+  "files",
+  "entry",
+  "entrySymbol",
+  "task",
+  "baseline",
+  "tier",
+  "tags",
+  "genuineDpMax",
+] as const;
+
+function isTier(value: unknown): value is Tier {
+  return typeof value === "string" && (KNOWN_TIERS as readonly string[]).includes(value);
+}
 
 function isLang(value: unknown): value is Lang {
   return typeof value === "string" && (KNOWN_LANGS as readonly string[]).includes(value);
@@ -45,6 +62,21 @@ function validateEntry(entry: unknown, files: string[]): { value: string } | { e
   return { value: entry };
 }
 
+interface FileFields {
+  files: string[];
+  entry: string;
+}
+
+function validateFilesAndEntry(raw: Record<string, unknown>): { value: FileFields } | { error: string } {
+  const files = validateFiles(raw.files);
+  if ("error" in files) return files;
+
+  const entry = validateEntry(raw.entry, files.value);
+  if ("error" in entry) return entry;
+
+  return { value: { files: files.value, entry: entry.value } };
+}
+
 function validateId(id: unknown): { value: string } | { error: string } {
   if (typeof id !== "string" || id.length === 0) return { error: "id must be a non-empty string" };
   return { value: id };
@@ -67,6 +99,64 @@ function validateEntrySymbol(entrySymbol: unknown): { value: string } | { error:
   return { value: entrySymbol };
 }
 
+function validateTier(tier: unknown): { value: Tier } | { error: string } {
+  if (!isTier(tier)) return { error: `tier must be "easy" or "hard", got: ${String(tier)}` };
+  return { value: tier };
+}
+
+function validateTags(tags: unknown): { value: string[] | undefined } | { error: string } {
+  if (tags === undefined) return { value: undefined };
+  if (!Array.isArray(tags) || tags.length === 0 || tags.some((t) => typeof t !== "string" || t.length === 0)) {
+    return { error: "tags must be a non-empty array of non-empty strings" };
+  }
+  return { value: tags as string[] };
+}
+
+function validateGenuineDpMax(
+  genuineDpMax: unknown,
+  tier: Tier,
+  baselineDecisionPoints: number,
+): { value: number | undefined } | { error: string } {
+  if (genuineDpMax === undefined) {
+    if (tier === "hard") return { error: "genuineDpMax is required when tier is \"hard\"" };
+    return { value: undefined };
+  }
+  const isValid = typeof genuineDpMax === "number" && Number.isInteger(genuineDpMax) && genuineDpMax >= 0 && genuineDpMax < baselineDecisionPoints;
+  if (!isValid) {
+    return { error: "genuineDpMax must be an integer with 0 <= genuineDpMax < baseline.decisionPoints" };
+  }
+  return { value: genuineDpMax };
+}
+
+function unknownManifestKeys(raw: Record<string, unknown>): string[] {
+  return Object.keys(raw).filter((key) => !(KNOWN_MANIFEST_KEYS as readonly string[]).includes(key));
+}
+
+interface TierFields {
+  tier: Tier;
+  tags?: string[];
+  genuineDpMax?: number;
+}
+
+function validateTierFields(raw: Record<string, unknown>, baselineDecisionPoints: number): { value: TierFields } | { error: string } {
+  const tier = validateTier(raw.tier);
+  if ("error" in tier) return tier;
+
+  const tags = validateTags(raw.tags);
+  if ("error" in tags) return tags;
+
+  const genuineDpMax = validateGenuineDpMax(raw.genuineDpMax, tier.value, baselineDecisionPoints);
+  if ("error" in genuineDpMax) return genuineDpMax;
+
+  return {
+    value: {
+      tier: tier.value,
+      ...(tags.value !== undefined ? { tags: tags.value } : {}),
+      ...(genuineDpMax.value !== undefined ? { genuineDpMax: genuineDpMax.value } : {}),
+    },
+  };
+}
+
 interface ValidatedFields {
   id: string;
   lang: Lang;
@@ -75,6 +165,9 @@ interface ValidatedFields {
   entrySymbol: string;
   task: string;
   baseline: BaselineMetrics;
+  tier: Tier;
+  tags?: string[];
+  genuineDpMax?: number;
 }
 
 function validateFields(raw: Record<string, unknown>): { value: ValidatedFields } | { error: string } {
@@ -84,11 +177,8 @@ function validateFields(raw: Record<string, unknown>): { value: ValidatedFields 
   const lang = validateLang(raw.lang);
   if ("error" in lang) return lang;
 
-  const files = validateFiles(raw.files);
-  if ("error" in files) return files;
-
-  const entry = validateEntry(raw.entry, files.value);
-  if ("error" in entry) return entry;
+  const fileFields = validateFilesAndEntry(raw);
+  if ("error" in fileFields) return fileFields;
 
   const entrySymbol = validateEntrySymbol(raw.entrySymbol);
   if ("error" in entrySymbol) return entrySymbol;
@@ -99,15 +189,19 @@ function validateFields(raw: Record<string, unknown>): { value: ValidatedFields 
   const baseline = validateBaseline(raw.baseline);
   if ("error" in baseline) return baseline;
 
+  const tierFields = validateTierFields(raw, baseline.value.decisionPoints);
+  if ("error" in tierFields) return tierFields;
+
   return {
     value: {
       id: id.value,
       lang: lang.value,
-      files: files.value,
-      entry: entry.value,
+      files: fileFields.value.files,
+      entry: fileFields.value.entry,
       entrySymbol: entrySymbol.value,
       task: task.value,
       baseline: baseline.value,
+      ...tierFields.value,
     },
   };
 }
@@ -117,6 +211,9 @@ function validateManifestShape(raw: unknown): { fields: ValidatedFields } | { er
 
   const fields = validateFields(raw as Record<string, unknown>);
   if ("error" in fields) return fields;
+
+  const unknownKeys = unknownManifestKeys(raw as Record<string, unknown>);
+  if (unknownKeys.length > 0) return { error: `unknown top-level key(s): ${unknownKeys.join(", ")}` };
 
   return { fields: fields.value };
 }

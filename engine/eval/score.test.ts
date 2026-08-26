@@ -48,6 +48,7 @@ function unsupportedLangCorpusDir(caseId: string): string {
       entry: "thing.cpp",
       entrySymbol: "f",
       task: "Improve thing.cpp. Keep the public function signature and behavior unchanged.",
+      tier: "easy",
       baseline: { decisionPoints: 1, functions: 1, silentHandlers: 0 },
     }),
   );
@@ -69,6 +70,7 @@ function importingCorpusDir(caseId: string): string {
       entry: "thing.ts",
       entrySymbol: "f",
       task: "Improve thing.ts. Keep the public function signature and behavior unchanged.",
+      tier: "easy",
       baseline: { decisionPoints: 1, functions: 1, silentHandlers: 0 },
     }),
   );
@@ -168,6 +170,7 @@ function importingPyCorpusDir(caseId: string): string {
       entry: "thing.py",
       entrySymbol: "f",
       task: "Improve thing.py. Keep the public function signature and behavior unchanged.",
+      tier: "easy",
       baseline: { decisionPoints: 1, functions: 1, silentHandlers: 0 },
     }),
   );

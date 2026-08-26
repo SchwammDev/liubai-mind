@@ -5,5 +5,6 @@
   "entry": "validate_order.ts",
   "entrySymbol": "validateOrder",
   "task": "Improve validate_order.ts. Keep the public function signature and behavior unchanged.",
+  "tier": "easy",
   "baseline": { "decisionPoints": 13, "functions": 1, "silentHandlers": 0 }
 }

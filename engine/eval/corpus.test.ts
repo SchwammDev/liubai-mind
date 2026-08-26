@@ -65,6 +65,7 @@ function minimalManifest(over: Partial<Record<string, unknown>> = {}): Record<st
     entrySymbol: "f",
     task: "Improve thing.ts. Keep the public function signature and behavior unchanged.",
     baseline: { decisionPoints: 1, functions: 1, silentHandlers: 0 },
+    tier: "easy",
     ...over,
   };
 }
@@ -99,6 +100,7 @@ function minimalCaseManifest(over: Partial<CaseManifest> = {}): CaseManifest {
     entrySymbol: "parseFlags",
     task: "Improve parse_flags.ts. Keep the public function signature and behavior unchanged.",
     baseline: { decisionPoints: 1, functions: 1, silentHandlers: 0 },
+    tier: "easy",
     probes: [{ args: [[]], returns: {} }],
     ...over,
   };
@@ -156,6 +158,76 @@ test("loadCases_rejects_a_manifest_missing_entrySymbol", () => {
 
   assertRejected(result);
   assert.match(result.error, /no-entry-symbol/);
+});
+
+test("loadCases_rejects_a_manifest_missing_tier", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "no-tier", minimalManifest({ tier: undefined }), minimalFiles());
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /no-tier/);
+});
+
+test("loadCases_rejects_a_manifest_with_an_unknown_tier_value", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "bad-tier", minimalManifest({ tier: "medium" }), minimalFiles());
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /bad-tier/);
+});
+
+test("loadCases_rejects_a_hard_tier_manifest_without_genuineDpMax", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "hard-no-genuine-dp-max", minimalManifest({ tier: "hard" }), minimalFiles());
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /hard-no-genuine-dp-max/);
+});
+
+test("loadCases_rejects_a_genuineDpMax_at_or_above_baseline_decisionPoints", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "genuine-dp-max-too-high", minimalManifest({ tier: "hard", genuineDpMax: 1 }), minimalFiles());
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /genuine-dp-max-too-high/);
+});
+
+test("loadCases_rejects_a_non_integer_genuineDpMax", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "genuine-dp-max-not-integer", minimalManifest({ tier: "hard", genuineDpMax: 0.5 }), minimalFiles());
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /genuine-dp-max-not-integer/);
+});
+
+test("loadCases_rejects_an_empty_tags_array", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "empty-tags", minimalManifest({ tags: [] }), minimalFiles());
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /empty-tags/);
+});
+
+test("loadCases_rejects_an_unknown_top_level_manifest_key", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "unknown-key", minimalManifest({ bogus: "nope" }), minimalFiles());
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /unknown top-level key\(s\): bogus/);
 });
 
 test("loadCases_rejects_a_case_without_probes_json", () => {
@@ -217,6 +289,20 @@ test("loadCases_merges_probes_from_probes_json_into_the_manifest", () => {
 
   assertLoaded(result);
   assert.deepEqual(result[0]?.probes, probes);
+});
+
+function tierFields(kase: CaseManifest | undefined) {
+  return { tier: kase?.tier, tags: kase?.tags, genuineDpMax: kase?.genuineDpMax };
+}
+
+test("loadCases_loads_a_hard_manifest_with_tags_and_genuineDpMax", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "hard-with-extras", minimalManifest({ tier: "hard", tags: ["tricky", "regression"], genuineDpMax: 0 }), minimalFiles());
+
+  const result = loadCases(dir);
+
+  assertLoaded(result);
+  assert.deepEqual(tierFields(result[0]), { tier: "hard", tags: ["tricky", "regression"], genuineDpMax: 0 });
 });
 
 test("loadCases_filters_to_the_requested_ids", () => {
