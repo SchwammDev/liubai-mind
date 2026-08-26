@@ -1,0 +1,12 @@
+{
+  "id": "ts-booking-quote",
+  "lang": "typescript",
+  "files": ["quote_booking.ts.case"],
+  "entry": "quote_booking.ts",
+  "entrySymbol": "quoteBooking",
+  "task": "Improve quote_booking.ts. Keep the public function signature and behavior unchanged.",
+  "tier": "hard",
+  "tags": ["entangled"],
+  "genuineDpMax": 23,
+  "baseline": { "decisionPoints": 48, "functions": 1, "silentHandlers": 0 }
+}

@@ -1,0 +1,122 @@
+export interface QuoteResult {
+  ok: boolean;
+  error?: string;
+  total?: number;
+  policy?: string;
+  line?: string;
+}
+
+interface BookingRequest {
+  category: string;
+  nights: number;
+  guests: number;
+  season: string;
+  loyaltyYears: number;
+  coupon: unknown;
+}
+
+interface CategoryLimits {
+  rate: number;
+  highSurcharge: number;
+  maxNights: number;
+  maxGuests: number;
+}
+
+const LIMITS: Record<string, CategoryLimits> = {
+  standard: { rate: 80, highSurcharge: 30, maxNights: 14, maxGuests: 2 },
+  suite: { rate: 150, highSurcharge: 60, maxNights: 21, maxGuests: 4 },
+  villa: { rate: 300, highSurcharge: 120, maxNights: 28, maxGuests: 8 },
+};
+
+const VILLA_MIN_NIGHTS = 3;
+const VILLA_DEPOSIT = 500;
+const SUITE_EXTRA_BED_FEE = 25;
+const PREFERRED_LOYALTY_YEARS = 3;
+
+export function quoteBooking(raw: unknown): QuoteResult {
+  const parsed = parseRequest(raw);
+  if (typeof parsed === "string") {
+    return { ok: false, error: parsed };
+  }
+  const preferred = isPreferred(parsed);
+  const total = totalFor(parsed, preferred);
+  const policy = preferred ? "flex" : "strict";
+  const line = parsed.category + ":" + String(parsed.nights) + "n:" + String(total) + ":" + policy;
+  return { ok: true, total, policy, line };
+}
+
+function parseRequest(raw: unknown): BookingRequest | string {
+  if (typeof raw !== "object" || raw === null) {
+    return "malformed request";
+  }
+  const req = raw as Record<string, unknown>;
+  const error = fieldError(req);
+  if (error !== null) {
+    return error;
+  }
+  return {
+    category: req.category as string,
+    nights: req.nights as number,
+    guests: req.guests as number,
+    season: req.season as string,
+    loyaltyYears: req.loyaltyYears as number,
+    coupon: req.coupon,
+  };
+}
+
+function fieldError(req: Record<string, unknown>): string | null {
+  if (!isNonNegativeInt(req.loyaltyYears)) {
+    return "bad loyalty";
+  }
+  const limits = LIMITS[req.category as string];
+  if (limits === undefined) {
+    return "unknown category";
+  }
+  if (!isIntInRange(req.nights, 1, limits.maxNights)) {
+    return "bad nights";
+  }
+  if (req.category === "villa" && (req.nights as number) < VILLA_MIN_NIGHTS) {
+    return "villa minimum stay";
+  }
+  if (!isIntInRange(req.guests, 1, limits.maxGuests)) {
+    return "bad guests";
+  }
+  if (!isSeason(req.season)) {
+    return "bad season";
+  }
+  return null;
+}
+
+function isNonNegativeInt(value: unknown): boolean {
+  return Number.isInteger(value) && (value as number) >= 0;
+}
+
+function isIntInRange(value: unknown, min: number, max: number): boolean {
+  return Number.isInteger(value) && (value as number) >= min && (value as number) <= max;
+}
+
+function isSeason(value: unknown): boolean {
+  return value === "low" || value === "high";
+}
+
+function isPreferred(request: BookingRequest): boolean {
+  return request.loyaltyYears >= PREFERRED_LOYALTY_YEARS || request.coupon === "VIP";
+}
+
+function totalFor(request: BookingRequest, preferred: boolean): number {
+  const limits = LIMITS[request.category];
+  let total = limits.rate * request.nights;
+  if (request.season === "high") {
+    total = total + limits.highSurcharge * request.nights;
+  }
+  if (preferred) {
+    total = total - Math.floor(total / 10);
+  }
+  if (request.category === "suite" && request.guests > 2) {
+    total = total + SUITE_EXTRA_BED_FEE;
+  }
+  if (request.category === "villa") {
+    total = total + VILLA_DEPOSIT;
+  }
+  return total;
+}
