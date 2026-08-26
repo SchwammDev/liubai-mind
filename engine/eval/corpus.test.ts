@@ -79,7 +79,7 @@ function minimalManifest(over: Partial<Record<string, unknown>> = {}): Record<st
   };
 }
 
-test("loadCases_loads_all_twelve_committed_cases", () => {
+test("loadCases_loads_all_committed_cases", () => {
   const result = loadCases(CORPUS_DIR);
 
   assertLoaded(result);
@@ -87,6 +87,7 @@ test("loadCases_loads_all_twelve_committed_cases", () => {
   assert.deepEqual(ids, [
     "py-config-loader",
     "py-ingest-bait",
+    "py-membership-renewal",
     "py-password-strength",
     "py-safe-convert",
     "py-status-dispatch",
@@ -527,9 +528,10 @@ async function assertMetricsMatchBaselineForPyCase(id: string, filename: string)
 }
 
 async function assertMainFunctionCcTripsRailForPyCase(id: string, filename: string): Promise<void> {
+  const manifest = loadCaseManifest(id);
   const source = readCaseSource(id, filename);
 
-  const extracted = await pythonExtractor.extract({ path: filename, after: source });
+  const extracted = await pythonExtractor.extract({ path: manifest.entry, after: source });
 
   assertMaxCcExceedsRailThreshold(extracted.functions, "python");
 }
@@ -718,6 +720,22 @@ test(
   },
 );
 
+test(
+  "py_membership_renewal_case_metrics_match_the_committed_baseline",
+  { skip: !venvPythonAvailable() },
+  async () => {
+    await assertMetricsMatchBaselineForPyCase("py-membership-renewal", "renewal.py.case");
+  },
+);
+
+test(
+  "py_membership_renewal_case_main_function_cc_trips_the_cc_rail",
+  { skip: !venvPythonAvailable() },
+  async () => {
+    await assertMainFunctionCcTripsRailForPyCase("py-membership-renewal", "renewal.py.case");
+  },
+);
+
 test("ts_flag_parser_probes_pass_and_fully_cover_the_entry_symbol", async () => {
   await assertProbesAdequateForCase("ts-flag-parser");
 });
@@ -789,6 +807,14 @@ test(
   { skip: !venvPythonAvailable() },
   async () => {
     await assertProbesAdequateForCase("py-ticket-price", [TICKET_PRICE_UNREACHABLE_CLAMP_LINE]);
+  },
+);
+
+test(
+  "py_membership_renewal_probes_pass_and_fully_cover_the_entry_symbol",
+  { skip: !venvPythonAvailable() },
+  async () => {
+    await assertProbesAdequateForCase("py-membership-renewal");
   },
 );
 

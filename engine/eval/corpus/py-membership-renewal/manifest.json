@@ -1,0 +1,12 @@
+{
+  "id": "py-membership-renewal",
+  "lang": "python",
+  "files": ["renewal.py.case"],
+  "entry": "renewal.py",
+  "entrySymbol": "process_renewal",
+  "task": "Improve renewal.py. Keep the public function signature and behavior unchanged.",
+  "tier": "hard",
+  "tags": ["entangled"],
+  "genuineDpMax": 31,
+  "baseline": { "decisionPoints": 45, "functions": 1, "silentHandlers": 0 }
+}
