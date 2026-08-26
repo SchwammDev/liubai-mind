@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+GRACE_DAYS = 30
+LATE_FEE = 15
+REINSTATE_SURCHARGE = 25
+MAX_STRIKES = 3
+TIER_FEES = {"basic": 40, "gold": 90}
+METHODS = ("card", "transfer")
+RENEWABLE_STATUSES = ("active", "lapsed", "suspended")
+
+
+def process_renewal(raw_member: object, raw_payment: object) -> dict:
+    error = _request_error(raw_member, raw_payment)
+    if error is not None:
+        return {"ok": False, "error": error}
+    member = raw_member
+    payment = raw_payment
+    fee, new_status = _renewal_terms(member)
+    if payment["amount"] < fee:
+        return {"ok": False, "error": "insufficient payment"}
+    receipt = payment["method"] + ":" + member["id"] + ":" + new_status + ":" + str(fee)
+    return {"ok": True, "status": new_status, "fee": fee, "receipt": receipt}
+
+
+def _request_error(member: object, payment: object) -> str | None:
+    shape = _shape_error(member, payment)
+    if shape is not None:
+        return shape
+    member_error = _member_error(member)
+    if member_error is not None:
+        return member_error
+    return _detail_error(member, payment)
+
+
+def _shape_error(member: object, payment: object) -> str | None:
+    if not isinstance(member, dict) or not isinstance(payment, dict):
+        return "malformed input"
+    if not all(key in member for key in ("id", "status", "tier")):
+        return "missing member field"
+    if not all(key in payment for key in ("amount", "method")):
+        return "missing payment field"
+    return None
+
+
+def _member_error(member: dict) -> str | None:
+    if not isinstance(member["id"], str) or len(member["id"]) == 0:
+        return "bad member id"
+    if member["status"] == "banned":
+        return "member banned"
+    if member["status"] not in RENEWABLE_STATUSES:
+        return "unknown status"
+    return None
+
+
+def _detail_error(member: dict, payment: dict) -> str | None:
+    if member["tier"] not in TIER_FEES:
+        return "unknown tier"
+    standing = _standing_error(member)
+    if standing is not None:
+        return standing
+    if not isinstance(payment["amount"], int) or payment["amount"] <= 0:
+        return "bad amount"
+    if payment["method"] not in METHODS:
+        return "unsupported method"
+    return None
+
+
+def _standing_error(member: dict) -> str | None:
+    if member["status"] == "lapsed":
+        return _int_field_error(member, "expired_days", "bad expiry")
+    if member["status"] == "suspended":
+        return _strikes_error(member)
+    return None
+
+
+def _strikes_error(member: dict) -> str | None:
+    field_error = _int_field_error(member, "strikes", "bad strikes")
+    if field_error is not None:
+        return field_error
+    if member["strikes"] >= MAX_STRIKES:
+        return "too many strikes"
+    return None
+
+
+def _int_field_error(member: dict, key: str, label: str) -> str | None:
+    if key not in member or not isinstance(member[key], int) or member[key] < 0:
+        return label
+    return None
+
+
+def _renewal_terms(member: dict) -> tuple[int, str]:
+    base = TIER_FEES[member["tier"]]
+    if member["status"] == "active":
+        return base, "renewed"
+    if member["status"] == "lapsed" and member["expired_days"] <= GRACE_DAYS:
+        return base + LATE_FEE, "renewed"
+    if member["status"] == "lapsed":
+        return base + REINSTATE_SURCHARGE, "reinstated"
+    return base + base // 2, "reactivated"
