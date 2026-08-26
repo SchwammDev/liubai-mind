@@ -172,7 +172,7 @@ function rejectFirstThenMutate(): PiSpawner {
 function tempPackedConditionsDir(): string {
   const dir = tempDir("eval-conditions-");
   mkdirSync(join(dir, "packs"), { recursive: true });
-  writeFileSync(join(dir, "packs", "pack.json"), '{"CC_ADVICE":{"typescript":"advice"}}');
+  writeFileSync(join(dir, "packs", "pack.json"), '{"CC_NUDGE":{"typescript":{"first":"advice","rest":"advice"}}}');
   writeFileSync(join(dir, "packed.json"), JSON.stringify({ id: "packed", env: {}, phrasingPack: "packs/pack.json" }));
   return dir;
 }

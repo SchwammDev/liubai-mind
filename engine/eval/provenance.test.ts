@@ -81,7 +81,7 @@ test("buildProvenance_stamps_a_null_pack_hash_when_no_pack_bytes_are_given", () 
 
 test("buildProvenance_stamps_a_sha256_pack_hash_when_pack_bytes_are_given", () => {
   const repo = tempGitRepo();
-  const bytes = '{"CC_ADVICE":{"python":"a"}}';
+  const bytes = '{"CC_NUDGE":{"python":{"first":"f","rest":"r"}}}';
 
   const provenance = buildProvenance({
     conditionId: "rails-default",

@@ -81,7 +81,7 @@ test("loadConditions_rejects_a_condition_with_an_invalid_phrasing_pack", () => {
 test("loadConditions_accepts_a_condition_with_a_valid_phrasing_pack", () => {
   const dir = tempConditionsDir();
   mkdirSync(join(dir, "packs"));
-  writeFileSync(join(dir, "packs", "pack.json"), '{"CC_ADVICE":{"python":"be terse"}}');
+  writeFileSync(join(dir, "packs", "pack.json"), '{"CC_NUDGE":{"python":{"first":"be terse","rest":"be terse"}}}');
   writeCondition(dir, "with-pack.json", { id: "with-pack", env: {}, phrasingPack: "packs/pack.json" });
 
   const result = loadConditions(dir);

@@ -1,0 +1,16 @@
+{
+  "CC_NUDGE": {
+    "python": {
+      "first": "{name} is making too many decisions at once. The smell is not a number — the function has quietly taken on more than one job, and the count is only the symptom. Work through it in order:\n1. Say what the function does in one sentence. If you cannot, it has more than one responsibility; a branch with no place in that sentence wants its own function.\n2. Lift the guards out first: turn precondition checks into early-return guard clauses so the happy path reads flat.\n3. Change the shape, do not just move it: a long if/elif on one value is usually a dispatch dict; branches that are genuinely different jobs become functions named for those jobs.\nDo not split the same tangle into helpers to quiet a checker — that relocates decisions without removing any. The test is whether a first-time reader can hold the function in their head, not whether a number dropped.",
+      "rest": "{name}: same smell — apply the one-sentence test, lift guards first, reshape rather than relocate."
+    },
+    "typescript": {
+      "first": "{name} is making too many decisions at once. The smell is not a number — the function has quietly taken on more than one job, and the count is only the symptom. Work through it in order:\n1. Say what the function does in one sentence. If you cannot, it has more than one responsibility; a branch with no place in that sentence wants its own function.\n2. Lift the guards out first: turn precondition checks into early-return guard clauses so the happy path reads flat.\n3. Change the shape, do not just move it: a long if/else chain on one value is usually a lookup object; branches that are genuinely different jobs become functions named for those jobs.\nDo not split the same tangle into helpers to quiet a checker — that relocates decisions without removing any. The test is whether a first-time reader can hold the function in their head, not whether a number dropped.",
+      "rest": "{name}: same smell — apply the one-sentence test, lift guards first, reshape rather than relocate."
+    },
+    "cpp": {
+      "first": "{name} is making too many decisions at once. The smell is not a number — the function has quietly taken on more than one job, and the count is only the symptom. Work through it in order:\n1. Say what the function does in one sentence. If you cannot, it has more than one responsibility; a branch with no place in that sentence wants its own function.\n2. Lift the guards out first: turn precondition checks into early-return guard clauses so the happy path reads flat.\n3. Change the shape, do not just move it: a long if/else chain on one value is usually a dispatch table; branches that are genuinely different jobs become functions named for those jobs.\nDo not split the same tangle into helpers to quiet a checker — that relocates decisions without removing any. The test is whether a first-time reader can hold the function in their head, not whether a number dropped.",
+      "rest": "{name}: same smell — apply the one-sentence test, lift guards first, reshape rather than relocate."
+    }
+  }
+}
