@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import type { Lang, Extracted } from "../contract.ts";
 import type { CaseManifest } from "./eval-contract.ts";
-import type { RawRow, Metrics, Verdict, GamedReason, JudgeResult, Provenance } from "./eval-contract.ts";
+import type { RawRow, Metrics, Verdict, GamedReason, JudgeResult, Provenance, Tier } from "./eval-contract.ts";
 import { decisionPoints, classifyVerdict } from "./judge.ts";
 import { countSilentHandlers } from "./silent-handlers.ts";
 import { loadCases, declaredFiles } from "./corpus.ts";
@@ -28,6 +28,7 @@ export interface JudgeEnv {
 export interface SummaryRow {
   conditionId: string;
   caseId: string | null;
+  tier: Tier | null;
   counts: Record<Verdict, number>;
   gamedReasons: Record<GamedReason, number>;
   total: number;
@@ -228,10 +229,11 @@ function emptyGamedReasons(): Record<GamedReason, number> {
   return Object.fromEntries(GAMED_REASONS.map((r) => [r, 0])) as Record<GamedReason, number>;
 }
 
-function newSummaryRow(conditionId: string, caseId: string | null, env: JudgeEnv): SummaryRow {
+function newSummaryRow(conditionId: string, caseId: string | null, tier: Tier | null, env: JudgeEnv): SummaryRow {
   return {
     conditionId,
     caseId,
+    tier,
     counts: emptyCounts(),
     gamedReasons: emptyGamedReasons(),
     total: 0,
@@ -279,8 +281,8 @@ interface SummaryBucket {
   dpReduction: DpReductionAccumulator;
 }
 
-function newSummaryBucket(conditionId: string, caseId: string | null, env: JudgeEnv): SummaryBucket {
-  return { row: newSummaryRow(conditionId, caseId, env), dpReduction: newDpReductionAccumulator() };
+function newSummaryBucket(conditionId: string, caseId: string | null, tier: Tier | null, env: JudgeEnv): SummaryBucket {
+  return { row: newSummaryRow(conditionId, caseId, tier, env), dpReduction: newDpReductionAccumulator() };
 }
 
 function addJudgeToBucket(bucket: SummaryBucket, judge: JudgeResult): void {
@@ -292,22 +294,47 @@ function finalizeSummaryRow(bucket: SummaryBucket): SummaryRow {
   return { ...bucket.row, meanDpReduction: meanDpReductionOf(bucket.dpReduction) };
 }
 
-export function aggregate(judged: JudgedRow[], env: JudgeEnv): SummaryRow[] {
-  const rollups = new Map<string, SummaryBucket>();
-  const details = new Map<string, SummaryBucket>();
+interface AggregationBuckets {
+  overall: Map<string, SummaryBucket>;
+  tier: Map<string, SummaryBucket>;
+  detail: Map<string, SummaryBucket>;
+}
+
+function newAggregationBuckets(): AggregationBuckets {
+  return { overall: new Map(), tier: new Map(), detail: new Map() };
+}
+
+function upsertBucket(
+  buckets: Map<string, SummaryBucket>,
+  key: string,
+  conditionId: string,
+  caseId: string | null,
+  tier: Tier | null,
+  env: JudgeEnv,
+  judge: JudgeResult,
+): void {
+  const bucket = buckets.get(key) ?? newSummaryBucket(conditionId, caseId, tier, env);
+  addJudgeToBucket(bucket, judge);
+  buckets.set(key, bucket);
+}
+
+function accumulateRow(buckets: AggregationBuckets, row: RawRow, judge: JudgeResult, tier: Tier | null, env: JudgeEnv): void {
+  upsertBucket(buckets.overall, row.conditionId, row.conditionId, null, null, env, judge);
+  if (tier !== null) {
+    upsertBucket(buckets.tier, detailKey(row.conditionId, tier), row.conditionId, null, tier, env, judge);
+  }
+  upsertBucket(buckets.detail, detailKey(row.conditionId, row.caseId), row.conditionId, row.caseId, tier, env, judge);
+}
+
+export function aggregate(judged: JudgedRow[], env: JudgeEnv, tierByCaseId: Map<string, Tier> = new Map()): SummaryRow[] {
+  const buckets = newAggregationBuckets();
 
   for (const { row, judge } of judged) {
-    const rollup = rollups.get(row.conditionId) ?? newSummaryBucket(row.conditionId, null, env);
-    addJudgeToBucket(rollup, judge);
-    rollups.set(row.conditionId, rollup);
-
-    const key = detailKey(row.conditionId, row.caseId);
-    const detail = details.get(key) ?? newSummaryBucket(row.conditionId, row.caseId, env);
-    addJudgeToBucket(detail, judge);
-    details.set(key, detail);
+    const tier = tierByCaseId.get(row.caseId) ?? null;
+    accumulateRow(buckets, row, judge, tier, env);
   }
 
-  return [...rollups.values(), ...details.values()].map(finalizeSummaryRow);
+  return [...buckets.overall.values(), ...buckets.tier.values(), ...buckets.detail.values()].map(finalizeSummaryRow);
 }
 
 function genuineRate(row: SummaryRow): number {
@@ -322,9 +349,13 @@ function formatMeanDpReduction(value: number | null): string {
   return value === null ? "-" : value.toFixed(1);
 }
 
+function conditionCell(row: SummaryRow): string {
+  return row.tier === null ? row.conditionId : `${row.conditionId} [${row.tier}]`;
+}
+
 function markdownRow(row: SummaryRow): string {
   const c = row.counts;
-  return `| ${row.conditionId} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["bar-missed"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${row.withCreatedFiles} | ${formatPercent(genuineRate(row))} | ${formatMeanDpReduction(row.meanDpReduction)} |`;
+  return `| ${conditionCell(row)} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["bar-missed"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${row.withCreatedFiles} | ${formatPercent(genuineRate(row))} | ${formatMeanDpReduction(row.meanDpReduction)} |`;
 }
 
 export function formatMarkdown(summary: SummaryRow[]): string {
@@ -424,12 +455,16 @@ function genuineRateDeltaLine(current: SummaryRow, compare: SummaryRow): string 
   return `${current.conditionId}: genuine ${compareRate} -> ${currentRate}`;
 }
 
+function isOverallRollup(row: SummaryRow): boolean {
+  return row.caseId === null && row.tier === null;
+}
+
 function genuineRateDeltaSection(currentSummary: SummaryRow[], compareSummary: SummaryRow[]): string[] {
-  const compareByCondition = new Map(compareSummary.filter((r) => r.caseId === null).map((r) => [r.conditionId, r]));
+  const compareByCondition = new Map(compareSummary.filter(isOverallRollup).map((r) => [r.conditionId, r]));
 
   const lines: string[] = [];
   for (const current of currentSummary) {
-    if (current.caseId !== null) continue;
+    if (!isOverallRollup(current)) continue;
     const compare = compareByCondition.get(current.conditionId);
     if (compare === undefined) continue;
     lines.push(genuineRateDeltaLine(current, compare));
@@ -443,6 +478,7 @@ async function buildCompareSection(
   compareRunDir: string,
   corpusDir: string,
   env: JudgeEnv,
+  tierByCaseId: Map<string, Tier>,
 ): Promise<{ text: string } | { error: string }> {
   const compareParsed = readRawJsonl(compareRunDir);
   if ("error" in compareParsed) return compareParsed;
@@ -454,10 +490,38 @@ async function buildCompareSection(
   const provenanceLines = provenanceDiff.length > 0 ? provenanceDiff : ["provenance identical"];
 
   const compareJudged = await judgeRows(compareParsed.rows, corpusDir);
-  const compareSummary = aggregate(compareJudged, env);
+  const compareSummary = aggregate(compareJudged, env, tierByCaseId);
   const deltaLines = genuineRateDeltaSection(currentSummary, compareSummary);
 
   return { text: [...provenanceLines, "", ...deltaLines, ""].join("\n") };
+}
+
+function tierByCaseId(cases: CaseManifest[]): Map<string, Tier> {
+  return new Map(cases.map((c) => [c.id, c.tier]));
+}
+
+function loadTierByCaseId(corpusDir: string): { map: Map<string, Tier> } | { error: string } {
+  const cases = loadCases(corpusDir);
+  if ("error" in cases) return { error: `score: failed to load corpus: ${cases.error}` };
+  return { map: tierByCaseId(cases) };
+}
+
+async function judgeAndSummarize(
+  rows: RawRow[],
+  corpusDir: string,
+  env: JudgeEnv,
+): Promise<{ summary: SummaryRow[]; tierByCaseId: Map<string, Tier> } | { error: string }> {
+  let judged: JudgedRow[];
+  try {
+    judged = await judgeRows(rows, corpusDir);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  const tierMap = loadTierByCaseId(corpusDir);
+  if ("error" in tierMap) return tierMap;
+
+  return { summary: aggregate(judged, env, tierMap.map), tierByCaseId: tierMap.map };
 }
 
 export async function runScore(opts: {
@@ -477,20 +541,16 @@ export async function runScore(opts: {
   const judgeEnv = resolveJudgeEnv(parsedRaw.rows, opts.corpusDir, opts.repoRoot, opts.pythonBin);
   if ("error" in judgeEnv) return { status: ERROR_STATUS, stdout: judgeEnv.error };
 
-  let judged: JudgedRow[];
-  try {
-    judged = await judgeRows(parsedRaw.rows, opts.corpusDir);
-  } catch (err) {
-    return { status: ERROR_STATUS, stdout: err instanceof Error ? err.message : String(err) };
-  }
+  const judgeResult = await judgeAndSummarize(parsedRaw.rows, opts.corpusDir, judgeEnv.env);
+  if ("error" in judgeResult) return { status: ERROR_STATUS, stdout: judgeResult.error };
 
-  const summary = aggregate(judged, judgeEnv.env);
+  const { summary, tierByCaseId: tierMap } = judgeResult;
   writeSummaryJsonl(opts.runDir, summary);
   const table = formatMarkdown(summary);
 
   if (opts.compareRunDir === undefined) return { status: OK_STATUS, stdout: table };
 
-  const compareSection = await buildCompareSection(parsedRaw.rows, summary, opts.compareRunDir, opts.corpusDir, judgeEnv.env);
+  const compareSection = await buildCompareSection(parsedRaw.rows, summary, opts.compareRunDir, opts.corpusDir, judgeEnv.env, tierMap);
   if ("error" in compareSection) return { status: ERROR_STATUS, stdout: compareSection.error };
 
   return { status: OK_STATUS, stdout: `${compareSection.text}\n${table}` };

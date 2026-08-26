@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 import { judgeRows, aggregate, formatMarkdown, compareProvenance, runScore } from "./score.ts";
 import type { SummaryRow, JudgeEnv } from "./score.ts";
-import type { RawRow, Metrics, Verdict, GamedReason, Provenance, JudgeResult } from "./eval-contract.ts";
+import type { RawRow, Metrics, Verdict, GamedReason, Provenance, JudgeResult, Tier } from "./eval-contract.ts";
 import type { JudgedRow } from "./score.ts";
 import { venvPythonAvailable } from "./judge-env.ts";
 import { gitSha } from "./provenance.ts";
@@ -121,6 +121,90 @@ function hardTierCorpusDir(caseId: string, genuineDpMax: number): string {
 
 function hardTierReducedButStillAboveBarSource(): string {
   return "export function f(x: number): number {\n  return x === 0 ? 0 : Math.sign(x);\n}\n";
+}
+
+function mixedTierEasyBeforeSource(): string {
+  return "export function f(x: number): number {\n  if (x > 0) {\n    return x;\n  }\n  return -x;\n}\n";
+}
+
+function mixedTierEasyAfterSource(): string {
+  return "export function f(x: number): number {\n  return Math.abs(x);\n}\n";
+}
+
+function mixedTierHardSource(): string {
+  return "export function f(x: number): number {\n  if (x > 0) {\n    return 1;\n  }\n  if (x < 0) {\n    return -1;\n  }\n  return 0;\n}\n";
+}
+
+function writeMixedTierCase(corpusDir: string, id: string, tier: Tier, source: string, probes: unknown[], genuineDpMax?: number): void {
+  const caseDir = join(corpusDir, id);
+  mkdirSync(caseDir, { recursive: true });
+  writeFileSync(
+    join(caseDir, "manifest.json"),
+    JSON.stringify({
+      id,
+      lang: "typescript",
+      files: ["thing.ts.case"],
+      entry: "thing.ts",
+      entrySymbol: "f",
+      task: "Improve thing.ts. Keep the public function signature and behavior unchanged.",
+      tier,
+      ...(genuineDpMax !== undefined ? { genuineDpMax } : {}),
+      baseline: { decisionPoints: tier === "hard" ? 2 : 1, functions: 1, silentHandlers: 0 },
+    }),
+  );
+  writeFileSync(join(caseDir, "probes.json"), JSON.stringify(probes));
+  writeFileSync(join(caseDir, "thing.ts.case"), source);
+}
+
+function mixedTierCorpusDir(): { corpusDir: string; easyId: string; hardId: string } {
+  const corpusDir = mkdtempSync(join(tmpdir(), "eval-score-corpus-"));
+  const easyId = "mix-easy";
+  const hardId = "mix-hard";
+  writeMixedTierCase(corpusDir, easyId, "easy", mixedTierEasyBeforeSource(), [
+    { args: [3], returns: 3 },
+    { args: [-3], returns: 3 },
+  ]);
+  writeMixedTierCase(
+    corpusDir,
+    hardId,
+    "hard",
+    mixedTierHardSource(),
+    [
+      { args: [1], returns: 1 },
+      { args: [-1], returns: -1 },
+      { args: [0], returns: 0 },
+    ],
+    0,
+  );
+  return { corpusDir, easyId, hardId };
+}
+
+function mixedTierGenuineFixRow(easyId: string): RawRow {
+  return rawRow("rails-default", easyId, { files: { "thing.ts": mixedTierEasyAfterSource() } });
+}
+
+function mixedTierUntouchedRow(hardId: string): RawRow {
+  return rawRow("rails-default", hardId, { files: { "thing.ts": mixedTierHardSource() } });
+}
+
+function writeRawRun(rows: RawRow[]): string {
+  const dir = tempRunDir();
+  writeRawJsonl(dir, rows);
+  return dir;
+}
+
+function assertGenuineRateDeltaLines(stdout: string, expected: string[]): void {
+  const lines = stdout.split("\n").filter((line) => line.startsWith("rails-default:"));
+  assert.deepEqual(lines, expected);
+}
+
+function tierMap(entries: [string, Tier][]): Map<string, Tier> {
+  return new Map(entries);
+}
+
+function assertTierRollupTotal(summary: SummaryRow[], conditionId: string, tier: Tier, expectedTotal: number): void {
+  const rollup = summary.find((row) => row.conditionId === conditionId && row.caseId === null && row.tier === tier)!;
+  assert.equal(rollup.total, expectedTotal);
 }
 
 function metrics(over: Partial<Metrics> = {}): Metrics {
@@ -251,6 +335,7 @@ function summaryRow(conditionId: string, caseId: string | null, counts: Partial<
   return {
     conditionId,
     caseId,
+    tier: null,
     counts: { ...emptyVerdictCounts(), ...counts },
     gamedReasons: { "helper-split": 0, "silent-handler": 0 },
     total,
@@ -364,6 +449,44 @@ test("aggregate_computes_mean_dp_reduction_independently_per_case_detail_row", (
   assert.equal(meanDpReductionOf(summary, "rails-default", "case-b"), 3);
 });
 
+test("aggregate_emits_a_tier_rollup_per_condition_and_tier_present_in_the_data", () => {
+  const judged = [judgedRow("rails-default", "case-a", "genuine-fix"), judgedRow("rails-default", "case-b", "gamed", "helper-split")];
+  const tiers = tierMap([["case-a", "easy"], ["case-b", "hard"]]);
+
+  const summary = aggregate(judged, judgeEnv(), tiers);
+
+  assertTierRollupTotal(summary, "rails-default", "easy", 1);
+  assertTierRollupTotal(summary, "rails-default", "hard", 1);
+});
+
+test("aggregate_omits_a_tier_rollup_for_a_tier_absent_from_the_data", () => {
+  const judged = [judgedRow("rails-default", "case-a", "genuine-fix")];
+  const tiers = tierMap([["case-a", "easy"]]);
+
+  const summary = aggregate(judged, judgeEnv(), tiers);
+
+  assert.equal(summary.some((row) => row.tier === "hard"), false);
+});
+
+test("aggregate_stamps_case_detail_rows_with_the_cases_tier", () => {
+  const judged = [judgedRow("rails-default", "case-a", "genuine-fix")];
+  const tiers = tierMap([["case-a", "hard"]]);
+
+  const summary = aggregate(judged, judgeEnv(), tiers);
+
+  const detail = summary.find((row) => row.caseId === "case-a")!;
+  assert.equal(detail.tier, "hard");
+});
+
+test("aggregate_orders_overall_rollup_before_tier_rollups_before_case_details", () => {
+  const judged = [judgedRow("rails-default", "case-a", "genuine-fix")];
+  const tiers = tierMap([["case-a", "easy"]]);
+
+  const summary = aggregate(judged, judgeEnv(), tiers);
+
+  assert.deepEqual(summary.map((row) => [row.caseId, row.tier]), [[null, null], [null, "easy"], ["case-a", "easy"]]);
+});
+
 test("formatMarkdown_renders_one_line_per_condition_with_counts_and_genuine_rate", () => {
   const summary: SummaryRow[] = [
     summaryRow("rails-default", null, { "genuine-fix": 3, gamed: 1 }, 4),
@@ -411,6 +534,14 @@ test("formatMarkdown_renders_a_dash_for_a_null_mean_dp_cut", () => {
   const table = formatMarkdown(summary);
 
   assertConditionLine(table, "rails-default", "0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0\\.0% \\| -");
+});
+
+test("formatMarkdown_suffixes_the_condition_cell_with_the_tier_for_a_tier_rollup", () => {
+  const summary: SummaryRow[] = [{ ...summaryRow("rails-default", null, { "genuine-fix": 1 }, 1), tier: "easy" }];
+
+  const table = formatMarkdown(summary);
+
+  assert.match(table, /\| rails-default \[easy\] \| 1 \| 1 \|/);
 });
 
 test("compareProvenance_lists_differing_fields_between_two_runs", () => {
@@ -728,6 +859,17 @@ test("runScore_with_compareRunDir_prints_provenance_diff_before_the_tables", asy
   const diffIndex = result.stdout.indexOf("model differs");
   const tableIndex = result.stdout.indexOf("| condition |");
   assert.ok(diffIndex >= 0 && tableIndex > diffIndex);
+});
+
+test("runScore_with_compareRunDir_matches_the_genuine_rate_delta_on_the_overall_rollup_not_a_tier_rollup", async () => {
+  const { corpusDir, easyId, hardId } = mixedTierCorpusDir();
+  const rows = [mixedTierGenuineFixRow(easyId), mixedTierUntouchedRow(hardId)];
+  const runA = writeRawRun(rows);
+  const runB = writeRawRun(rows);
+
+  const result = await runScore({ runDir: runA, corpusDir, repoRoot: REPO_ROOT, compareRunDir: runB });
+
+  assertGenuineRateDeltaLines(result.stdout, ["rails-default: genuine 50.0% -> 50.0%"]);
 });
 
 function readSummaryRows(runDir: string): SummaryRow[] {

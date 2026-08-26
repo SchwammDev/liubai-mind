@@ -2,9 +2,20 @@ import { join } from "node:path";
 
 import { runCollect } from "./collect.ts";
 import { runScore } from "./score.ts";
+import type { Tier } from "./eval-contract.ts";
 
 export type ParsedCli =
-  | { cmd: "collect"; run: string; model: string; reps: number; parallel: number; timeoutMs?: number; cases?: string[]; conditions?: string[] }
+  | {
+      cmd: "collect";
+      run: string;
+      model: string;
+      reps: number;
+      parallel: number;
+      timeoutMs?: number;
+      cases?: string[];
+      conditions?: string[];
+      tier?: Tier;
+    }
   | { cmd: "score"; run: string; compare?: string }
   | { error: string };
 
@@ -19,7 +30,7 @@ const DEFAULT_PARALLEL = 1;
 
 const USAGE = [
   "Usage:",
-  "  liubai eval collect --run <name> --model <provider/id> [--reps N] [--parallel N] [--timeout-ms N] [--case id]... [--condition id]...",
+  "  liubai eval collect --run <name> --model <provider/id> [--reps N] [--parallel N] [--timeout-ms N] [--case id]... [--condition id]... [--tier <easy|hard>]",
   "  liubai eval score --run <name> [--compare <otherRunName>]",
 ].join("\n");
 
@@ -33,6 +44,7 @@ interface CollectAccum {
   repsRaw?: string;
   parallelRaw?: string;
   timeoutMsRaw?: string;
+  tierRaw?: string;
   cases: string[];
   conditions: string[];
 }
@@ -65,6 +77,7 @@ function collectFlagHandlers(): FlagHandlers<CollectAccum> {
     "--timeout-ms": (a, v) => { a.timeoutMsRaw = v; },
     "--case": (a, v) => { a.cases.push(v); },
     "--condition": (a, v) => { a.conditions.push(v); },
+    "--tier": (a, v) => { a.tierRaw = v; },
   };
 }
 
@@ -89,13 +102,20 @@ function parseParallel(raw: string | undefined): { value: number } | { error: st
   return { value: n };
 }
 
-function collectOptionalFields(accum: CollectAccum): Partial<Extract<ParsedCli, { cmd: "collect" }>> {
+function parseTier(raw: string | undefined): { value: Tier | undefined } | { error: string } {
+  if (raw === undefined) return { value: undefined };
+  if (raw === "easy" || raw === "hard") return { value: raw };
+  return { error: `--tier must be "easy" or "hard", got: ${raw}` };
+}
+
+function collectOptionalFields(accum: CollectAccum, tier: Tier | undefined): Partial<Extract<ParsedCli, { cmd: "collect" }>> {
   const timeoutMs = accum.timeoutMsRaw === undefined ? undefined : Number(accum.timeoutMsRaw);
 
   return {
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     ...(accum.cases.length > 0 ? { cases: accum.cases } : {}),
     ...(accum.conditions.length > 0 ? { conditions: accum.conditions } : {}),
+    ...(tier !== undefined ? { tier } : {}),
   };
 }
 
@@ -109,13 +129,16 @@ function buildCollectResult(accum: CollectAccum): ParsedCli {
   const parallel = parseParallel(accum.parallelRaw);
   if ("error" in parallel) return usageError(parallel.error);
 
+  const tier = parseTier(accum.tierRaw);
+  if ("error" in tier) return usageError(tier.error);
+
   return {
     cmd: "collect",
     run: accum.run,
     model: accum.model,
     reps: reps.value,
     parallel: parallel.value,
-    ...collectOptionalFields(accum),
+    ...collectOptionalFields(accum, tier.value),
   };
 }
 
@@ -161,6 +184,7 @@ async function runCollectCmd(
     ...(parsed.timeoutMs !== undefined ? { timeoutMs: parsed.timeoutMs } : {}),
     ...(parsed.cases !== undefined ? { cases: parsed.cases } : {}),
     ...(parsed.conditions !== undefined ? { conditions: parsed.conditions } : {}),
+    ...(parsed.tier !== undefined ? { tier: parsed.tier } : {}),
   });
 
   return {

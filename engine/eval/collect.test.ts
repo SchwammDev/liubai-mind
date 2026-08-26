@@ -9,7 +9,7 @@ import type { CollectOpts } from "./collect.ts";
 import type { RunSpec, RunOutcome, PiSpawner } from "./spawner.ts";
 import { gitSha } from "./provenance.ts";
 import { SNAPSHOT_FILE_CAP_BYTES } from "./snapshot.ts";
-import type { RawRow } from "./eval-contract.ts";
+import type { RawRow, Tier } from "./eval-contract.ts";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 
@@ -174,6 +174,34 @@ function tempPackedConditionsDir(): string {
   mkdirSync(join(dir, "packs"), { recursive: true });
   writeFileSync(join(dir, "packs", "pack.json"), '{"CC_ADVICE":{"typescript":"advice"}}');
   writeFileSync(join(dir, "packed.json"), JSON.stringify({ id: "packed", env: {}, phrasingPack: "packs/pack.json" }));
+  return dir;
+}
+
+function writeMinimalCase(corpusDir: string, id: string, tier: Tier, genuineDpMax?: number): void {
+  const caseDir = join(corpusDir, id);
+  mkdirSync(caseDir, { recursive: true });
+  writeFileSync(
+    join(caseDir, "manifest.json"),
+    JSON.stringify({
+      id,
+      lang: "typescript",
+      files: ["thing.ts.case"],
+      entry: "thing.ts",
+      entrySymbol: "f",
+      task: "Improve thing.ts. Keep the public function signature and behavior unchanged.",
+      baseline: { decisionPoints: 1, functions: 1, silentHandlers: 0 },
+      tier,
+      ...(genuineDpMax !== undefined ? { genuineDpMax } : {}),
+    }),
+  );
+  writeFileSync(join(caseDir, "probes.json"), JSON.stringify([{ args: [1], returns: 2 }]));
+  writeFileSync(join(caseDir, "thing.ts.case"), "export function f(x: number): number {\n  return x;\n}\n");
+}
+
+function twoTierCorpusDir(): string {
+  const dir = tempDir("eval-corpus-");
+  writeMinimalCase(dir, "case-easy", "easy");
+  writeMinimalCase(dir, "case-hard", "hard", 0);
   return dir;
 }
 
@@ -453,6 +481,32 @@ test("runCollect_rejects_a_non_positive_parallel_value_with_a_load_error", async
   assert.equal(result.status, 1);
   assert.equal(calls.length, 0);
   assert.match(result.stderr, /parallel/);
+});
+
+function assertOnlyCasesRan(runDir: string, expectedCaseIds: string[]): void {
+  assert.deepEqual(readRawRows(runDir).map((row) => row.caseId), expectedCaseIds);
+}
+
+test("runCollect_keeps_only_cases_matching_the_tier_filter", async () => {
+  const corpusDir = twoTierCorpusDir();
+  const { spawner } = recordingSpawner();
+  const opts = baseOpts({ corpusDir, conditions: ["control"], tier: "easy", spawner });
+
+  const result = await runCollect(opts);
+
+  assertRawRowCounts(result, 1, 0);
+  assertOnlyCasesRan(opts.runDir, ["case-easy"]);
+});
+
+test("runCollect_reports_a_load_error_when_the_tier_filter_matches_no_cases", async () => {
+  const { spawner, calls } = recordingSpawner();
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], tier: "hard", spawner });
+
+  const result = await runCollect(opts);
+
+  assert.equal(result.status, 1);
+  assert.equal(calls.length, 0);
+  assert.match(result.stderr, /no cases with tier: hard/);
 });
 
 function assertBothDeclaredAndExtraFileCaptured(files: Record<string, string>, extraFilename: string, extraContent: string): void {
