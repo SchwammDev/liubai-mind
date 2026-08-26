@@ -98,6 +98,7 @@ test("loadCases_loads_all_committed_cases", () => {
     "ts-event-router",
     "ts-flag-parser",
     "ts-grade-bands",
+    "ts-order-fulfillment",
     "ts-order-validator",
     "ts-retry-config",
     "ts-shipping-cost",
@@ -676,6 +677,14 @@ test("ts_telemetry_pipeline_case_main_function_cc_trips_the_cc_rail", async () =
   await assertMainFunctionCcTripsRailForTsCase("ts-telemetry-pipeline", "process_batch.ts.case");
 });
 
+test("ts_order_fulfillment_case_metrics_match_the_committed_baseline", async () => {
+  await assertMetricsMatchBaselineForTsCase("ts-order-fulfillment", "process_events.ts.case");
+});
+
+test("ts_order_fulfillment_case_main_function_cc_trips_the_cc_rail", async () => {
+  await assertMainFunctionCcTripsRailForTsCase("ts-order-fulfillment", "process_events.ts.case");
+});
+
 test(
   "py_password_strength_case_metrics_match_the_committed_baseline",
   { skip: !venvPythonAvailable() },
@@ -818,6 +827,10 @@ test("ts_booking_quote_probes_pass_and_fully_cover_the_entry_symbol", async () =
 
 test("ts_telemetry_pipeline_probes_pass_and_fully_cover_the_entry_symbol", async () => {
   await assertProbesAdequateForCase("ts-telemetry-pipeline");
+});
+
+test("ts_order_fulfillment_probes_pass_and_fully_cover_the_entry_symbol", async () => {
+  await assertProbesAdequateForCase("ts-order-fulfillment");
 });
 
 test(

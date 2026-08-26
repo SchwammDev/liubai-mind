@@ -1,0 +1,82 @@
+[
+  { "args": [5], "returns": { "ok": false, "error": "malformed input" } },
+  { "args": [{ "stock": 5, "events": [] }], "returns": { "ok": false, "error": "bad stock" } },
+  { "args": [{ "stock": { "a": -1 }, "events": [] }], "returns": { "ok": false, "error": "bad stock" } },
+  { "args": [{ "stock": {}, "events": 5 }], "returns": { "ok": false, "error": "bad events" } },
+  { "args": [{ "stock": {}, "events": [5] }], "returns": { "ok": false, "error": "event 0: malformed" } },
+  { "args": [{ "stock": {}, "events": [{ "type": "teleport" }] }], "returns": { "ok": false, "error": "event 0: bad type" } },
+  { "args": [{ "stock": {}, "events": [{ "type": "order", "id": "", "item": "a", "qty": 1 }] }], "returns": { "ok": false, "error": "event 0: bad id" } },
+  { "args": [{ "stock": { "a": 2 }, "events": [{ "type": "order", "id": "o1", "item": "a", "qty": 1 }, { "type": "order", "id": "o1", "item": "a", "qty": 1 }] }], "returns": { "ok": false, "error": "event 1: duplicate order" } },
+  { "args": [{ "stock": {}, "events": [{ "type": "order", "id": "x", "item": "", "qty": 1 }] }], "returns": { "ok": false, "error": "event 0: bad item" } },
+  { "args": [{ "stock": {}, "events": [{ "type": "order", "id": "x", "item": "a", "qty": 0 }] }], "returns": { "ok": false, "error": "event 0: bad qty" } },
+  { "args": [{ "stock": {}, "events": [{ "type": "cancel", "id": 5 }] }], "returns": { "ok": false, "error": "event 0: bad id" } },
+  { "args": [{ "stock": {}, "events": [{ "type": "ship" }] }], "returns": { "ok": false, "error": "event 0: bad id" } },
+  { "args": [{ "stock": {}, "events": [{ "type": "ship", "id": "x", "qty": "2" }] }], "returns": { "ok": false, "error": "event 0: bad qty" } },
+  { "args": [{ "stock": {}, "events": [{ "type": "restock", "item": 5, "qty": 1 }] }], "returns": { "ok": false, "error": "event 0: bad item" } },
+  { "args": [{ "stock": {}, "events": [{ "type": "restock", "item": "a", "qty": 0 }] }], "returns": { "ok": false, "error": "event 0: bad qty" } },
+  { "args": [{ "stock": {}, "events": [{ "type": "expire", "id": "" }] }], "returns": { "ok": false, "error": "event 0: bad id" } },
+  {
+    "args": [{
+      "stock": { "widget": 10, "gear": 3 },
+      "events": [
+        { "type": "order", "id": "o1", "item": "widget", "qty": 6 },
+        { "type": "order", "id": "o2", "item": "widget", "qty": 5 },
+        { "type": "order", "id": "o3", "item": "gear", "qty": 2 },
+        { "type": "order", "id": "o4", "item": "gear", "qty": 3 },
+        { "type": "cancel", "id": "o1" },
+        { "type": "ship", "id": "o2", "qty": 2 },
+        { "type": "ship", "id": "o2" },
+        { "type": "expire", "id": "o3" },
+        { "type": "ship", "id": "o4" },
+        { "type": "order", "id": "o5", "item": "gizmo", "qty": 1 },
+        { "type": "restock", "item": "gizmo", "qty": 2 },
+        { "type": "cancel", "id": "o9" },
+        { "type": "ship", "id": "o5", "qty": 9 }
+      ]
+    }],
+    "returns": {
+      "ok": true,
+      "orders": { "o1": "cancelled", "o2": "shipped", "o3": "expired", "o4": "shipped", "o5": "reserved" },
+      "stock": { "widget": 5, "gear": 0, "gizmo": 1 },
+      "queue": [],
+      "rejected": 2,
+      "report": "orders=5;reserved=1;backordered=0;shipped=2;partial=0;cancelled=1;expired=1;rejected=2"
+    }
+  },
+  {
+    "args": [{
+      "stock": { "bolt": 1 },
+      "events": [
+        { "type": "order", "id": "b1", "item": "bolt", "qty": 5 },
+        { "type": "order", "id": "b2", "item": "bolt", "qty": 2 },
+        { "type": "restock", "item": "bolt", "qty": 2 },
+        { "type": "cancel", "id": "b1" },
+        { "type": "ship", "id": "b2", "qty": 1 },
+        { "type": "cancel", "id": "b2" },
+        { "type": "ship", "id": "b3" },
+        { "type": "expire", "id": "b1" },
+        { "type": "order", "id": "b4", "item": "bolt", "qty": 1 },
+        { "type": "ship", "id": "b4", "qty": 1 }
+      ]
+    }],
+    "returns": {
+      "ok": true,
+      "orders": { "b1": "cancelled", "b2": "cancelled", "b4": "shipped" },
+      "stock": { "bolt": 1 },
+      "queue": [],
+      "rejected": 2,
+      "report": "orders=3;reserved=0;backordered=0;shipped=1;partial=0;cancelled=2;expired=0;rejected=2"
+    }
+  },
+  {
+    "args": [{ "stock": {}, "events": [] }],
+    "returns": {
+      "ok": true,
+      "orders": {},
+      "stock": {},
+      "queue": [],
+      "rejected": 0,
+      "report": "orders=0;reserved=0;backordered=0;shipped=0;partial=0;cancelled=0;expired=0;rejected=0"
+    }
+  }
+]

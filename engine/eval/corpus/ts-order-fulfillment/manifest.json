@@ -1,0 +1,12 @@
+{
+  "id": "ts-order-fulfillment",
+  "lang": "typescript",
+  "files": ["process_events.ts.case"],
+  "entry": "process_events.ts",
+  "entrySymbol": "processEvents",
+  "task": "Improve process_events.ts. Keep the public function signature and behavior unchanged.",
+  "tier": "hard",
+  "tags": ["entangled", "distractor", "coupled-state", "deletion-bait"],
+  "genuineDpMax": 52,
+  "baseline": { "decisionPoints": 60, "functions": 3, "silentHandlers": 0 }
+}
