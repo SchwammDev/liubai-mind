@@ -1,0 +1,279 @@
+interface Want {
+  item: string;
+  qty: number;
+}
+
+interface FulfillmentState {
+  stock: Record<string, number>;
+  orders: Record<string, string>;
+  reserved: Record<string, Want>;
+  pendingWants: Record<string, Want>;
+  queue: string[];
+  rejected: number;
+}
+
+export interface FulfillmentResult {
+  ok: boolean;
+  error?: string;
+  orders?: Record<string, string>;
+  stock?: Record<string, number>;
+  queue?: string[];
+  rejected?: number;
+  report?: string;
+}
+
+export function processEvents(raw: unknown): FulfillmentResult {
+  const inputError = validateInput(raw);
+  if (inputError !== null) {
+    return { ok: false, error: inputError };
+  }
+  const input = raw as { stock: Record<string, number>; events: unknown[] };
+  const state = newState(input.stock);
+  for (let index = 0; index < input.events.length; index++) {
+    const error = eventError(input.events[index], index, state.orders);
+    if (error !== null) {
+      return { ok: false, error };
+    }
+    applyEvent(state, input.events[index] as Record<string, unknown>);
+  }
+  return {
+    ok: true,
+    orders: state.orders,
+    stock: state.stock,
+    queue: state.queue,
+    rejected: state.rejected,
+    report: buildReport(state.orders, state.rejected),
+  };
+}
+
+function validateInput(raw: unknown): string | null {
+  if (typeof raw !== "object" || raw === null) {
+    return "malformed input";
+  }
+  const input = raw as Record<string, unknown>;
+  const stockError = validateStock(input.stock);
+  if (stockError !== null) {
+    return stockError;
+  }
+  if (!Array.isArray(input.events)) {
+    return "bad events";
+  }
+  return null;
+}
+
+function validateStock(stock: unknown): string | null {
+  if (typeof stock !== "object" || stock === null) {
+    return "bad stock";
+  }
+  const rawStock = stock as Record<string, unknown>;
+  for (const item of Object.keys(rawStock)) {
+    if (!Number.isInteger(rawStock[item]) || (rawStock[item] as number) < 0) {
+      return "bad stock";
+    }
+  }
+  return null;
+}
+
+function newState(initialStock: Record<string, number>): FulfillmentState {
+  const stock: Record<string, number> = {};
+  for (const item of Object.keys(initialStock)) {
+    stock[item] = initialStock[item];
+  }
+  return { stock, orders: {}, reserved: {}, pendingWants: {}, queue: [], rejected: 0 };
+}
+
+function eventError(entry: unknown, index: number, orders: Record<string, string>): string | null {
+  if (typeof entry !== "object" || entry === null) {
+    return "event " + index + ": malformed";
+  }
+  const event = entry as Record<string, unknown>;
+  const detail = eventDetailError(event, orders);
+  if (detail !== null) {
+    return "event " + index + ": " + detail;
+  }
+  return null;
+}
+
+function eventDetailError(event: Record<string, unknown>, orders: Record<string, string>): string | null {
+  if (event.type === "order") {
+    return orderError(event, orders);
+  }
+  if (event.type === "cancel" || event.type === "expire") {
+    return idError(event);
+  }
+  if (event.type === "ship") {
+    return shipError(event);
+  }
+  if (event.type === "restock") {
+    return restockError(event);
+  }
+  return "bad type";
+}
+
+function orderError(event: Record<string, unknown>, orders: Record<string, string>): string | null {
+  if (!isNonEmptyString(event.id)) {
+    return "bad id";
+  }
+  if (orders[event.id as string] !== undefined) {
+    return "duplicate order";
+  }
+  if (!isNonEmptyString(event.item)) {
+    return "bad item";
+  }
+  if (!isPositiveInt(event.qty)) {
+    return "bad qty";
+  }
+  return null;
+}
+
+function idError(event: Record<string, unknown>): string | null {
+  if (!isNonEmptyString(event.id)) {
+    return "bad id";
+  }
+  return null;
+}
+
+function shipError(event: Record<string, unknown>): string | null {
+  if (!isNonEmptyString(event.id)) {
+    return "bad id";
+  }
+  if (event.qty !== undefined && !isPositiveInt(event.qty)) {
+    return "bad qty";
+  }
+  return null;
+}
+
+function restockError(event: Record<string, unknown>): string | null {
+  if (!isNonEmptyString(event.item)) {
+    return "bad item";
+  }
+  if (!isPositiveInt(event.qty)) {
+    return "bad qty";
+  }
+  return null;
+}
+
+function isNonEmptyString(value: unknown): boolean {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isPositiveInt(value: unknown): boolean {
+  return Number.isInteger(value) && (value as number) >= 1;
+}
+
+function availableOf(stock: Record<string, number>, item: string): number {
+  return stock[item] === undefined ? 0 : stock[item];
+}
+
+function applyEvent(state: FulfillmentState, event: Record<string, unknown>): void {
+  if (event.type === "order") {
+    handleOrder(state, event.id as string, event.item as string, event.qty as number);
+    return;
+  }
+  if (event.type === "cancel") {
+    handleRelease(state, event.id as string, "cancelled");
+    return;
+  }
+  if (event.type === "ship") {
+    handleShip(state, event.id as string, event.qty as number | undefined);
+    return;
+  }
+  if (event.type === "restock") {
+    handleRestock(state, event.item as string, event.qty as number);
+    return;
+  }
+  handleRelease(state, event.id as string, "expired");
+}
+
+function handleOrder(state: FulfillmentState, id: string, item: string, qty: number): void {
+  const available = availableOf(state.stock, item);
+  if (available >= qty) {
+    state.stock[item] = available - qty;
+    state.reserved[id] = { item, qty };
+    state.orders[id] = "reserved";
+    return;
+  }
+  state.queue.push(id);
+  state.pendingWants[id] = { item, qty };
+  state.orders[id] = "backordered";
+}
+
+function handleRelease(state: FulfillmentState, id: string, status: string): void {
+  if (state.reserved[id] !== undefined) {
+    const holding = state.reserved[id];
+    state.stock[holding.item] = availableOf(state.stock, holding.item) + holding.qty;
+    delete state.reserved[id];
+    state.orders[id] = status;
+    drainBackorders(state);
+    return;
+  }
+  if (status === "cancelled" && state.orders[id] === "backordered") {
+    state.queue.splice(state.queue.indexOf(id), 1);
+    delete state.pendingWants[id];
+    state.orders[id] = "cancelled";
+    return;
+  }
+  state.rejected = state.rejected + 1;
+}
+
+function handleShip(state: FulfillmentState, id: string, qty: number | undefined): void {
+  const holding = state.reserved[id];
+  if (holding === undefined) {
+    state.rejected = state.rejected + 1;
+    return;
+  }
+  if (qty === undefined || qty === holding.qty) {
+    delete state.reserved[id];
+    state.orders[id] = "shipped";
+    return;
+  }
+  if (qty < holding.qty) {
+    holding.qty = holding.qty - qty;
+    state.orders[id] = "partial";
+    return;
+  }
+  state.rejected = state.rejected + 1;
+}
+
+function handleRestock(state: FulfillmentState, item: string, qty: number): void {
+  state.stock[item] = availableOf(state.stock, item) + qty;
+  drainBackorders(state);
+}
+
+function drainBackorders(state: FulfillmentState): void {
+  for (let position = 0; position < state.queue.length; position++) {
+    const pendingId = state.queue[position];
+    const want = state.pendingWants[pendingId];
+    const onHand = availableOf(state.stock, want.item);
+    if (onHand >= want.qty) {
+      state.stock[want.item] = onHand - want.qty;
+      state.reserved[pendingId] = { item: want.item, qty: want.qty };
+      state.orders[pendingId] = "reserved";
+      delete state.pendingWants[pendingId];
+      state.queue.splice(position, 1);
+      position = position - 1;
+    }
+  }
+}
+
+const STATUSES = ["reserved", "backordered", "shipped", "partial", "cancelled", "expired"];
+
+function statusCounts(orders: Record<string, string>): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const status of STATUSES) {
+    counts[status] = 0;
+  }
+  for (const id of Object.keys(orders)) {
+    counts[orders[id]] = counts[orders[id]] + 1;
+  }
+  return counts;
+}
+
+function buildReport(orders: Record<string, string>, rejected: number): string {
+  const counts = statusCounts(orders);
+  let line = "orders=" + Object.keys(orders).length;
+  for (const status of STATUSES) {
+    line = line + ";" + status + "=" + counts[status];
+  }
+  return line + ";rejected=" + rejected;
+}

@@ -1,0 +1,202 @@
+interface Want {
+  item: string;
+  qty: number;
+}
+
+export interface FulfillmentResult {
+  ok: boolean;
+  error?: string;
+  orders?: Record<string, string>;
+  stock?: Record<string, number>;
+  queue?: string[];
+  rejected?: number;
+  report?: string;
+}
+
+export function processEvents(raw: unknown): FulfillmentResult {
+  if (typeof raw !== "object" || raw === null) {
+    return { ok: false, error: "malformed input" };
+  }
+  const input = raw as Record<string, unknown>;
+  if (typeof input.stock !== "object" || input.stock === null) {
+    return { ok: false, error: "bad stock" };
+  }
+  const stock: Record<string, number> = {};
+  const rawStock = input.stock as Record<string, unknown>;
+  for (const item of Object.keys(rawStock)) {
+    if (!Number.isInteger(rawStock[item]) || (rawStock[item] as number) < 0) {
+      return { ok: false, error: "bad stock" };
+    }
+    stock[item] = rawStock[item] as number;
+  }
+  if (!Array.isArray(input.events)) {
+    return { ok: false, error: "bad events" };
+  }
+
+  const orders: Record<string, string> = {};
+  const reserved: Record<string, Want> = {};
+  const pendingWants: Record<string, Want> = {};
+  const queue: string[] = [];
+  let rejected = 0;
+
+  for (let index = 0; index < input.events.length; index++) {
+    const event = input.events[index] as Record<string, unknown>;
+    if (typeof event !== "object" || event === null) {
+      return { ok: false, error: "event " + index + ": malformed" };
+    }
+
+    if (event.type === "order") {
+      if (typeof event.id !== "string" || event.id.length === 0) {
+        return { ok: false, error: "event " + index + ": bad id" };
+      }
+      if (orders[event.id] !== undefined) {
+        return { ok: false, error: "event " + index + ": duplicate order" };
+      }
+      if (typeof event.item !== "string" || event.item.length === 0) {
+        return { ok: false, error: "event " + index + ": bad item" };
+      }
+      if (!Number.isInteger(event.qty) || (event.qty as number) < 1) {
+        return { ok: false, error: "event " + index + ": bad qty" };
+      }
+      const available = stock[event.item] === undefined ? 0 : stock[event.item];
+      if (available >= (event.qty as number)) {
+        stock[event.item] = available - (event.qty as number);
+        reserved[event.id] = { item: event.item, qty: event.qty as number };
+        orders[event.id] = "reserved";
+      } else {
+        queue.push(event.id);
+        pendingWants[event.id] = { item: event.item, qty: event.qty as number };
+        orders[event.id] = "backordered";
+      }
+    } else if (event.type === "cancel") {
+      if (typeof event.id !== "string" || event.id.length === 0) {
+        return { ok: false, error: "event " + index + ": bad id" };
+      }
+      if (reserved[event.id] !== undefined) {
+        const holding = reserved[event.id];
+        const back = stock[holding.item] === undefined ? 0 : stock[holding.item];
+        stock[holding.item] = back + holding.qty;
+        delete reserved[event.id];
+        orders[event.id] = "cancelled";
+        for (let position = 0; position < queue.length; position++) {
+          const pendingId = queue[position];
+          const want = pendingWants[pendingId];
+          const onHand = stock[want.item] === undefined ? 0 : stock[want.item];
+          if (onHand >= want.qty) {
+            stock[want.item] = onHand - want.qty;
+            reserved[pendingId] = { item: want.item, qty: want.qty };
+            orders[pendingId] = "reserved";
+            delete pendingWants[pendingId];
+            queue.splice(position, 1);
+            position = position - 1;
+          }
+        }
+      } else if (orders[event.id] === "backordered") {
+        queue.splice(queue.indexOf(event.id), 1);
+        delete pendingWants[event.id];
+        orders[event.id] = "cancelled";
+      } else {
+        rejected = rejected + 1;
+      }
+    } else if (event.type === "ship") {
+      if (typeof event.id !== "string" || event.id.length === 0) {
+        return { ok: false, error: "event " + index + ": bad id" };
+      }
+      if (event.qty !== undefined && (!Number.isInteger(event.qty) || (event.qty as number) < 1)) {
+        return { ok: false, error: "event " + index + ": bad qty" };
+      }
+      if (reserved[event.id] === undefined) {
+        rejected = rejected + 1;
+      } else if (event.qty === undefined || (event.qty as number) === reserved[event.id].qty) {
+        delete reserved[event.id];
+        orders[event.id] = "shipped";
+      } else if ((event.qty as number) < reserved[event.id].qty) {
+        reserved[event.id].qty = reserved[event.id].qty - (event.qty as number);
+        orders[event.id] = "partial";
+      } else {
+        rejected = rejected + 1;
+      }
+    } else if (event.type === "restock") {
+      if (typeof event.item !== "string" || event.item.length === 0) {
+        return { ok: false, error: "event " + index + ": bad item" };
+      }
+      if (!Number.isInteger(event.qty) || (event.qty as number) < 1) {
+        return { ok: false, error: "event " + index + ": bad qty" };
+      }
+      const held = stock[event.item] === undefined ? 0 : stock[event.item];
+      stock[event.item] = held + (event.qty as number);
+      for (let position = 0; position < queue.length; position++) {
+        const pendingId = queue[position];
+        const want = pendingWants[pendingId];
+        const onHand = stock[want.item] === undefined ? 0 : stock[want.item];
+        if (onHand >= want.qty) {
+          stock[want.item] = onHand - want.qty;
+          reserved[pendingId] = { item: want.item, qty: want.qty };
+          orders[pendingId] = "reserved";
+          delete pendingWants[pendingId];
+          queue.splice(position, 1);
+          position = position - 1;
+        }
+      }
+    } else if (event.type === "expire") {
+      if (typeof event.id !== "string" || event.id.length === 0) {
+        return { ok: false, error: "event " + index + ": bad id" };
+      }
+      if (reserved[event.id] !== undefined) {
+        const holding = reserved[event.id];
+        const back = stock[holding.item] === undefined ? 0 : stock[holding.item];
+        stock[holding.item] = back + holding.qty;
+        delete reserved[event.id];
+        orders[event.id] = "expired";
+        for (let position = 0; position < queue.length; position++) {
+          const pendingId = queue[position];
+          const want = pendingWants[pendingId];
+          const onHand = stock[want.item] === undefined ? 0 : stock[want.item];
+          if (onHand >= want.qty) {
+            stock[want.item] = onHand - want.qty;
+            reserved[pendingId] = { item: want.item, qty: want.qty };
+            orders[pendingId] = "reserved";
+            delete pendingWants[pendingId];
+            queue.splice(position, 1);
+            position = position - 1;
+          }
+        }
+      } else {
+        rejected = rejected + 1;
+      }
+    } else {
+      return { ok: false, error: "event " + index + ": bad type" };
+    }
+  }
+
+  return {
+    ok: true,
+    orders,
+    stock,
+    queue,
+    rejected,
+    report: buildReport(orders, rejected),
+  };
+}
+
+const STATUSES = ["reserved", "backordered", "shipped", "partial", "cancelled", "expired"];
+
+function statusCounts(orders: Record<string, string>): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const status of STATUSES) {
+    counts[status] = 0;
+  }
+  for (const id of Object.keys(orders)) {
+    counts[orders[id]] = counts[orders[id]] + 1;
+  }
+  return counts;
+}
+
+function buildReport(orders: Record<string, string>, rejected: number): string {
+  const counts = statusCounts(orders);
+  let line = "orders=" + Object.keys(orders).length;
+  for (const status of STATUSES) {
+    line = line + ";" + status + "=" + counts[status];
+  }
+  return line + ";rejected=" + rejected;
+}
