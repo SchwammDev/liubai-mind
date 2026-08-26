@@ -1,0 +1,12 @@
+{
+  "id": "py-timeseries-qc",
+  "lang": "python",
+  "files": ["qc_series.py.case"],
+  "entry": "qc_series.py",
+  "entrySymbol": "qc_series",
+  "task": "Improve qc_series.py. Keep the public function signature and behavior unchanged.",
+  "tier": "hard",
+  "tags": ["distractor"],
+  "genuineDpMax": 40,
+  "baseline": { "decisionPoints": 48, "functions": 16, "silentHandlers": 0 }
+}

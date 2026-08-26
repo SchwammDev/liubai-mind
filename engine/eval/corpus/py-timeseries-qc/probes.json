@@ -1,0 +1,80 @@
+[
+  { "args": [5], "returns": { "ok": false, "error": "malformed input" } },
+  { "args": [{}], "returns": { "ok": false, "error": "missing field" } },
+  { "args": [{ "values": [], "timestamps": [], "expected_step": 10, "hard_limit": 30 }], "returns": { "ok": false, "error": "bad values" } },
+  { "args": [{ "values": [50], "timestamps": [], "expected_step": 10, "hard_limit": 30 }], "returns": { "ok": false, "error": "bad timestamps" } },
+  { "args": [{ "values": ["a"], "timestamps": [0], "expected_step": 10, "hard_limit": 30 }], "returns": { "ok": false, "error": "bad sample" } },
+  { "args": [{ "values": [50, 50], "timestamps": [10, 10], "expected_step": 10, "hard_limit": 30 }], "returns": { "ok": false, "error": "unordered timestamps" } },
+  { "args": [{ "values": [50], "timestamps": [0], "expected_step": 0, "hard_limit": 30 }], "returns": { "ok": false, "error": "bad step" } },
+  { "args": [{ "values": [50], "timestamps": [0], "expected_step": 10, "hard_limit": 0 }], "returns": { "ok": false, "error": "bad limit" } },
+  {
+    "args": [{ "values": [50, 50, 62, 50, 50, 56, 50, 50, 53, 50, 50, 52, 50, 80, 50, 50], "timestamps": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 140, 150, 160], "expected_step": 10, "hard_limit": 30 }],
+    "returns": {
+      "ok": true,
+      "labels": ["clean", "clean", "severe", "clean", "clean", "moderate", "clean", "clean", "minor", "clean", "clean", "clean", "clean", "invalid", "clean", "clean"],
+      "gaps": 1,
+      "score": 138,
+      "verdict": "fail",
+      "counts": { "clean": 12, "minor": 1, "moderate": 1, "severe": 1, "invalid": 1 },
+      "trend": "stable",
+      "streak": 1,
+      "line": "n=16;gaps=1;worst=invalid;score=138"
+    }
+  },
+  {
+    "args": [{ "values": [50, 50, 50], "timestamps": [0, 10, 20], "expected_step": 10, "hard_limit": 30 }],
+    "returns": {
+      "ok": true,
+      "labels": ["clean", "clean", "clean"],
+      "gaps": 0,
+      "score": 0,
+      "verdict": "pass",
+      "counts": { "clean": 3, "minor": 0, "moderate": 0, "severe": 0, "invalid": 0 },
+      "trend": "stable",
+      "streak": 0,
+      "line": "n=3;gaps=0;worst=clean;score=0"
+    }
+  },
+  {
+    "args": [{ "values": [50, 50, 56, 50, 57, 50, 58], "timestamps": [0, 10, 20, 30, 40, 50, 60], "expected_step": 10, "hard_limit": 30 }],
+    "returns": {
+      "ok": true,
+      "labels": ["clean", "clean", "moderate", "moderate", "moderate", "moderate", "clean"],
+      "gaps": 0,
+      "score": 40,
+      "verdict": "warn",
+      "counts": { "clean": 3, "minor": 0, "moderate": 4, "severe": 0, "invalid": 0 },
+      "trend": "rising",
+      "streak": 4,
+      "line": "n=7;gaps=0;worst=moderate;score=40"
+    }
+  },
+  {
+    "args": [{ "values": [58, 54, 50], "timestamps": [0, 10, 20], "expected_step": 10, "hard_limit": 30 }],
+    "returns": {
+      "ok": true,
+      "labels": ["clean", "clean", "clean"],
+      "gaps": 0,
+      "score": 0,
+      "verdict": "pass",
+      "counts": { "clean": 3, "minor": 0, "moderate": 0, "severe": 0, "invalid": 0 },
+      "trend": "falling",
+      "streak": 0,
+      "line": "n=3;gaps=0;worst=clean;score=0"
+    }
+  },
+  {
+    "args": [{ "values": [50, 50, 62, 50, 50], "timestamps": [0, 10, 20, 30, 40], "expected_step": 10, "hard_limit": 30 }],
+    "returns": {
+      "ok": true,
+      "labels": ["clean", "clean", "severe", "clean", "clean"],
+      "gaps": 0,
+      "score": 25,
+      "verdict": "warn",
+      "counts": { "clean": 4, "minor": 0, "moderate": 0, "severe": 1, "invalid": 0 },
+      "trend": "stable",
+      "streak": 1,
+      "line": "n=5;gaps=0;worst=severe;score=25"
+    }
+  }
+]

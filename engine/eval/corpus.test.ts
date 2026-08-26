@@ -92,6 +92,7 @@ test("loadCases_loads_all_committed_cases", () => {
     "py-safe-convert",
     "py-status-dispatch",
     "py-ticket-price",
+    "py-timeseries-qc",
     "ts-booking-quote",
     "ts-event-router",
     "ts-flag-parser",
@@ -745,6 +746,22 @@ test(
   },
 );
 
+test(
+  "py_timeseries_qc_case_metrics_match_the_committed_baseline",
+  { skip: !venvPythonAvailable() },
+  async () => {
+    await assertMetricsMatchBaselineForPyCase("py-timeseries-qc", "qc_series.py.case");
+  },
+);
+
+test(
+  "py_timeseries_qc_case_main_function_cc_trips_the_cc_rail",
+  { skip: !venvPythonAvailable() },
+  async () => {
+    await assertMainFunctionCcTripsRailForPyCase("py-timeseries-qc", "qc_series.py.case");
+  },
+);
+
 test("ts_flag_parser_probes_pass_and_fully_cover_the_entry_symbol", async () => {
   await assertProbesAdequateForCase("ts-flag-parser");
 });
@@ -828,6 +845,14 @@ test(
   { skip: !venvPythonAvailable() },
   async () => {
     await assertProbesAdequateForCase("py-membership-renewal");
+  },
+);
+
+test(
+  "py_timeseries_qc_probes_pass_and_fully_cover_the_entry_symbol",
+  { skip: !venvPythonAvailable() },
+  async () => {
+    await assertProbesAdequateForCase("py-timeseries-qc");
   },
 );
 
