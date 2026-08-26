@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, existsSync, readFileSync, appendFileSync, write
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 
-import type { CaseManifest, ConditionManifest, RawRow } from "./eval-contract.ts";
+import type { CaseManifest, ConditionManifest, RawRow, Tier } from "./eval-contract.ts";
 import { loadConditions } from "./conditions.ts";
 import { loadCases, copyPlan } from "./corpus.ts";
 import { buildProvenance } from "./provenance.ts";
@@ -19,6 +19,7 @@ export interface CollectOpts {
   timeoutMs?: number;
   cases?: string[];
   conditions?: string[];
+  tier?: Tier;
   spawner?: PiSpawner;
   workRoot?: string;
   now?: () => string;
@@ -266,6 +267,12 @@ function loadError(message: string): CollectResult {
   return { status: 1, rowsWritten: 0, rowsSkipped: 0, stderr: message };
 }
 
+function filterByTier(cases: CaseManifest[], tier: Tier | undefined): CaseManifest[] | { error: string } {
+  if (tier === undefined) return cases;
+  const filtered = cases.filter((kase) => kase.tier === tier);
+  return filtered.length > 0 ? filtered : { error: `no cases with tier: ${tier}` };
+}
+
 function validateParallel(parallel: number | undefined): CollectResult | undefined {
   if (parallel === undefined) return undefined;
   if (Number.isInteger(parallel) && parallel >= 1) return undefined;
@@ -379,12 +386,15 @@ export async function runCollect(opts: CollectOpts): Promise<CollectResult> {
   const cases = loadCases(corpusDir, opts.cases);
   if ("error" in cases) return loadError(cases.error);
 
+  const tieredCases = filterByTier(cases, opts.tier);
+  if ("error" in tieredCases) return loadError(tieredCases.error);
+
   const rawPath = join(opts.runDir, "raw.jsonl");
   const existingKeys = loadExistingKeys(rawPath);
   mkdirSync(join(opts.runDir, "transcripts"), { recursive: true });
 
   const ctx = buildContext(opts, corpusDir, conditionsDir);
-  const items = buildWorkItems(cases, conditions, opts.reps);
+  const items = buildWorkItems(tieredCases, conditions, opts.reps);
   const counts = await runWorkItems(ctx, opts.runDir, rawPath, items, existingKeys);
 
   return toCollectResult(counts);
