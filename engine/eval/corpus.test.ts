@@ -86,6 +86,7 @@ test("loadCases_loads_all_committed_cases", () => {
   const ids = result.map((c) => c.id).sort();
   assert.deepEqual(ids, [
     "py-config-loader",
+    "py-grid-accumulate",
     "py-ingest-bait",
     "py-membership-renewal",
     "py-password-strength",
@@ -771,6 +772,22 @@ test(
   },
 );
 
+test(
+  "py_grid_accumulate_case_metrics_match_the_committed_baseline",
+  { skip: !venvPythonAvailable() },
+  async () => {
+    await assertMetricsMatchBaselineForPyCase("py-grid-accumulate", "accumulate_grid.py.case");
+  },
+);
+
+test(
+  "py_grid_accumulate_case_main_function_cc_trips_the_cc_rail",
+  { skip: !venvPythonAvailable() },
+  async () => {
+    await assertMainFunctionCcTripsRailForPyCase("py-grid-accumulate", "accumulate_grid.py.case");
+  },
+);
+
 test("ts_flag_parser_probes_pass_and_fully_cover_the_entry_symbol", async () => {
   await assertProbesAdequateForCase("ts-flag-parser");
 });
@@ -866,6 +883,14 @@ test(
   { skip: !venvPythonAvailable() },
   async () => {
     await assertProbesAdequateForCase("py-timeseries-qc");
+  },
+);
+
+test(
+  "py_grid_accumulate_probes_pass_and_fully_cover_the_entry_symbol",
+  { skip: !venvPythonAvailable() },
+  async () => {
+    await assertProbesAdequateForCase("py-grid-accumulate");
   },
 );
 

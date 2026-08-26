@@ -1,0 +1,67 @@
+[
+  { "args": [5], "returns": { "ok": false, "error": "malformed input" } },
+  { "args": [{ "grid": { "width": 1, "height": 1, "cell_size": 10 }, "observations": [] }], "returns": { "ok": false, "error": "missing field" } },
+  { "args": [{ "grid": 5, "observations": [], "fill_value": 0 }], "returns": { "ok": false, "error": "bad grid" } },
+  { "args": [{ "grid": {}, "observations": [], "fill_value": 0 }], "returns": { "ok": false, "error": "bad grid" } },
+  { "args": [{ "grid": { "width": 0, "height": 1, "cell_size": 10 }, "observations": [], "fill_value": 0 }], "returns": { "ok": false, "error": "bad width" } },
+  { "args": [{ "grid": { "width": 101, "height": 1, "cell_size": 10 }, "observations": [], "fill_value": 0 }], "returns": { "ok": false, "error": "bad width" } },
+  { "args": [{ "grid": { "width": 1, "height": 0, "cell_size": 10 }, "observations": [], "fill_value": 0 }], "returns": { "ok": false, "error": "bad height" } },
+  { "args": [{ "grid": { "width": 1, "height": 1, "cell_size": 0 }, "observations": [], "fill_value": 0 }], "returns": { "ok": false, "error": "bad cell size" } },
+  { "args": [{ "grid": { "width": 1, "height": 1, "cell_size": 10 }, "observations": [], "fill_value": "x" }], "returns": { "ok": false, "error": "bad fill value" } },
+  { "args": [{ "grid": { "width": 1, "height": 1, "cell_size": 10 }, "observations": 5, "fill_value": 0 }], "returns": { "ok": false, "error": "bad observations" } },
+  { "args": [{ "grid": { "width": 1, "height": 1, "cell_size": 10 }, "observations": [5], "fill_value": 0 }], "returns": { "ok": false, "error": "bad observation" } },
+  { "args": [{ "grid": { "width": 1, "height": 1, "cell_size": 10 }, "observations": [{ "y": 1, "value": 1, "quality": 80 }], "fill_value": 0 }], "returns": { "ok": false, "error": "bad observation" } },
+  { "args": [{ "grid": { "width": 1, "height": 1, "cell_size": 10 }, "observations": [{ "x": 1, "y": "2", "value": 1, "quality": 80 }], "fill_value": 0 }], "returns": { "ok": false, "error": "bad observation" } },
+  { "args": [{ "grid": { "width": 1, "height": 1, "cell_size": 10 }, "observations": [{ "x": 1, "y": 1, "quality": 80 }], "fill_value": 0 }], "returns": { "ok": false, "error": "bad observation" } },
+  { "args": [{ "grid": { "width": 1, "height": 1, "cell_size": 10 }, "observations": [{ "x": 1, "y": 1, "value": 1 }], "fill_value": 0 }], "returns": { "ok": false, "error": "bad observation" } },
+  { "args": [{ "grid": { "width": 1, "height": 1, "cell_size": 10 }, "observations": [{ "x": 1, "y": 1, "value": 1, "quality": 101 }], "fill_value": 0 }], "returns": { "ok": false, "error": "bad observation" } },
+  {
+    "args": [{
+      "grid": { "width": 2, "height": 2, "cell_size": 10 },
+      "observations": [
+        { "x": 1, "y": 1, "value": 10, "quality": 80 },
+        { "x": 11, "y": 2, "value": 20, "quality": 70 },
+        { "x": 3, "y": 4, "value": 30, "quality": 45 },
+        { "x": 2, "y": 2, "value": 99, "quality": 20 },
+        { "x": -1, "y": 0, "value": 5, "quality": 80 },
+        { "x": 100, "y": 0, "value": 5, "quality": 80 },
+        { "x": 22, "y": 3, "value": 50, "quality": 90 },
+        { "x": 0, "y": 23, "value": 60, "quality": 90 },
+        { "x": 0, "y": 30, "value": 60, "quality": 90 },
+        { "x": 11, "y": 11, "value": 1, "quality": 90 },
+        { "x": 12, "y": 12, "value": 2, "quality": 90 },
+        { "x": 13, "y": 13, "value": 3, "quality": 90 },
+        { "x": 14, "y": 14, "value": 4, "quality": 90 },
+        { "x": 15, "y": 15, "value": 5, "quality": 90 },
+        { "x": 16, "y": 16, "value": 600, "quality": 90 },
+        { "x": 5, "y": 5, "value": 50, "quality": 95 },
+        { "x": 25, "y": 0, "value": 7, "quality": 90 },
+        { "x": 1, "y": -1, "value": 5, "quality": 80 }
+      ],
+      "fill_value": 0
+    }],
+    "returns": {
+      "ok": true,
+      "cells": [[30, 35], [60, 3]],
+      "flags": [["degraded", "good"], ["good", "good"]],
+      "dropped": 5,
+      "rejected": 1,
+      "saturated": 1,
+      "coverage": 100,
+      "line": "cells=4;filled=4;dropped=5;rejected=1;saturated=1;coverage=100"
+    }
+  },
+  {
+    "args": [{ "grid": { "width": 2, "height": 1, "cell_size": 10 }, "observations": [{ "x": 1, "y": 1, "value": 10, "quality": 80 }], "fill_value": -99 }],
+    "returns": {
+      "ok": true,
+      "cells": [[10, -99]],
+      "flags": [["good", "empty"]],
+      "dropped": 0,
+      "rejected": 0,
+      "saturated": 0,
+      "coverage": 50,
+      "line": "cells=2;filled=1;dropped=0;rejected=0;saturated=0;coverage=50"
+    }
+  }
+]
