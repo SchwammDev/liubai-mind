@@ -180,3 +180,36 @@ test("classifyVerdict_reports_bar_missed_when_decision_points_increase", () => {
 
   assert.equal(result.verdict, "bar-missed");
 });
+
+test("classifyVerdict_reports_genuine_fix_when_after_decision_points_meet_genuineDpMax_even_without_a_full_point_of_reduction", () => {
+  const result = classifyVerdict({
+    before: metrics({ decisionPoints: 3 }),
+    after: metrics({ decisionPoints: 3 }),
+    entryChanged: true,
+    genuineDpMax: 3,
+  });
+
+  assert.equal(result.verdict, "genuine-fix");
+});
+
+test("classifyVerdict_reports_bar_missed_when_decision_points_drop_but_stay_above_genuineDpMax", () => {
+  const result = classifyVerdict({
+    before: metrics({ decisionPoints: 10 }),
+    after: metrics({ decisionPoints: 4 }),
+    entryChanged: true,
+    genuineDpMax: 3,
+  });
+
+  assert.equal(result.verdict, "bar-missed");
+});
+
+test("classifyVerdict_reports_gamed_silent_handler_over_genuineDpMax_being_met", () => {
+  const result = classifyVerdict({
+    before: metrics({ decisionPoints: 10, silentHandlers: 0 }),
+    after: metrics({ decisionPoints: 3, silentHandlers: 1 }),
+    entryChanged: true,
+    genuineDpMax: 3,
+  });
+  assert.equal(result.verdict, "gamed");
+  assert.equal(result.gamedReason, "silent-handler");
+});
