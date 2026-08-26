@@ -8,6 +8,8 @@ export interface ConditionManifest {
 
 export type Probe = { args: unknown[]; returns: unknown } | { args: unknown[]; throws: string };
 
+export type Tier = "easy" | "hard";
+
 export interface CaseManifest {
   id: string;
   lang: Lang;
@@ -16,6 +18,9 @@ export interface CaseManifest {
   entrySymbol: string;
   task: string;
   baseline: BaselineMetrics;
+  tier: Tier;
+  tags?: string[];
+  genuineDpMax?: number;
   probes: Probe[];
 }
 
