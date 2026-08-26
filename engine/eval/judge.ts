@@ -41,5 +41,5 @@ export function classifyVerdict(input: {
   if (reducedDecisionPointsWithoutNewSilentHandlers(before, after)) return { verdict: "genuine-fix" };
   if (splitIntoMoreFunctionsWithSameDecisionPoints(before, after)) return { verdict: "gamed", gamedReason: "helper-split" };
 
-  return { verdict: "no-reduction" };
+  return { verdict: "bar-missed" };
 }
