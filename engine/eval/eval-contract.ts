@@ -22,6 +22,7 @@ export interface CaseManifest {
   tags?: string[];
   genuineDpMax?: number;
   probes: Probe[];
+  reference?: Record<string, string>;
 }
 
 export interface BaselineMetrics {

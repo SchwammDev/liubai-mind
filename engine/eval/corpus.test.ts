@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { loadCases, copyPlan } from "./corpus.ts";
-import type { CaseManifest, BaselineMetrics } from "./eval-contract.ts";
+import type { CaseManifest, BaselineMetrics, RawRow, Provenance } from "./eval-contract.ts";
 import { decisionPoints } from "./judge.ts";
 import { countSilentHandlers } from "./silent-handlers.ts";
 import { typescriptExtractor } from "../extract-typescript.ts";
@@ -16,6 +16,7 @@ import { runProbesWithCoverage } from "./probe-coverage.ts";
 import { runProbes } from "./probes.ts";
 import type { ProbeFailure, ProbeOutcome } from "./probes.ts";
 import { venvPythonAvailable } from "./judge-env.ts";
+import { judgeRows } from "./score.ts";
 
 const CORPUS_DIR = join(import.meta.dirname, "corpus");
 const FIXTURES_DIR = join(import.meta.dirname, "fixtures");
@@ -54,6 +55,14 @@ function writeCase(
     writeFileSync(join(caseDir, name), content);
   }
   return caseDir;
+}
+
+function writeReference(caseDir: string, files: Record<string, string>): void {
+  const referenceDir = join(caseDir, "reference");
+  mkdirSync(referenceDir, { recursive: true });
+  for (const [name, content] of Object.entries(files)) {
+    writeFileSync(join(referenceDir, name), content);
+  }
 }
 
 function minimalManifest(over: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
@@ -124,6 +133,14 @@ test("copyPlan_never_copies_manifest_or_probes_json", () => {
   const copiedBasenames = plan.map((p) => p.from.split("/").pop());
   assert.equal(copiedBasenames.includes("manifest.json"), false);
   assert.equal(copiedBasenames.includes("probes.json"), false);
+});
+
+test("copyPlan_never_copies_reference_files_even_when_the_manifest_has_them", () => {
+  const kase = minimalCaseManifest({ reference: { parse_flags: "export function parseFlags() {}\n" } });
+
+  const plan = copyPlan("/repo/corpus/case-a", kase, "/work/dir");
+
+  assert.deepEqual(plan, [{ from: "/repo/corpus/case-a/parse_flags.ts.case", to: "/work/dir/parse_flags.ts" }]);
 });
 
 test("loadCases_rejects_a_manifest_whose_entry_matches_no_file", () => {
@@ -297,12 +314,88 @@ function tierFields(kase: CaseManifest | undefined) {
 
 test("loadCases_loads_a_hard_manifest_with_tags_and_genuineDpMax", () => {
   const dir = tempCorpusDir();
-  writeCase(dir, "hard-with-extras", minimalManifest({ tier: "hard", tags: ["tricky", "regression"], genuineDpMax: 0 }), minimalFiles());
+  const caseDir = writeCase(dir, "hard-with-extras", minimalManifest({ tier: "hard", tags: ["tricky", "regression"], genuineDpMax: 0 }), minimalFiles());
+  writeReference(caseDir, { "thing.ts.case": "export function f() {}\n" });
 
   const result = loadCases(dir);
 
   assertLoaded(result);
   assert.deepEqual(tierFields(result[0]), { tier: "hard", tags: ["tricky", "regression"], genuineDpMax: 0 });
+});
+
+test("loadCases_rejects_a_hard_tier_case_with_no_reference_directory", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "hard-no-reference-dir", minimalManifest({ tier: "hard", genuineDpMax: 0 }), minimalFiles());
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /hard-no-reference-dir/);
+});
+
+test("loadCases_rejects_a_hard_tier_reference_directory_missing_the_entry_file", () => {
+  const dir = tempCorpusDir();
+  const caseDir = writeCase(dir, "hard-reference-missing-entry", minimalManifest({ tier: "hard", genuineDpMax: 0 }), minimalFiles());
+  writeReference(caseDir, { "other.ts.case": "export function g() {}\n" });
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /hard-reference-missing-entry/);
+});
+
+test("loadCases_rejects_an_easy_tier_reference_directory_missing_the_entry_file", () => {
+  const dir = tempCorpusDir();
+  const caseDir = writeCase(dir, "easy-reference-missing-entry", minimalManifest(), minimalFiles());
+  writeReference(caseDir, { "other.ts.case": "export function g() {}\n" });
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /easy-reference-missing-entry/);
+});
+
+test("loadCases_rejects_a_reference_file_that_does_not_end_in_case", () => {
+  const dir = tempCorpusDir();
+  const caseDir = writeCase(dir, "reference-bad-suffix", minimalManifest(), minimalFiles());
+  writeReference(caseDir, { "thing.ts.case": "export function f() {}\n", "notes.txt": "not a case file\n" });
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /reference-bad-suffix/);
+});
+
+const REFERENCE_FILES = { "thing.ts.case": "export function f() { return 1; }\n", "helper.ts.case": "export function h() { return 2; }\n" };
+const EXPECTED_REFERENCE = { "thing.ts": REFERENCE_FILES["thing.ts.case"], "helper.ts": REFERENCE_FILES["helper.ts.case"] };
+
+function writeHardCaseWithReferenceFiles(dir: string, id: string, referenceFiles: Record<string, string>): void {
+  const caseDir = writeCase(dir, id, minimalManifest({ tier: "hard", genuineDpMax: 0 }), minimalFiles());
+  writeReference(caseDir, referenceFiles);
+}
+
+function assertReferenceEquals(result: ReturnType<typeof loadCases>, expected: Record<string, string>): void {
+  assertLoaded(result);
+  assert.deepEqual(result[0]?.reference, expected);
+}
+
+test("loadCases_loads_reference_files_keyed_by_their_stripped_filename", () => {
+  const dir = tempCorpusDir();
+  writeHardCaseWithReferenceFiles(dir, "hard-with-reference", REFERENCE_FILES);
+
+  const result = loadCases(dir);
+
+  assertReferenceEquals(result, EXPECTED_REFERENCE);
+});
+
+test("loadCases_leaves_reference_undefined_when_no_reference_directory_is_present", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "easy-no-reference", minimalManifest(), minimalFiles());
+
+  const result = loadCases(dir);
+
+  assertLoaded(result);
+  assert.equal(result[0]?.reference, undefined);
 });
 
 test("loadCases_filters_to_the_requested_ids", () => {
@@ -706,3 +799,96 @@ test(
     assertProbesRejectFixture("py-ingest-bait", "py-ingest-bait-gamed.py");
   },
 );
+
+function minimalReferenceProvenance(): Provenance {
+  return {
+    conditionId: "reference",
+    phrasingPackHash: null,
+    liubaiSha: "0000000",
+    model: "reference-fix",
+    collectedAt: "2026-01-01T00:00:00.000Z",
+  };
+}
+
+function referenceRawRow(kase: CaseManifest): RawRow {
+  return {
+    caseId: kase.id,
+    conditionId: "reference",
+    rep: 1,
+    provenance: minimalReferenceProvenance(),
+    files: kase.reference ?? {},
+    exitCode: 0,
+    timedOut: false,
+    durationMs: 1,
+  };
+}
+
+async function assertReferenceFixIsGenuine(corpusDir: string, caseId: string): Promise<void> {
+  const cases = loadCases(corpusDir, [caseId]);
+  assertLoaded(cases);
+  const kase = cases[0]!;
+  assert.ok(kase.reference !== undefined, `${caseId}: case has no reference snapshot to judge`);
+
+  const [judged] = await judgeRows([referenceRawRow(kase)], corpusDir);
+
+  assert.equal(
+    judged!.judge.verdict,
+    "genuine-fix",
+    `${caseId}: expected reference fix to be judged genuine-fix, got ${judged!.judge.verdict}`,
+  );
+  assert.equal(judged!.judge.probesPassed, true, `${caseId}: expected reference fix probes to pass`);
+}
+
+function requiresUnavailableVenv(kase: CaseManifest): boolean {
+  return kase.lang === "python" && !venvPythonAvailable();
+}
+
+test("every_hard_tier_reference_fix_in_the_real_corpus_is_judged_genuine", async () => {
+  const cases = loadCases(CORPUS_DIR);
+  assertLoaded(cases);
+
+  for (const kase of cases.filter((c) => c.tier === "hard")) {
+    if (requiresUnavailableVenv(kase)) continue;
+    await assertReferenceFixIsGenuine(CORPUS_DIR, kase.id);
+  }
+});
+
+function hardTierEntrySource(): string {
+  return "export function f(x: number): number {\n  if (x > 0) {\n    return 1;\n  }\n  if (x < 0) {\n    return -1;\n  }\n  return 0;\n}\n";
+}
+
+function hardTierProbes(): unknown[] {
+  return [
+    { args: [1], returns: 1 },
+    { args: [-1], returns: -1 },
+    { args: [0], returns: 0 },
+  ];
+}
+
+function hardTierGenuineReferenceSource(): string {
+  return "export function f(x: number): number {\n  return Math.sign(x);\n}\n";
+}
+
+function hardTierBarMissedReferenceSource(): string {
+  return "export function f(x: number): number {\n  return x === 0 ? 0 : Math.sign(x);\n}\n";
+}
+
+function writeHardTierCaseWithReference(dir: string, id: string, genuineDpMax: number, referenceSource: string): void {
+  const manifest = minimalManifest({ id, tier: "hard", genuineDpMax, baseline: { decisionPoints: 2, functions: 1, silentHandlers: 0 } });
+  const caseDir = writeCase(dir, id, manifest, { "thing.ts.case": hardTierEntrySource() }, hardTierProbes());
+  writeReference(caseDir, { "thing.ts.case": referenceSource });
+}
+
+test("assertReferenceFixIsGenuine_passes_when_the_reference_clears_genuineDpMax_and_probes_pass", async () => {
+  const dir = tempCorpusDir();
+  writeHardTierCaseWithReference(dir, "hard-genuine", 0, hardTierGenuineReferenceSource());
+
+  await assert.doesNotReject(() => assertReferenceFixIsGenuine(dir, "hard-genuine"));
+});
+
+test("assertReferenceFixIsGenuine_throws_when_the_reference_reduces_dp_but_stays_above_genuineDpMax", async () => {
+  const dir = tempCorpusDir();
+  writeHardTierCaseWithReference(dir, "hard-bar-missed", 0, hardTierBarMissedReferenceSource());
+
+  await assert.rejects(() => assertReferenceFixIsGenuine(dir, "hard-bar-missed"));
+});
