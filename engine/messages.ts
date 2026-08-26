@@ -7,10 +7,21 @@ export interface HelperConvention {
   root: string;
 }
 
-const DEFAULT_CC_ADVICE: Record<Lang, string> = {
-  python: "replace if/elif chains with dispatch dicts",
-  typescript: "replace if/else chains with lookup objects",
-  cpp: "replace if/else chains with dispatch tables",
+export interface CcNudgePhrasing {
+  first: string;
+  rest: string;
+}
+
+const DEFAULT_CC_TEMPLATE = "{name} (CC={cc}). Threshold is {threshold}. Extract guard clauses, split branches into named helpers, or ";
+
+function sameForAll(template: string): CcNudgePhrasing {
+  return { first: template, rest: template };
+}
+
+const DEFAULT_CC_NUDGE: Record<Lang, CcNudgePhrasing> = {
+  python: sameForAll(`${DEFAULT_CC_TEMPLATE}replace if/elif chains with dispatch dicts.`),
+  typescript: sameForAll(`${DEFAULT_CC_TEMPLATE}replace if/else chains with lookup objects.`),
+  cpp: sameForAll(`${DEFAULT_CC_TEMPLATE}replace if/else chains with dispatch tables.`),
 };
 
 const KNOWN_LANGS: readonly Lang[] = ["python", "typescript", "cpp"];
@@ -28,23 +39,41 @@ export function readPack(path: string | undefined, read: (p: string) => string):
   }
 }
 
-export function resolveCcAdvice(defaults: Record<Lang, string>, pack: unknown): Record<Lang, string> {
+function asPhrasing(entry: unknown): CcNudgePhrasing | undefined {
+  if (typeof entry !== "object" || entry === null) return undefined;
+  const { first, rest } = entry as Record<string, unknown>;
+  if (typeof first !== "string" || typeof rest !== "string") return undefined;
+  return { first, rest };
+}
+
+export function resolveCcNudge(
+  defaults: Record<Lang, CcNudgePhrasing>,
+  pack: unknown,
+): Record<Lang, CcNudgePhrasing> {
   const resolved = { ...defaults };
   if (typeof pack !== "object" || pack === null) return resolved;
 
-  const ccAdvice = (pack as Record<string, unknown>).CC_ADVICE;
-  if (typeof ccAdvice !== "object" || ccAdvice === null) return resolved;
+  const ccNudge = (pack as Record<string, unknown>).CC_NUDGE;
+  if (typeof ccNudge !== "object" || ccNudge === null) return resolved;
 
-  for (const [lang, advice] of Object.entries(ccAdvice as Record<string, unknown>)) {
+  for (const [lang, entry] of Object.entries(ccNudge as Record<string, unknown>)) {
     if (!isLang(lang)) continue;
-    if (typeof advice !== "string") continue;
-    resolved[lang] = advice;
+    const phrasing = asPhrasing(entry);
+    if (phrasing === undefined) continue;
+    resolved[lang] = phrasing;
   }
   return resolved;
 }
 
-export const CC_ADVICE: Record<Lang, string> = resolveCcAdvice(
-  DEFAULT_CC_ADVICE,
+export function formatCcNudge(template: string, facts: { name: string; cc: number; threshold: number }): string {
+  return template
+    .replaceAll("{name}", facts.name)
+    .replaceAll("{cc}", String(facts.cc))
+    .replaceAll("{threshold}", String(facts.threshold));
+}
+
+export const CC_NUDGE: Record<Lang, CcNudgePhrasing> = resolveCcNudge(
+  DEFAULT_CC_NUDGE,
   readPack(process.env.LIUBAI_PHRASING_PACK, (p) => readFileSync(p, "utf8")),
 );
 

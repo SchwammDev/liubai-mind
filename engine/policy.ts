@@ -1,6 +1,6 @@
 import type { CommentFacts, Exemption, Lang, Nudge, Rule, RuleConfig, RuleContext, RuleName } from "./contract.ts";
 import { RULE } from "./contract.ts";
-import { ANNOTATION_ADVICE, CC_ADVICE, DOC_COMMENT_FORM, TEST_HELPERS } from "./messages.ts";
+import { ANNOTATION_ADVICE, CC_NUDGE, DOC_COMMENT_FORM, TEST_HELPERS, formatCcNudge } from "./messages.ts";
 
 export { RULE } from "./contract.ts";
 export type { Exemption, RuleConfig, RuleName } from "./contract.ts";
@@ -43,17 +43,19 @@ const ccRule = (cfg: RuleConfig): Rule => ({
   name: RULE.cc,
   run: (ctx: RuleContext): Nudge[] => {
     const threshold = thresholdFor(RULE.cc, cfg, ctx.lang);
+    const phrasing = CC_NUDGE[ctx.lang];
 
     const nudges: Nudge[] = [];
     for (const fn of ctx.extracted.functions) {
       if (fn.body === "same") continue;
       if (fn.cyclomaticComplexity <= threshold) continue;
 
+      const template = nudges.length === 0 ? phrasing.first : phrasing.rest;
       nudges.push({
         rule: RULE.cc,
         severity: cfg.severity,
         line: fn.startLine,
-        msg: `${fn.name} (CC=${fn.cyclomaticComplexity}). Threshold is ${threshold}. Extract guard clauses, split branches into named helpers, or ${CC_ADVICE[ctx.lang]}.`,
+        msg: formatCcNudge(template, { name: fn.name, cc: fn.cyclomaticComplexity, threshold }),
       });
     }
     return nudges;
