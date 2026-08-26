@@ -1,0 +1,12 @@
+{
+  "id": "ts-telemetry-pipeline",
+  "lang": "typescript",
+  "files": ["process_batch.ts.case"],
+  "entry": "process_batch.ts",
+  "entrySymbol": "processBatch",
+  "task": "Improve process_batch.ts. Keep the public function signature and behavior unchanged.",
+  "tier": "hard",
+  "tags": ["distractor"],
+  "genuineDpMax": 30,
+  "baseline": { "decisionPoints": 44, "functions": 11, "silentHandlers": 0 }
+}
