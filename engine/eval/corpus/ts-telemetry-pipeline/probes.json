@@ -1,0 +1,49 @@
+[
+  { "args": [5], "returns": { "ok": false, "error": "malformed batch" } },
+  { "args": [{}], "returns": { "ok": false, "error": "missing readings" } },
+  { "args": [{ "readings": [] }], "returns": { "ok": false, "error": "empty batch" } },
+  { "args": [{ "readings": [5] }], "returns": { "ok": false, "error": "reading 0: malformed" } },
+  { "args": [{ "readings": [{ "channel": "", "unit": "mV", "value": 1, "at": 0 }] }], "returns": { "ok": false, "error": "reading 0: bad channel" } },
+  { "args": [{ "readings": [{ "channel": "a", "unit": "W", "value": 1, "at": 0 }] }], "returns": { "ok": false, "error": "reading 0: bad unit" } },
+  { "args": [{ "readings": [{ "channel": "a", "unit": "mV", "value": 1.5, "at": 0 }] }], "returns": { "ok": false, "error": "reading 0: bad value" } },
+  { "args": [{ "readings": [{ "channel": "a", "unit": "mV", "value": 1, "at": -1 }] }], "returns": { "ok": false, "error": "reading 0: bad timestamp" } },
+  {
+    "args": [{ "readings": [
+      { "channel": "a", "unit": "mV", "value": 0, "at": 0 },
+      { "channel": "a", "unit": "mV", "value": 49, "at": 10 },
+      { "channel": "a", "unit": "mV", "value": 50, "at": 20 },
+      { "channel": "b", "unit": "mV", "value": 199, "at": 0 },
+      { "channel": "b", "unit": "mV", "value": 200, "at": 10 },
+      { "channel": "b", "unit": "mV", "value": 599, "at": 20 },
+      { "channel": "c", "unit": "mV", "value": 600, "at": 0 },
+      { "channel": "c", "unit": "mV", "value": 899, "at": 10 },
+      { "channel": "c", "unit": "V", "value": 1, "at": 20 },
+      { "channel": "d", "unit": "uV", "value": 1500, "at": 0 },
+      { "channel": "d", "unit": "uV", "value": -1500, "at": 10 }
+    ] }],
+    "returns": {
+      "ok": true,
+      "readings": 11,
+      "labels": ["standby", "standby", "idle", "idle", "active", "active", "loaded", "loaded", "critical", "standby", "negative"],
+      "channels": {
+        "a": { "count": 3, "min": 0, "max": 50, "worst": "idle" },
+        "b": { "count": 3, "min": 199, "max": 599, "worst": "active" },
+        "c": { "count": 3, "min": 600, "max": 1000, "worst": "critical" },
+        "d": { "count": 2, "min": -1, "max": 1, "worst": "negative" }
+      },
+      "alerts": ["c:loaded", "c:loaded", "c:critical", "d:negative"],
+      "report": "readings=11;channels=4;alerts=4;worst=negative"
+    }
+  },
+  {
+    "args": [{ "readings": [{ "channel": "a", "unit": "mV", "value": 300, "at": 5 }] }],
+    "returns": {
+      "ok": true,
+      "readings": 1,
+      "labels": ["active"],
+      "channels": { "a": { "count": 1, "min": 300, "max": 300, "worst": "active" } },
+      "alerts": [],
+      "report": "readings=1;channels=1;alerts=0;worst=active"
+    }
+  }
+]
