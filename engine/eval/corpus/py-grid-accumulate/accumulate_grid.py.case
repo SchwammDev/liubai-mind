@@ -1,0 +1,150 @@
+from __future__ import annotations
+
+MAX_DIM = 100
+MIN_QUALITY = 30
+GOOD_QUALITY = 60
+SATURATION_LIMIT = 5
+
+
+def accumulate_grid(raw: object) -> dict:
+    if not isinstance(raw, dict):
+        return {"ok": False, "error": "malformed input"}
+    if "grid" not in raw or "observations" not in raw or "fill_value" not in raw:
+        return {"ok": False, "error": "missing field"}
+    grid = raw["grid"]
+    if not isinstance(grid, dict):
+        return {"ok": False, "error": "bad grid"}
+    if "width" not in grid or "height" not in grid or "cell_size" not in grid:
+        return {"ok": False, "error": "bad grid"}
+    width = grid["width"]
+    height = grid["height"]
+    cell_size = grid["cell_size"]
+    if not isinstance(width, int) or width < 1 or width > MAX_DIM:
+        return {"ok": False, "error": "bad width"}
+    if not isinstance(height, int) or height < 1 or height > MAX_DIM:
+        return {"ok": False, "error": "bad height"}
+    if not isinstance(cell_size, int) or cell_size < 1:
+        return {"ok": False, "error": "bad cell size"}
+    if not isinstance(raw["fill_value"], int):
+        return {"ok": False, "error": "bad fill value"}
+    observations = raw["observations"]
+    if not isinstance(observations, list):
+        return {"ok": False, "error": "bad observations"}
+
+    sums = {}
+    counts = {}
+    degraded = {}
+    dropped = 0
+    rejected = 0
+    saturated = 0
+    tolerance = cell_size // 2
+    for obs in observations:
+        if not isinstance(obs, dict):
+            return {"ok": False, "error": "bad observation"}
+        if "x" not in obs or not isinstance(obs["x"], int):
+            return {"ok": False, "error": "bad observation"}
+        if "y" not in obs or not isinstance(obs["y"], int):
+            return {"ok": False, "error": "bad observation"}
+        if "value" not in obs or not isinstance(obs["value"], int):
+            return {"ok": False, "error": "bad observation"}
+        if "quality" not in obs or not isinstance(obs["quality"], int):
+            return {"ok": False, "error": "bad observation"}
+        if obs["quality"] < 0 or obs["quality"] > 100:
+            return {"ok": False, "error": "bad observation"}
+
+        if obs["quality"] < MIN_QUALITY:
+            rejected = rejected + 1
+            continue
+
+        x = obs["x"]
+        if x < 0:
+            dropped = dropped + 1
+            continue
+        col = x // cell_size
+        if col >= width:
+            if x - width * cell_size < tolerance:
+                col = width - 1
+            else:
+                dropped = dropped + 1
+                continue
+
+        y = obs["y"]
+        if y < 0:
+            dropped = dropped + 1
+            continue
+        row = y // cell_size
+        if row >= height:
+            if y - height * cell_size < tolerance:
+                row = height - 1
+            else:
+                dropped = dropped + 1
+                continue
+
+        key = (row, col)
+        if counts.get(key, 0) >= SATURATION_LIMIT:
+            saturated = saturated + 1
+            continue
+        sums[key] = sums.get(key, 0) + obs["value"]
+        counts[key] = counts.get(key, 0) + 1
+        if obs["quality"] < GOOD_QUALITY:
+            degraded[key] = True
+
+    cells = _averaged_rows(sums, counts, width, height, raw["fill_value"])
+    flags = _flag_rows(counts, degraded, width, height)
+    coverage = _coverage(counts, width, height)
+    line = _summary_line(width * height, len(counts), dropped, rejected, saturated, coverage)
+    return {
+        "ok": True,
+        "cells": cells,
+        "flags": flags,
+        "dropped": dropped,
+        "rejected": rejected,
+        "saturated": saturated,
+        "coverage": coverage,
+        "line": line,
+    }
+
+
+def _averaged_rows(sums: dict, counts: dict, width: int, height: int, fill_value: int) -> list:
+    rows = []
+    for row in range(height):
+        cells = []
+        for col in range(width):
+            key = (row, col)
+            if key in counts:
+                cells.append(sums[key] // counts[key])
+            else:
+                cells.append(fill_value)
+        rows.append(cells)
+    return rows
+
+
+def _flag_rows(counts: dict, degraded: dict, width: int, height: int) -> list:
+    rows = []
+    for row in range(height):
+        flags = []
+        for col in range(width):
+            key = (row, col)
+            if key not in counts:
+                flags.append("empty")
+            elif key in degraded:
+                flags.append("degraded")
+            else:
+                flags.append("good")
+        rows.append(flags)
+    return rows
+
+
+def _coverage(counts: dict, width: int, height: int) -> int:
+    return len(counts) * 100 // (width * height)
+
+
+def _summary_line(total_cells: int, filled: int, dropped: int, rejected: int, saturated: int, coverage: int) -> str:
+    return (
+        "cells=" + str(total_cells)
+        + ";filled=" + str(filled)
+        + ";dropped=" + str(dropped)
+        + ";rejected=" + str(rejected)
+        + ";saturated=" + str(saturated)
+        + ";coverage=" + str(coverage)
+    )

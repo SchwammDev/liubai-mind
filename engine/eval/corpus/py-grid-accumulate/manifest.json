@@ -1,0 +1,12 @@
+{
+  "id": "py-grid-accumulate",
+  "lang": "python",
+  "files": ["accumulate_grid.py.case"],
+  "entry": "accumulate_grid.py",
+  "entrySymbol": "accumulate_grid",
+  "task": "Improve accumulate_grid.py. Keep the public function signature and behavior unchanged.",
+  "tier": "hard",
+  "tags": ["entangled", "coupled-state", "deletion-bait"],
+  "genuineDpMax": 40,
+  "baseline": { "decisionPoints": 46, "functions": 5, "silentHandlers": 0 }
+}
