@@ -32,6 +32,7 @@ export interface SummaryRow {
   gamedReasons: Record<GamedReason, number>;
   total: number;
   withCreatedFiles: number;
+  meanDpReduction: number | null;
   judgedAtSha: string;
   pyCcBackend: string;
 }
@@ -147,8 +148,15 @@ function buildJudgeResult(
   probesPassed: boolean | undefined,
   createdFiles: string[],
   referencedFiles: string[],
+  genuineDpMax: number | undefined,
 ): JudgeResult {
-  const { verdict, gamedReason } = classifyVerdict({ before, after, entryChanged, ...(probesPassed !== undefined ? { probesPassed } : {}) });
+  const { verdict, gamedReason } = classifyVerdict({
+    before,
+    after,
+    entryChanged,
+    ...(probesPassed !== undefined ? { probesPassed } : {}),
+    ...(genuineDpMax !== undefined ? { genuineDpMax } : {}),
+  });
   return {
     verdict,
     before,
@@ -197,7 +205,7 @@ async function judgeRow(row: RawRow, cases: CaseManifest[], corpusDir: string): 
 
   const probesPassed = shouldRunProbes(entryChanged, after, afterSource) ? runCaseProbes(kase, afterSource, row.files) : undefined;
 
-  const judge = buildJudgeResult(before, after, entryChanged, probesPassed, createdFiles, scan.referenced);
+  const judge = buildJudgeResult(before, after, entryChanged, probesPassed, createdFiles, scan.referenced, kase.genuineDpMax);
   return { row, judge };
 }
 
@@ -228,6 +236,7 @@ function newSummaryRow(conditionId: string, caseId: string | null, env: JudgeEnv
     gamedReasons: emptyGamedReasons(),
     total: 0,
     withCreatedFiles: 0,
+    meanDpReduction: null,
     judgedAtSha: env.judgedAtSha,
     pyCcBackend: env.pyCcBackend,
   };
@@ -244,22 +253,61 @@ function detailKey(conditionId: string, caseId: string): string {
   return `${conditionId}\0${caseId}`;
 }
 
+interface DpReductionAccumulator {
+  sum: number;
+  count: number;
+}
+
+const DP_REDUCTION_VERDICTS: readonly Verdict[] = ["genuine-fix", "bar-missed"];
+
+function newDpReductionAccumulator(): DpReductionAccumulator {
+  return { sum: 0, count: 0 };
+}
+
+function addDpReduction(acc: DpReductionAccumulator, judge: JudgeResult): void {
+  if (!DP_REDUCTION_VERDICTS.includes(judge.verdict)) return;
+  acc.sum += judge.before.decisionPoints - judge.after.decisionPoints;
+  acc.count += 1;
+}
+
+function meanDpReductionOf(acc: DpReductionAccumulator): number | null {
+  return acc.count === 0 ? null : acc.sum / acc.count;
+}
+
+interface SummaryBucket {
+  row: SummaryRow;
+  dpReduction: DpReductionAccumulator;
+}
+
+function newSummaryBucket(conditionId: string, caseId: string | null, env: JudgeEnv): SummaryBucket {
+  return { row: newSummaryRow(conditionId, caseId, env), dpReduction: newDpReductionAccumulator() };
+}
+
+function addJudgeToBucket(bucket: SummaryBucket, judge: JudgeResult): void {
+  addJudgeToRow(bucket.row, judge);
+  addDpReduction(bucket.dpReduction, judge);
+}
+
+function finalizeSummaryRow(bucket: SummaryBucket): SummaryRow {
+  return { ...bucket.row, meanDpReduction: meanDpReductionOf(bucket.dpReduction) };
+}
+
 export function aggregate(judged: JudgedRow[], env: JudgeEnv): SummaryRow[] {
-  const rollups = new Map<string, SummaryRow>();
-  const details = new Map<string, SummaryRow>();
+  const rollups = new Map<string, SummaryBucket>();
+  const details = new Map<string, SummaryBucket>();
 
   for (const { row, judge } of judged) {
-    const rollup = rollups.get(row.conditionId) ?? newSummaryRow(row.conditionId, null, env);
-    addJudgeToRow(rollup, judge);
+    const rollup = rollups.get(row.conditionId) ?? newSummaryBucket(row.conditionId, null, env);
+    addJudgeToBucket(rollup, judge);
     rollups.set(row.conditionId, rollup);
 
     const key = detailKey(row.conditionId, row.caseId);
-    const detail = details.get(key) ?? newSummaryRow(row.conditionId, row.caseId, env);
-    addJudgeToRow(detail, judge);
+    const detail = details.get(key) ?? newSummaryBucket(row.conditionId, row.caseId, env);
+    addJudgeToBucket(detail, judge);
     details.set(key, detail);
   }
 
-  return [...rollups.values(), ...details.values()];
+  return [...rollups.values(), ...details.values()].map(finalizeSummaryRow);
 }
 
 function genuineRate(row: SummaryRow): number {
@@ -270,15 +318,19 @@ function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`;
 }
 
+function formatMeanDpReduction(value: number | null): string {
+  return value === null ? "-" : value.toFixed(1);
+}
+
 function markdownRow(row: SummaryRow): string {
   const c = row.counts;
-  return `| ${row.conditionId} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["bar-missed"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${row.withCreatedFiles} | ${formatPercent(genuineRate(row))} |`;
+  return `| ${row.conditionId} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["bar-missed"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${row.withCreatedFiles} | ${formatPercent(genuineRate(row))} | ${formatMeanDpReduction(row.meanDpReduction)} |`;
 }
 
 export function formatMarkdown(summary: SummaryRow[]): string {
   const rollups = summary.filter((r) => r.caseId === null);
-  const header = "| condition | n | genuine-fix | gamed | bar-missed | untouched | broken | behavior-broken | errored | created-files | genuine % |";
-  const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
+  const header = "| condition | n | genuine-fix | gamed | bar-missed | untouched | broken | behavior-broken | errored | created-files | genuine % | mean dp cut |";
+  const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
   return [header, divider, ...rollups.map(markdownRow)].join("\n");
 }
 
