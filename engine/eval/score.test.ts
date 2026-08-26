@@ -86,6 +86,12 @@ function importingRowFiles(): Record<string, string> {
   };
 }
 
+function writeReferenceEntryFile(caseDir: string, entryFilename: string, source: string): void {
+  const referenceDir = join(caseDir, "reference");
+  mkdirSync(referenceDir, { recursive: true });
+  writeFileSync(join(referenceDir, `${entryFilename}.case`), source);
+}
+
 function hardTierCorpusDir(caseId: string, genuineDpMax: number): string {
   const corpusDir = mkdtempSync(join(tmpdir(), "eval-score-corpus-"));
   const caseDir = join(corpusDir, caseId);
@@ -116,6 +122,7 @@ function hardTierCorpusDir(caseId: string, genuineDpMax: number): string {
     join(caseDir, "thing.ts.case"),
     "export function f(x: number): number {\n  if (x > 0) {\n    return 1;\n  }\n  if (x < 0) {\n    return -1;\n  }\n  return 0;\n}\n",
   );
+  writeReferenceEntryFile(caseDir, "thing.ts", hardTierReducedButStillAboveBarSource());
   return corpusDir;
 }
 
@@ -154,6 +161,7 @@ function writeMixedTierCase(corpusDir: string, id: string, tier: Tier, source: s
   );
   writeFileSync(join(caseDir, "probes.json"), JSON.stringify(probes));
   writeFileSync(join(caseDir, "thing.ts.case"), source);
+  if (tier === "hard") writeReferenceEntryFile(caseDir, "thing.ts", source);
 }
 
 function mixedTierCorpusDir(): { corpusDir: string; easyId: string; hardId: string } {

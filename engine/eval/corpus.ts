@@ -262,6 +262,41 @@ function ensureFilesExist(caseDir: string, files: string[]): { error: string } |
   return undefined;
 }
 
+const REFERENCE_DIRNAME = "reference";
+
+function referenceDirOf(caseDir: string): string {
+  return join(caseDir, REFERENCE_DIRNAME);
+}
+
+function invalidReferenceFilename(filenames: string[]): string | undefined {
+  return filenames.find((f) => !f.endsWith(".case"));
+}
+
+function readReferenceFiles(referenceDir: string, filenames: string[]): Record<string, string> {
+  const reference: Record<string, string> = {};
+  for (const filename of filenames) {
+    reference[stripCaseSuffix(filename)] = readFileSync(join(referenceDir, filename), "utf8");
+  }
+  return reference;
+}
+
+function loadReference(caseDir: string, entry: string, tier: Tier): { value: Record<string, string> | undefined } | { error: string } {
+  const referenceDir = referenceDirOf(caseDir);
+  if (!existsSync(referenceDir)) {
+    if (tier === "hard") return { error: `hard case requires a ${REFERENCE_DIRNAME}/ directory` };
+    return { value: undefined };
+  }
+
+  const filenames = readdirSync(referenceDir);
+  const invalid = invalidReferenceFilename(filenames);
+  if (invalid !== undefined) return { error: `${REFERENCE_DIRNAME} file does not end in .case: ${invalid}` };
+
+  const entryFile = `${entry}.case`;
+  if (!filenames.includes(entryFile)) return { error: `${REFERENCE_DIRNAME}/ is missing the entry file: ${entryFile}` };
+
+  return { value: readReferenceFiles(referenceDir, filenames) };
+}
+
 function loadCase(caseDir: string, id: string): { manifest: CaseManifest } | { error: string } {
   const raw: unknown = JSON.parse(readFileSync(join(caseDir, "manifest.json"), "utf8"));
   const validated = validateManifestShape(raw);
@@ -273,7 +308,16 @@ function loadCase(caseDir: string, id: string): { manifest: CaseManifest } | { e
   const probes = loadProbes(caseDir);
   if ("error" in probes) return { error: `${id}: ${probes.error}` };
 
-  return { manifest: { ...validated.fields, probes: probes.value } };
+  const reference = loadReference(caseDir, validated.fields.entry, validated.fields.tier);
+  if ("error" in reference) return { error: `${id}: ${reference.error}` };
+
+  return {
+    manifest: {
+      ...validated.fields,
+      probes: probes.value,
+      ...(reference.value !== undefined ? { reference: reference.value } : {}),
+    },
+  };
 }
 
 function subdirectories(dir: string): string[] {

@@ -195,7 +195,13 @@ function writeMinimalCase(corpusDir: string, id: string, tier: Tier, genuineDpMa
     }),
   );
   writeFileSync(join(caseDir, "probes.json"), JSON.stringify([{ args: [1], returns: 2 }]));
-  writeFileSync(join(caseDir, "thing.ts.case"), "export function f(x: number): number {\n  return x;\n}\n");
+  const source = "export function f(x: number): number {\n  return x;\n}\n";
+  writeFileSync(join(caseDir, "thing.ts.case"), source);
+  if (tier === "hard") {
+    const referenceDir = join(caseDir, "reference");
+    mkdirSync(referenceDir, { recursive: true });
+    writeFileSync(join(referenceDir, "thing.ts.case"), source);
+  }
 }
 
 function twoTierCorpusDir(): string {
