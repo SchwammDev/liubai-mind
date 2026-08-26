@@ -56,13 +56,14 @@ spawn tasks=[
 ## Nudge-phrasing eval
 
 ```
-liubai eval collect --run <name> --model <provider/id> [--reps N] [--timeout-ms N] [--case id]... [--condition id]...
+liubai eval collect --run <name> --model <provider/id> [--reps N] [--timeout-ms N] [--case id]... [--condition id]... [--tier <easy|hard>]
 liubai eval score --run <name> [--compare <otherRunName>]
 ```
 
 **Conditions** — `engine/eval/conditions/*.json`, one per steering variant; optional phrasing pack set via `LIUBAI_PHRASING_PACK`.
-**Corpus** — `engine/eval/corpus/<case>/`, entry file uses the `.case` extension.
-**Verdicts** — `genuine-fix` (real complexity drop), `gamed` (`helper-split` | `silent-handler` — complexity moved, not removed), `bar-missed` (touched, no improvement), `untouched` (entry file unchanged), `broken` (output failed to parse), `behavior-broken` (entry changed but the after-source fails the case's behavior probes), `errored` (infra failure, not model behavior).
+**Corpus** — `engine/eval/corpus/<case>/`, entry file uses the `.case` extension. Every manifest declares `tier: "easy" | "hard"`; hard cases also declare `genuineDpMax` (the decision-point bar a genuine fix must reach, set from the committed reference fix) and ship that reference fix in `reference/` — a test judges it `genuine-fix` and runs it through the probes. Optional `tags` slice hard cases by difficulty lever.
+**Verdicts** — `genuine-fix` (decision points at or below the bar: `genuineDpMax` when set, else any reduction), `gamed` (`helper-split` | `silent-handler` — complexity moved, not removed), `bar-missed` (touched, bar not reached), `untouched` (entry file unchanged), `broken` (output failed to parse), `behavior-broken` (entry changed but the after-source fails the case's behavior probes), `errored` (infra failure, not model behavior).
+**Summary** — per-condition rollups overall and per tier, plus per-case detail rows; `mean dp cut` averages the decision-point reduction over behavior-valid rows (`genuine-fix` + `bar-missed`).
 
 `collect` runs the working-tree rails via pi headless, one spawn per case/condition/rep. `score` re-judges `raw.jsonl` offline — no model calls, safe to re-run after judge changes.
 
