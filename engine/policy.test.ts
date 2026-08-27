@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { analyze } from "./analyze.ts";
 import type { BeforeFunctionFacts, CommentFacts, Env, Extracted, FunctionFacts, Lang, Nudge, RuleConfig, RuleName } from "./contract.ts";
 import { RULE } from "./contract.ts";
-import { buildRules, DEFAULT_POLICY, dpDeltaEnabledLangs } from "./policy.ts";
+import { buildRules, DEFAULT_POLICY } from "./policy.ts";
 
 const PATH_BY_LANG: Record<Lang, string> = {
   python: "app/foo.py",
@@ -217,23 +217,14 @@ function withBefore(afterCcs: number[], beforeFunctions: BeforeFunctionFacts[]):
   return { ...functionsOnly(ccFns(afterCcs)), beforeFunctions };
 }
 
-const CC_DELTA_ENABLED_POLICY = {
-  ...DEFAULT_POLICY,
-  [RULE.ccDelta]: { ...(DEFAULT_POLICY[RULE.ccDelta] as RuleConfig), enabled: ["python"] as Lang[] },
-};
-
 const SPLIT_BEFORE: BeforeFunctionFacts[] = [beforeFunc({ name: "handleRequest", cyclomaticComplexity: 12 })];
 
 function ccDeltaResp(extracted: Extracted) {
-  return analyze({ path: "app/foo.py", after: "x" }, envWith(extracted), buildRules(CC_DELTA_ENABLED_POLICY, "python"));
+  return analyze({ path: "app/foo.py", after: "x" }, envWith(extracted), buildRules(DEFAULT_POLICY, "python"));
 }
 
-test("dpDeltaEnabledLangs returns no langs when the flag is undefined", () => {
-  assert.deepEqual(dpDeltaEnabledLangs(undefined), []);
-});
-
-test("dpDeltaEnabledLangs enables python and typescript when the flag is a non-empty string", () => {
-  assert.deepEqual(dpDeltaEnabledLangs("1"), ["python", "typescript"]);
+test("the cc-delta rule is enabled by default for python and typescript", () => {
+  assert.deepEqual(DEFAULT_POLICY[RULE.ccDelta].enabled, ["python", "typescript"]);
 });
 
 test("the cc-delta rule nudges a helper split that hides a violation without lowering decision points", async () => {
