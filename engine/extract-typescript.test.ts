@@ -26,6 +26,21 @@ async function ccOf(src: string, name: string, path = "app/foo.ts"): Promise<num
   return findFn(ext, name).cyclomaticComplexity;
 }
 
+async function controlStatementCountOf(src: string, name: string, path = "app/foo.ts"): Promise<number> {
+  const ext = await extractText(path, src);
+  return findFn(ext, name).controlStatementCount;
+}
+
+async function rawAssertCountOf(src: string, name: string, path = "app/foo.ts"): Promise<number> {
+  const ext = await extractText(path, src);
+  return findFn(ext, name).rawAssertCount;
+}
+
+async function plumbingLinesOf(src: string, name: string, path = "app/foo.ts"): Promise<number> {
+  const ext = await extractText(path, src);
+  return findFn(ext, name).plumbingLines;
+}
+
 test("source_where_only_part_is_broken_extracts_nothing", async () => {
   const src = "export function f(x: number): number { return x; }\n)))garbage(((\n";
 
@@ -409,9 +424,109 @@ test("a non-test call's trailing callback in a test file stays anonymous and non
   assert.equal(fn.isTest, false);
 });
 
+test("control_statement_count_counts_if_and_for_and_else_if_adds_one_more", async () => {
+  const src =
+    "function f(x) {\n" +
+    "  if (x === 1) { return 1; }\n" +
+    "  else if (x === 2) { return 2; }\n" +
+    "  for (let i = 0; i < x; i++) { use(i); }\n" +
+    "  return 0;\n" +
+    "}\n";
+
+  assert.equal(await controlStatementCountOf(src, "f"), 3);
+});
+
+test("ternary_and_logical_and_are_not_counted_as_control_statements", async () => {
+  const src = "function f(x, y) {\n  const z = x ? y : 0;\n  return z && y;\n}\n";
+
+  assert.equal(await controlStatementCountOf(src, "f"), 0);
+});
+
+test("nested_inner_function_statements_are_excluded_from_the_outer_functions_facts", async () => {
+  const src =
+    "function outer() {\n" +
+    "  function inner(b) {\n" +
+    "    if (b) {\n" +
+    "      expect(b && b).toBe(true);\n" +
+    "      const data = {\n" +
+    "        a: 1,\n" +
+    "      };\n" +
+    "    }\n" +
+    "    return 0;\n" +
+    "  }\n" +
+    "  return inner(1);\n" +
+    "}\n";
+
+  const ext = await extractText("app/foo.ts", src);
+  const outer = findFn(ext, "outer");
+
+  assert.equal(outer.controlStatementCount, 0);
+  assert.equal(outer.rawAssertCount, 0);
+  assert.equal(outer.plumbingLines, 0);
+});
+
+test("three_plain_expect_calls_count_three", async () => {
+  const src = "function f() {\n  expect(a).toBe(1);\n  expect(b).toBe(2);\n  expect(c).toBe(3);\n}\n";
+
+  assert.equal(await rawAssertCountOf(src, "f"), 3);
+});
+
+test("and_joined_expect_and_assert_ok_count_one_per_operand", async () => {
+  const src =
+    "function f() {\n  expect(a && b).toBe(true);\n}\n" +
+    "function g() {\n  assert.ok(a && b && c);\n}\n" +
+    "function h() {\n  assert.strictEqual(a, b);\n}\n";
+
+  assert.equal(await rawAssertCountOf(src, "f"), 2);
+  assert.equal(await rawAssertCountOf(src, "g"), 3);
+  assert.equal(await rawAssertCountOf(src, "h"), 1);
+});
+
+test("a_call_to_a_non_expect_non_assert_helper_is_not_a_raw_assert", async () => {
+  const src = "function f() {\n  someHelper(a, b);\n}\n";
+
+  assert.equal(await rawAssertCountOf(src, "f"), 0);
+});
+
+test("multiline_literal_assignment_adds_its_full_line_span_to_plumbing_lines", async () => {
+  const src =
+    "function f() {\n" +
+    "  const data = {\n" +
+    "    a: 1,\n" +
+    "    b: 2,\n" +
+    "  };\n" +
+    "  return data;\n" +
+    "}\n";
+
+  assert.equal(await plumbingLinesOf(src, "f"), 4);
+});
+
+test("assignment_with_a_call_on_the_right_hand_side_adds_no_plumbing_lines", async () => {
+  const src = "function f() {\n  const result = client.score(x);\n  return result;\n}\n";
+
+  assert.equal(await plumbingLinesOf(src, "f"), 0);
+});
+
+test("a_for_loop_headers_own_declaration_does_not_count_as_plumbing", async () => {
+  const src = "function f() {\n  for (let i = 0; i < 10; i++) {\n    use(i);\n  }\n}\n";
+
+  assert.equal(await plumbingLinesOf(src, "f"), 0);
+});
+
+test("a_bare_assert_call_counts_operands_but_a_prefixed_helper_name_does_not_count", async () => {
+  const src =
+    "function f() {\n  assert(a && b);\n}\n" +
+    "function assertTileIsValid(a, b) {\n  helper(a, b);\n}\n" +
+    "function g() {\n  assertTileIsValid(a, b);\n}\n";
+
+  assert.equal(await rawAssertCountOf(src, "f"), 2);
+  assert.equal(await rawAssertCountOf(src, "g"), 0);
+});
+
 const WELL_FORMED_FUNCTION = {
   name: "f", startLine: 1, endLine: 1, cyclomaticComplexity: 1, missingAnnotations: [],
   isTest: false, bodyLineCount: 1, signature: "new", body: "new",
+  controlStatementCount: 0, rawAssertCount: 0, plumbingLines: 0,
 };
 const WELL_FORMED_COMMENT = { line: 1, text: "// x", kind: "line", added: true };
 function rejectsFunctionWith(override: Record<string, unknown>): void {
@@ -428,6 +543,9 @@ test("validateFunction rejects a non-object or a mistyped scalar field", () => {
   rejectsFunctionWith({ cyclomaticComplexity: "1" });
   rejectsFunctionWith({ isTest: "no" });
   rejectsFunctionWith({ bodyLineCount: "1" });
+  rejectsFunctionWith({ controlStatementCount: "1" });
+  rejectsFunctionWith({ rawAssertCount: "1" });
+  rejectsFunctionWith({ plumbingLines: "1" });
 });
 
 test("validateFunction rejects a malformed annotations list or change field", () => {

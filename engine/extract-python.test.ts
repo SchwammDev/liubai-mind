@@ -71,6 +71,18 @@ async function ccOf(src: string, name = "f"): Promise<number> {
   return findFn(await extractText("app/foo.py", src), name).cyclomaticComplexity;
 }
 
+async function controlStatementCountOf(src: string, name = "f"): Promise<number> {
+  return findFn(await extractText("app/foo.py", src), name).controlStatementCount;
+}
+
+async function rawAssertCountOf(src: string, name = "f"): Promise<number> {
+  return findFn(await extractText("app/foo.py", src), name).rawAssertCount;
+}
+
+async function plumbingLinesOf(src: string, name = "f"): Promise<number> {
+  return findFn(await extractText("app/foo.py", src), name).plumbingLines;
+}
+
 test("cyclomatic_complexity_scores_branching_higher_than_flat", async () => {
   const ext = await extractText("app/foo.py", BRANCHING_THEN_FLAT);
 
@@ -175,6 +187,92 @@ test("lizard_cc_handles_nested_function_namespace_strip", async () => {
   assert.equal(await ccOf(NESTED_INNER, "inner"), 2);
 });
 
+test("control_statement_count_counts_if_and_for_and_elif_adds_one_more", async () => {
+  const src =
+    "def f(x):\n" +
+    "    if x:\n" +
+    "        return 1\n" +
+    "    elif x:\n" +
+    "        return 2\n" +
+    "    for i in range(x):\n" +
+    "        pass\n" +
+    "    return 0\n";
+
+  assert.equal(await controlStatementCountOf(src), 3);
+});
+
+test("with_block_ternary_and_bool_op_are_not_counted_as_control_statements", async () => {
+  const src =
+    "def f(x):\n" +
+    "    with pytest.raises(ValueError):\n" +
+    "        y = 1 if x else 2\n" +
+    "        z = x and y\n" +
+    "    return y\n";
+
+  assert.equal(await controlStatementCountOf(src), 0);
+});
+
+test("nested_inner_function_statements_are_excluded_from_the_outer_functions_facts", async () => {
+  const src =
+    "def outer(a):\n" +
+    "    def inner(b):\n" +
+    "        if b > 0:\n" +
+    "            assert b and a\n" +
+    "            data = {\n" +
+    "                'x': 1,\n" +
+    "            }\n" +
+    "        return 0\n" +
+    "    return inner(a)\n";
+
+  const ext = await extractText("app/foo.py", src);
+  const outer = findFn(ext, "outer");
+
+  assert.equal(outer.controlStatementCount, 0);
+  assert.equal(outer.rawAssertCount, 0);
+  assert.equal(outer.plumbingLines, 0);
+});
+
+test("three_plain_assert_statements_count_three", async () => {
+  const src = "def f():\n    assert a\n    assert b\n    assert c\n";
+
+  assert.equal(await rawAssertCountOf(src), 3);
+});
+
+test("and_joined_assert_counts_one_per_operand_but_or_joined_assert_stays_one", async () => {
+  const src =
+    "def f():\n    assert a and b\n" +
+    "def g():\n    assert a and b and c\n" +
+    "def h():\n    assert a or b\n";
+
+  assert.equal(await rawAssertCountOf(src, "f"), 2);
+  assert.equal(await rawAssertCountOf(src, "g"), 3);
+  assert.equal(await rawAssertCountOf(src, "h"), 1);
+});
+
+test("helper_call_assertion_is_not_a_raw_assert", async () => {
+  const src = "def f():\n    assert_frame_equal(a, b)\n";
+
+  assert.equal(await rawAssertCountOf(src), 0);
+});
+
+test("multiline_literal_assignment_adds_its_full_line_span_to_plumbing_lines", async () => {
+  const src =
+    "def f():\n" +
+    "    data = {\n" +
+    "        'a': 1,\n" +
+    "        'b': 2,\n" +
+    "    }\n" +
+    "    return data\n";
+
+  assert.equal(await plumbingLinesOf(src), 4);
+});
+
+test("assignment_with_a_call_on_the_right_hand_side_adds_no_plumbing_lines", async () => {
+  const src = "def f():\n    result = client.score(x)\n    return result\n";
+
+  assert.equal(await plumbingLinesOf(src), 0);
+});
+
 test("missing_lizard_hard_fails_with_install_message", async () => {
   const systemPythonWithoutLizard = "/usr/bin/python3";
   const res = spawnSync(systemPythonWithoutLizard, [join(import.meta.dirname, "extract-python.py")], {
@@ -190,6 +288,7 @@ test("missing_lizard_hard_fails_with_install_message", async () => {
 const WELL_FORMED_FUNCTION = {
   name: "f", startLine: 1, endLine: 1, cyclomaticComplexity: 1, missingAnnotations: [],
   isTest: false, bodyLineCount: 1, signature: "new", body: "new",
+  controlStatementCount: 0, rawAssertCount: 0, plumbingLines: 0,
 };
 
 const WELL_FORMED_COMMENT = { line: 1, text: "# x", kind: "line", added: true };
@@ -209,6 +308,9 @@ test("validateFunction rejects a non-object or a mistyped scalar field", () => {
   rejectsFunctionWith({ cyclomaticComplexity: "1" });
   rejectsFunctionWith({ isTest: "no" });
   rejectsFunctionWith({ bodyLineCount: "1" });
+  rejectsFunctionWith({ controlStatementCount: "1" });
+  rejectsFunctionWith({ rawAssertCount: "1" });
+  rejectsFunctionWith({ plumbingLines: "1" });
 });
 
 test("validateFunction rejects a malformed annotations list or change field", () => {

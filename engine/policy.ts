@@ -1,7 +1,7 @@
-import type { CommentFacts, Exemption, Lang, Nudge, Rule, RuleConfig, RuleContext, RuleName } from "./contract.ts";
+import type { CommentFacts, Exemption, FunctionFacts, Lang, Nudge, Rule, RuleConfig, RuleContext, RuleName } from "./contract.ts";
 import { RULE } from "./contract.ts";
 import { decisionPoints } from "./decision-points.ts";
-import { ANNOTATION_ADVICE, CC_DELTA_NUDGE, CC_NUDGE, DOC_COMMENT_FORM, TEST_BODY_NUDGE, TEST_HELPERS, formatCcDeltaNudge, formatCcNudge, formatTestBodyNudge } from "./messages.ts";
+import { ANNOTATION_ADVICE, CC_DELTA_NUDGE, CC_NUDGE, DOC_COMMENT_FORM, TEST_ASSERT_PILE_NUDGE, TEST_DATA_PLUMBING_NUDGE, TEST_HELPERS, TEST_LINEARITY_NUDGE, formatCcDeltaNudge, formatCcNudge, formatTestNudge } from "./messages.ts";
 
 export { RULE } from "./contract.ts";
 export type { Exemption, RuleConfig, RuleName } from "./contract.ts";
@@ -23,10 +23,20 @@ export const DEFAULT_POLICY: Policy = {
     enabled: ["python"],
     severity: "nudge",
   },
-  [RULE.testBody]: {
-    enabled: ["python", "typescript", "cpp"],
+  [RULE.testLinearity]: {
+    enabled: ["python", "typescript"],
     severity: "nudge",
-    threshold: { python: 8, typescript: 8, cpp: 8 },
+    threshold: { python: 0, typescript: 0, cpp: 0 },
+  },
+  [RULE.testAssertPile]: {
+    enabled: ["python", "typescript"],
+    severity: "nudge",
+    threshold: { python: 2, typescript: 2, cpp: 2 },
+  },
+  [RULE.testDataPlumbing]: {
+    enabled: ["python", "typescript"],
+    severity: "nudge",
+    threshold: { python: 6, typescript: 6, cpp: 6 },
   },
   [RULE.discourageComments]: {
     enabled: ["python", "typescript", "cpp"],
@@ -102,33 +112,44 @@ function helperHint(lang: Lang, helpers: string[] | undefined): string {
   return ` No ${convention.pattern} helpers in ${convention.root} yet — write one.`;
 }
 
-const testBodyRule = (cfg: RuleConfig): Rule => ({
-  name: RULE.testBody,
-  run: (ctx: RuleContext): Nudge[] => {
-    const threshold = thresholdFor(RULE.testBody, cfg, ctx.lang);
+function testFactRule(
+  name: RuleName,
+  factOf: (fn: FunctionFacts) => number,
+  phrasing: { first: string; rest: string },
+  useHelperHint: boolean,
+): (cfg: RuleConfig) => Rule {
+  return (cfg: RuleConfig): Rule => ({
+    name,
+    run: (ctx: RuleContext): Nudge[] => {
+      const threshold = thresholdFor(name, cfg, ctx.lang);
 
-    const flagged = ctx.extracted.functions.filter(
-      (fn) => fn.isTest && fn.body !== "same" && fn.bodyLineCount > threshold,
-    );
-    if (flagged.length === 0) return [];
+      const flagged = ctx.extracted.functions.filter(
+        (fn) => fn.isTest && fn.body !== "same" && factOf(fn) > threshold,
+      );
+      if (flagged.length === 0) return [];
 
-    const hint = helperHint(ctx.lang, ctx.env.helpers?.(ctx.lang));
+      const hint = useHelperHint ? helperHint(ctx.lang, ctx.env.helpers?.(ctx.lang)) : "";
 
-    const nudges: Nudge[] = [];
-    for (let i = 0; i < flagged.length; i++) {
-      const fn = flagged[i]!;
-      const template = i === 0 ? TEST_BODY_NUDGE.first : TEST_BODY_NUDGE.rest;
-      const base = formatTestBodyNudge(template, { name: fn.name });
-      nudges.push({
-        rule: RULE.testBody,
-        severity: cfg.severity,
-        line: fn.startLine,
-        msg: i === 0 ? base + hint : base,
-      });
-    }
-    return nudges;
-  },
-});
+      const nudges: Nudge[] = [];
+      for (let i = 0; i < flagged.length; i++) {
+        const fn = flagged[i]!;
+        const template = i === 0 ? phrasing.first : phrasing.rest;
+        const base = formatTestNudge(template, { name: fn.name, n: factOf(fn) });
+        nudges.push({
+          rule: name,
+          severity: cfg.severity,
+          line: fn.startLine,
+          msg: i === 0 && useHelperHint ? base + hint : base,
+        });
+      }
+      return nudges;
+    },
+  });
+}
+
+const testLinearityRule = testFactRule(RULE.testLinearity, (fn) => fn.controlStatementCount, TEST_LINEARITY_NUDGE, false);
+const testAssertPileRule = testFactRule(RULE.testAssertPile, (fn) => fn.rawAssertCount, TEST_ASSERT_PILE_NUDGE, true);
+const testDataPlumbingRule = testFactRule(RULE.testDataPlumbing, (fn) => fn.plumbingLines, TEST_DATA_PLUMBING_NUDGE, false);
 
 function matchesExemption(
   path: string,
@@ -189,7 +210,9 @@ const IMPLS: Record<RuleName, (cfg: RuleConfig) => Rule> = {
   [RULE.cc]: ccRule,
   [RULE.ccDelta]: ccDeltaRule,
   [RULE.typeAnnotation]: typeAnnotationRule,
-  [RULE.testBody]: testBodyRule,
+  [RULE.testLinearity]: testLinearityRule,
+  [RULE.testAssertPile]: testAssertPileRule,
+  [RULE.testDataPlumbing]: testDataPlumbingRule,
   [RULE.discourageComments]: discourageCommentsRule,
 };
 

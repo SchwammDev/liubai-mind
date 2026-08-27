@@ -63,6 +63,129 @@ function cyclomaticComplexityWithin(functionNode: TSNode): number {
   return count;
 }
 
+const CONTROL_STATEMENT_NODE_TYPES = new Set([
+  "if_statement",
+  "for_statement",
+  "for_in_statement",
+  "while_statement",
+  "do_statement",
+  "switch_statement",
+  "try_statement",
+]);
+
+function walkOwnScope(functionNode: TSNode, visitor: (node: TSNode) => void): void {
+  const visit = (node: TSNode, isRoot: boolean): void => {
+    if (!isRoot && FUNCTION_NODE_TYPES.has(node.type)) return;
+    if (!isRoot) visitor(node);
+    for (const child of node.namedChildren) visit(child, false);
+  };
+  visit(functionNode, true);
+}
+
+function controlStatementCountWithin(functionNode: TSNode): number {
+  let count = 0;
+  walkOwnScope(functionNode, (node) => {
+    if (CONTROL_STATEMENT_NODE_TYPES.has(node.type)) count += 1;
+  });
+  return count;
+}
+
+function memberExpressionRootIdentifier(node: TSNode): TSNode | null {
+  let current = node;
+  while (current.type === "member_expression") {
+    const object = current.childForFieldName("object");
+    if (object === null) return null;
+    current = object;
+  }
+  return current;
+}
+
+function isAssertMemberCallee(node: TSNode): boolean {
+  if (node.type !== "member_expression") return false;
+  const root = memberExpressionRootIdentifier(node);
+  return root !== null && root.type === "identifier" && root.text === "assert";
+}
+
+function isExpectCallee(node: TSNode): boolean {
+  return node.type === "identifier" && node.text === "expect";
+}
+
+function isBareAssertCallee(node: TSNode): boolean {
+  return node.type === "identifier" && node.text === "assert";
+}
+
+function andChainOperandCount(node: TSNode): number {
+  if (node.type !== "binary_expression") return 1;
+  const op = operatorOf(node);
+  if (op === null || op.text !== "&&") return 1;
+  const left = node.childForFieldName("left");
+  const right = node.childForFieldName("right");
+  const leftCount = left !== null ? andChainOperandCount(left) : 1;
+  const rightCount = right !== null ? andChainOperandCount(right) : 1;
+  return leftCount + rightCount;
+}
+
+function rawAssertContribution(callNode: TSNode): number {
+  const args = callNode.childForFieldName("arguments");
+  const firstArg = args?.namedChildren[0];
+  if (firstArg === undefined) return 1;
+  return andChainOperandCount(firstArg);
+}
+
+function rawAssertCountWithin(functionNode: TSNode): number {
+  let count = 0;
+  walkOwnScope(functionNode, (node) => {
+    if (node.type !== "call_expression") return;
+    const callee = node.childForFieldName("function");
+    if (callee === null) return;
+    if (isExpectCallee(callee) || isBareAssertCallee(callee) || isAssertMemberCallee(callee)) {
+      count += rawAssertContribution(node);
+    }
+  });
+  return count;
+}
+
+function lineSpanOf(node: TSNode): number {
+  return node.endPosition.row - node.startPosition.row + 1;
+}
+
+function containsCallOrNew(node: TSNode): boolean {
+  if (node.type === "call_expression" || node.type === "new_expression") return true;
+  for (const child of node.namedChildren) {
+    if (containsCallOrNew(child)) return true;
+  }
+  return false;
+}
+
+function isForLoopInitializer(node: TSNode): boolean {
+  const parent = node.parent;
+  return parent !== null && parent.type === "for_statement" && parent.childForFieldName("initializer") === node;
+}
+
+function declarationHasNoCallInitializer(node: TSNode): boolean {
+  const values = node.namedChildren
+    .filter((child) => child.type === "variable_declarator")
+    .map((declarator) => declarator.childForFieldName("value"))
+    .filter((value): value is TSNode => value !== null);
+  if (values.length === 0) return false;
+  return values.every((value) => !containsCallOrNew(value));
+}
+
+function plumbingLinesWithin(functionNode: TSNode): number {
+  let total = 0;
+  walkOwnScope(functionNode, (node) => {
+    if (node.type === "lexical_declaration" || node.type === "variable_declaration") {
+      if (!isForLoopInitializer(node) && declarationHasNoCallInitializer(node)) total += lineSpanOf(node);
+      return;
+    }
+    if (node.type === "assignment_expression") {
+      const right = node.childForFieldName("right");
+      if (right !== null && !containsCallOrNew(right)) total += lineSpanOf(node);
+    }
+  });
+  return total;
+}
+
 const TOOLING_RE =
   /@ts-(?:ignore|expect-error)|eslint-(?:disable|enable)(?:-next-line)?|istanbul ignore next|c8 ignore next|prettier-ignore|stylelint-disable|tslint:disable|jshint|jscs|jslint/i;
 
@@ -124,6 +247,9 @@ export function validateFunction(raw: unknown): FunctionFacts {
     endLine: requireNumber(raw.endLine, "extract-typescript: function endLine is not a number"),
     signature: requireChange(raw.signature, "extract-typescript: function signature is not a Change"),
     body: requireChange(raw.body, "extract-typescript: function body is not a Change"),
+    controlStatementCount: requireNumber(raw.controlStatementCount, "extract-typescript: function controlStatementCount is not a number"),
+    rawAssertCount: requireNumber(raw.rawAssertCount, "extract-typescript: function rawAssertCount is not a number"),
+    plumbingLines: requireNumber(raw.plumbingLines, "extract-typescript: function plumbingLines is not a number"),
   };
 }
 
@@ -434,6 +560,9 @@ function functionFacts(
       bodyLineCount,
       signature,
       body: bodyChange,
+      controlStatementCount: controlStatementCountWithin(node),
+      rawAssertCount: rawAssertCountWithin(node),
+      plumbingLines: plumbingLinesWithin(node),
     } satisfies FunctionFacts;
   });
 }

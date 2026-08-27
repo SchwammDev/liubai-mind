@@ -57,6 +57,9 @@ export function validateFunction(raw: unknown): FunctionFacts {
     endLine: requireNumber(raw.endLine, "extract-python: function endLine is not a number"),
     signature: requireChange(raw.signature, "extract-python: function signature is not a Change"),
     body: requireChange(raw.body, "extract-python: function body is not a Change"),
+    controlStatementCount: requireNumber(raw.controlStatementCount, "extract-python: function controlStatementCount is not a number"),
+    rawAssertCount: requireNumber(raw.rawAssertCount, "extract-python: function rawAssertCount is not a number"),
+    plumbingLines: requireNumber(raw.plumbingLines, "extract-python: function plumbingLines is not a number"),
   };
 }
 
