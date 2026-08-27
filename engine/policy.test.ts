@@ -260,13 +260,14 @@ test("the cc-delta rule stays silent when no before-function exceeded the thresh
   assert.deepEqual(resp.nudges, []);
 });
 
-test("the test-body rule nudges a touched test function over the lang threshold", async () => {
+test("the test-body rule coaches a touched over-threshold test without citing the metric", async () => {
   const env = envWith({ functions: [func({ name: "f", isTest: true, body: "changed", bodyLineCount: 9, startLine: 4 })], comments: [] });
 
   const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
 
   assert.equal(resp.nudges.length, 1);
-  assertNudge(firstNudge(resp), { rule: RULE.testBody, severity: "nudge", line: 4, msgMatches: [/f \(9L\)/, /Threshold is 8/] });
+  assertNudge(firstNudge(resp), { rule: RULE.testBody, severity: "nudge", line: 4, msgMatches: [/^f reads as a wall of mechanics/, /domain language/] });
+  assert.doesNotMatch(firstNudge(resp).msg, /threshold|\d+L/i, "coaching nudge must not lead with the line-count metric");
 });
 
 test("the test-body rule stays silent at the threshold", async () => {
@@ -343,6 +344,14 @@ test("the test-body rule appends helper hint only on the first nudge", async () 
   assert.match(nthNudge(resp, 0).msg, /Existing helpers: assert_eq, assert_throws\./);
   assert.doesNotMatch(nthNudge(resp, 1).msg, /Existing helpers/);
   assert.doesNotMatch(nthNudge(resp, 1).msg, /No assert_\*\/_\* helpers/);
+});
+
+test("subsequent test-body nudges use the short same-smell form", async () => {
+  const env = envWith(functionsOnly(TWO_LONG_TESTS), () => []);
+
+  const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
+
+  assert.match(nthNudge(resp, 1).msg, /^test_b: same smell/);
 });
 
 test("the test-body rule suggests writing a helper when none exist", async () => {

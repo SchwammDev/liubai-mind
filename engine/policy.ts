@@ -1,7 +1,7 @@
 import type { CommentFacts, Exemption, Lang, Nudge, Rule, RuleConfig, RuleContext, RuleName } from "./contract.ts";
 import { RULE } from "./contract.ts";
 import { decisionPoints } from "./decision-points.ts";
-import { ANNOTATION_ADVICE, CC_DELTA_NUDGE, CC_NUDGE, DOC_COMMENT_FORM, TEST_HELPERS, formatCcDeltaNudge, formatCcNudge } from "./messages.ts";
+import { ANNOTATION_ADVICE, CC_DELTA_NUDGE, CC_NUDGE, DOC_COMMENT_FORM, TEST_BODY_NUDGE, TEST_HELPERS, formatCcDeltaNudge, formatCcNudge, formatTestBodyNudge } from "./messages.ts";
 
 export { RULE } from "./contract.ts";
 export type { Exemption, RuleConfig, RuleName } from "./contract.ts";
@@ -117,7 +117,8 @@ const testBodyRule = (cfg: RuleConfig): Rule => ({
     const nudges: Nudge[] = [];
     for (let i = 0; i < flagged.length; i++) {
       const fn = flagged[i]!;
-      const base = `${fn.name} (${fn.bodyLineCount}L). Long test: hide asserts behind intent-named helpers; extract setup. Threshold is ${threshold}.`;
+      const template = i === 0 ? TEST_BODY_NUDGE.first : TEST_BODY_NUDGE.rest;
+      const base = formatTestBodyNudge(template, { name: fn.name });
       nudges.push({
         rule: RULE.testBody,
         severity: cfg.severity,

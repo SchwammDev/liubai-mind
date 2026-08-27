@@ -120,7 +120,7 @@ test("a long test's nudge rides along on the tool result", async () => {
 
   assert.equal(outcome.blocked, false);
   assert.match(outcome.text, /edited 1 file/);
-  assert.match(outcome.text, /Long test/);
+  assert.match(outcome.text, /wall of mechanics/);
 });
 
 test("an edit that triggers no rail leaves the result untouched", async () => {
