@@ -30,7 +30,7 @@ test("loadConditions_loads_all_committed_conditions", () => {
 
   assertLoaded(result);
   const ids = result.map((c) => c.id).sort();
-  assert.deepEqual(ids, ["coaching-v1", "control", "dp-delta-v1", "rails-default"]);
+  assert.deepEqual(ids, ["coaching-v1", "control", "rails-default"]);
 });
 
 test("loadConditions_reads_control_env_from_its_manifest", () => {

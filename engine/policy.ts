@@ -8,10 +8,6 @@ export type { Exemption, RuleConfig, RuleName } from "./contract.ts";
 
 export type Policy = Record<RuleName, RuleConfig>;
 
-export function dpDeltaEnabledLangs(flag: string | undefined): Lang[] {
-  return flag !== undefined && flag !== "" ? ["python", "typescript"] : [];
-}
-
 export const DEFAULT_POLICY: Policy = {
   [RULE.cc]: {
     enabled: ["python", "typescript", "cpp"],
@@ -19,7 +15,7 @@ export const DEFAULT_POLICY: Policy = {
     threshold: { python: 8, typescript: 8, cpp: 8 },
   },
   [RULE.ccDelta]: {
-    enabled: dpDeltaEnabledLangs(process.env.LIUBAI_DP_DELTA),
+    enabled: ["python", "typescript"],
     severity: "nudge",
     threshold: { python: 8, typescript: 8, cpp: 8 },
   },
