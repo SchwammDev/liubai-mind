@@ -25,12 +25,12 @@ function writeCondition(dir: string, filename: string, manifest: object): void {
   writeFileSync(join(dir, filename), JSON.stringify(manifest));
 }
 
-test("loadConditions_loads_both_committed_conditions", () => {
+test("loadConditions_loads_all_committed_conditions", () => {
   const result = loadConditions(CONDITIONS_DIR);
 
   assertLoaded(result);
   const ids = result.map((c) => c.id).sort();
-  assert.deepEqual(ids, ["control", "rails-default"]);
+  assert.deepEqual(ids, ["coaching-v1", "control", "rails-default"]);
 });
 
 test("loadConditions_reads_control_env_from_its_manifest", () => {
