@@ -1,10 +1,6 @@
-import type { FunctionFacts } from "../contract.ts";
 import type { Metrics, Verdict, GamedReason } from "./eval-contract.ts";
 
-export function decisionPoints(functions: FunctionFacts[]): number {
-  const total = functions.reduce((sum, fn) => sum + fn.cyclomaticComplexity, 0);
-  return total - functions.length;
-}
+export { decisionPoints } from "../decision-points.ts";
 
 function isBroken(before: Metrics, after: Metrics): boolean {
   return !after.parsed || (after.nFunctions === 0 && before.nFunctions >= 1);

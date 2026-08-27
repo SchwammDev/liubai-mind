@@ -18,6 +18,12 @@ export interface AnalyzeResp { nudges: Nudge[]; errors: RailError[] }
 export interface Extracted {
   functions: FunctionFacts[];
   comments: CommentFacts[];
+  beforeFunctions?: BeforeFunctionFacts[];
+}
+
+export interface BeforeFunctionFacts {
+  name: string;
+  cyclomaticComplexity: number;
 }
 
 export type Change = "new" | "changed" | "same";

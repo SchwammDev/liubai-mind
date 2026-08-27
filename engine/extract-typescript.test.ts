@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { typescriptExtractor, validateFunction, validateComment } from "./extract-typescript.ts";
-import type { Extracted, FunctionFacts } from "./contract.ts";
+import type { BeforeFunctionFacts, Extracted, FunctionFacts } from "./contract.ts";
 
 async function extractText(path: string, after: string, before?: string): Promise<Extracted> {
   const res = typescriptExtractor.extract({ path, after, ...(before !== undefined ? { before } : {}) });
@@ -12,6 +12,12 @@ async function extractText(path: string, after: string, before?: string): Promis
 function findFn(ext: Extracted, name: string): FunctionFacts {
   const fn = ext.functions.find((f) => f.name === name);
   if (fn === undefined) assert.fail(`expected function ${name}`);
+  return fn;
+}
+
+function findBeforeFn(ext: Extracted, name: string): BeforeFunctionFacts {
+  const fn = ext.beforeFunctions?.find((f) => f.name === name);
+  if (fn === undefined) assert.fail(`expected before function ${name}`);
   return fn;
 }
 
@@ -177,6 +183,22 @@ test("new_function_when_no_before_marks_both_new", async () => {
   const fn = findFn(ext, "f");
   assert.equal(fn.signature, "new");
   assert.equal(fn.body, "new");
+});
+
+test("beforeFunctions_reports_cyclomatic_complexity_of_a_branching_before_function", async () => {
+  const before = "function f(x) {\n  if (x === 1) return 1;\n  else if (x === 2) return 2;\n  else if (x === 3) return 3;\n  return 0;\n}\n";
+  const after = "function f(x) {\n  return 0;\n}\n";
+
+  const ext = await extractText("app/foo.ts", after, before);
+  const fn = findBeforeFn(ext, "f");
+
+  assert.equal(fn.cyclomaticComplexity, 4);
+});
+
+test("beforeFunctions_is_undefined_when_extraction_has_no_before", async () => {
+  const ext = await extractText("app/foo.ts", "function f() {\n  return 1;\n}\n");
+
+  assert.equal(ext.beforeFunctions, undefined);
 });
 
 test("comment_kinds_classify_line_block_doc_tooling", async () => {

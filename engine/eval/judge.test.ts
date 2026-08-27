@@ -1,39 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { decisionPoints, classifyVerdict } from "./judge.ts";
+import { classifyVerdict } from "./judge.ts";
 import type { Metrics } from "./eval-contract.ts";
-import type { FunctionFacts } from "../contract.ts";
-
-function fn(cc: number): FunctionFacts {
-  return {
-    name: "f",
-    startLine: 1,
-    endLine: 1,
-    cyclomaticComplexity: cc,
-    missingAnnotations: [],
-    isTest: false,
-    bodyLineCount: 1,
-    signature: "same",
-    body: "same",
-  };
-}
 
 function metrics(over: Partial<Metrics>): Metrics {
   return { decisionPoints: 4, nFunctions: 1, silentHandlers: 0, parsed: true, ...over };
 }
-
-test("decisionPoints_sums_cc_minus_function_count", () => {
-  const result = decisionPoints([fn(3), fn(5), fn(2)]);
-
-  assert.equal(result, (3 + 5 + 2) - 3);
-});
-
-test("decisionPoints_of_empty_list_is_zero", () => {
-  const result = decisionPoints([]);
-
-  assert.equal(result, 0);
-});
 
 test("classifyVerdict_reports_broken_when_after_did_not_parse", () => {
   const result = classifyVerdict({

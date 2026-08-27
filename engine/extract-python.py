@@ -258,11 +258,31 @@ def _functions(after: str, before: str | None, path: str) -> list[dict]:
     return _function_facts(tree, lines, path, before_funcs, lizard_map)
 
 
+def _before_functions(before: str, path: str) -> list[dict]:
+    try:
+        tree = ast.parse(before)
+    except SyntaxError:
+        return []
+    lizard_map = _lizard_map(before, path)
+    facts: dict[str, dict] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not node.body:
+            continue
+        cc = lizard_map.get((node.name, node.lineno), cyclomatic_complexity(node))
+        facts[node.name] = {"name": node.name, "cyclomaticComplexity": cc}
+    return list(facts.values())
+
+
 def extract(path: str, before: str | None, after: str) -> dict:
-    return {
+    result = {
         "functions": _functions(after, before, path),
         "comments": _comment_facts(after, before),
     }
+    if before is not None:
+        result["beforeFunctions"] = _before_functions(before, path)
+    return result
 
 
 def main() -> int:
