@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
 import { analyze } from "./analyze.ts";
-import type { Extracted, FunctionFacts } from "./contract.ts";
+import type { BeforeFunctionFacts, Extracted, FunctionFacts } from "./contract.ts";
 import { RULE } from "./contract.ts";
 import { buildRules, DEFAULT_POLICY } from "./policy.ts";
 import { pythonExtractor, validateFunction, validateComment } from "./extract-python.ts";
@@ -61,6 +61,12 @@ function findFn(ext: Extracted, name: string): FunctionFacts {
   return fn;
 }
 
+function findBeforeFn(ext: Extracted, name: string): BeforeFunctionFacts {
+  const fn = ext.beforeFunctions?.find((f) => f.name === name);
+  if (fn === undefined) assert.fail(`expected before function ${name}`);
+  return fn;
+}
+
 async function ccOf(src: string, name = "f"): Promise<number> {
   return findFn(await extractText("app/foo.py", src), name).cyclomaticComplexity;
 }
@@ -97,6 +103,20 @@ test("new_function_when_no_before_marks_both_new", async () => {
 
   assert.equal(fn.signature, "new");
   assert.equal(fn.body, "new");
+});
+
+test("beforeFunctions_reports_cyclomatic_complexity_of_a_branching_before_function", async () => {
+  const ext = await extractText("app/foo.py", "def f(x):\n    return 1\n", AND_OR_TRY_EXCEPT);
+
+  const fn = findBeforeFn(ext, "f");
+
+  assert.equal(fn.cyclomaticComplexity, 6);
+});
+
+test("beforeFunctions_is_undefined_when_extraction_has_no_before", async () => {
+  const ext = await extractText("app/foo.py", "def f():\n    return 1\n");
+
+  assert.equal(ext.beforeFunctions, undefined);
 });
 
 test("missing_annotations_skip_self_and_report_return", async () => {

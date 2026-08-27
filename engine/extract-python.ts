@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
-import type { CommentFacts, Extracted, Extractor, FunctionFacts } from "./contract.ts";
+import type { BeforeFunctionFacts, CommentFacts, Extracted, Extractor, FunctionFacts } from "./contract.ts";
 
 const SCRIPT_PATH = join(import.meta.dirname, "extract-python.py");
 export const PYTHON_BIN = join(import.meta.dirname, ".venv", "bin", "python");
@@ -70,15 +70,26 @@ export function validateComment(raw: unknown): CommentFacts {
   };
 }
 
+export function validateBeforeFunction(raw: unknown): BeforeFunctionFacts {
+  if (!isObject(raw)) throw new Error("extract-python: before-function fact is not an object");
+  return {
+    name: requireString(raw.name, "extract-python: before-function name is not a string"),
+    cyclomaticComplexity: requireNumber(raw.cyclomaticComplexity, "extract-python: before-function cyclomaticComplexity is not a number"),
+  };
+}
+
 function validateExtracted(raw: unknown): Extracted {
   if (!isObject(raw)) throw new Error("extract-python: output is not an object");
   const functions = raw.functions;
   const comments = raw.comments;
+  const beforeFunctions = raw.beforeFunctions;
   if (!Array.isArray(functions)) throw new Error("extract-python: functions is not an array");
   if (!Array.isArray(comments)) throw new Error("extract-python: comments is not an array");
+  if (beforeFunctions !== undefined && !Array.isArray(beforeFunctions)) throw new Error("extract-python: beforeFunctions is not an array");
   return {
     functions: functions.map(validateFunction),
     comments: comments.map(validateComment),
+    ...(beforeFunctions !== undefined ? { beforeFunctions: beforeFunctions.map(validateBeforeFunction) } : {}),
   };
 }
 

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 
-import type { Change, CommentFacts, Extracted, Extractor, FunctionFacts } from "./contract.ts";
+import type { BeforeFunctionFacts, Change, CommentFacts, Extracted, Extractor, FunctionFacts } from "./contract.ts";
 
 const require_ = createRequire(import.meta.url);
 
@@ -137,14 +137,25 @@ export function validateComment(raw: unknown): CommentFacts {
   };
 }
 
+export function validateBeforeFunction(raw: unknown): BeforeFunctionFacts {
+  if (!isObject(raw)) throw new Error("extract-typescript: before-function fact is not an object");
+  return {
+    name: requireString(raw.name, "extract-typescript: before-function name is not a string"),
+    cyclomaticComplexity: requireNumber(raw.cyclomaticComplexity, "extract-typescript: before-function cyclomaticComplexity is not a number"),
+  };
+}
+
 function validateExtracted(raw: Extracted): Extracted {
   const functions = raw.functions;
   const comments = raw.comments;
+  const beforeFunctions = raw.beforeFunctions;
   if (!Array.isArray(functions)) throw new Error("extract-typescript: functions is not an array");
   if (!Array.isArray(comments)) throw new Error("extract-typescript: comments is not an array");
+  if (beforeFunctions !== undefined && !Array.isArray(beforeFunctions)) throw new Error("extract-typescript: beforeFunctions is not an array");
   return {
     functions: functions.map(validateFunction),
     comments: comments.map(validateComment),
+    ...(beforeFunctions !== undefined ? { beforeFunctions: beforeFunctions.map(validateBeforeFunction) } : {}),
   };
 }
 
@@ -294,6 +305,21 @@ function beforeFunctionRegions(language: unknown, before: string | undefined): B
   return out;
 }
 
+function beforeFunctionFacts(language: unknown, path: string, before: string | undefined): BeforeFunctionFacts[] | undefined {
+  if (before === undefined) return undefined;
+  const root = parseSource(language, before);
+  if (root === null) return [];
+  const testPath = isTestPath(path);
+  const q = newQuery(language);
+  const testNodes = testCallbackNodes(root.rootNode, q);
+  const functions = uniqueFunctionNodes(root.rootNode, q);
+
+  return functions.map((node) => ({
+    name: functionNameOf(node, testNodes.has(node.startIndex), testPath),
+    cyclomaticComplexity: cyclomaticComplexityWithin(node),
+  }));
+}
+
 function classifyCommentKind(text: string, isBlock: boolean, isDoc: boolean): CommentFacts["kind"] {
   if (TOOLING_RE.test(text)) return "tooling";
   if (!isBlock) return "line";
@@ -353,6 +379,12 @@ function uniqueFunctionNodes(root: TSNode, q: QueryLike): TSNode[] {
   return functions;
 }
 
+function functionNameOf(node: TSNode, isTestCallback: boolean, testPath: boolean): string {
+  const nameField = node.childForFieldName("name");
+  if (nameField !== null) return nameField.text;
+  return isTestCallback && testPath ? resolveTestDescription(node) : "anonymous";
+}
+
 function functionFacts(
   root: TSNode,
   language: unknown,
@@ -370,14 +402,7 @@ function functionFacts(
   return functions.map((node) => {
     const body = bodyNodeOf(node);
     const isTestCallback = testNodes.has(node.startIndex);
-
-    let name: string;
-    const nameField = node.childForFieldName("name");
-    if (nameField !== null) {
-      name = nameField.text;
-    } else {
-      name = isTestCallback && testPath ? resolveTestDescription(node) : "anonymous";
-    }
+    const name = functionNameOf(node, isTestCallback, testPath);
 
     const startLine = node.startPosition.row + 1;
     const endLine = node.endPosition.row + 1;
@@ -415,11 +440,12 @@ function functionFacts(
 
 function extractRaw(input: { path: string; before?: string; after: string }): Extracted {
   const language = loadLanguageForPath(input.path);
+  const beforeFunctions = beforeFunctionFacts(language, input.path, input.before);
   const root = parseSource(language, input.after);
-  if (root === null) return { functions: [], comments: [] };
+  if (root === null) return { functions: [], comments: [], ...(beforeFunctions !== undefined ? { beforeFunctions } : {}) };
   const functions = functionFacts(root.rootNode, language, input.path, input.after, input.before);
   const comments = commentFacts(input.after, input.before, root.rootNode, language);
-  return { functions, comments };
+  return { functions, comments, ...(beforeFunctions !== undefined ? { beforeFunctions } : {}) };
 }
 
 export const typescriptExtractor: Extractor = {
