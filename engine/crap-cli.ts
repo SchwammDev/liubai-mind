@@ -9,6 +9,8 @@ import type { Lang } from "./contract.ts";
 import { detectLang } from "./lang.ts";
 import { typescriptExtractor } from "./extract-typescript.ts";
 import { pythonCrapAdapter } from "./coverage-python.ts";
+import { DEFAULT_POLICY, RULE } from "./policy.ts";
+import { decisionPoints } from "./decision-points.ts";
 
 const DEFAULT_THRESHOLD = 10;
 const HEADER_SCAN_LINES = 5;
@@ -155,13 +157,16 @@ function groupCandidatesByLang(cwd: string): Partial<Record<Lang, string[]>> {
   return byLang;
 }
 
-type LangOutcome = { ok: true; violations: Record<string, CrapViolation[]> } | { ok: false; result: CrapResult };
+type LangOutcome =
+  | { ok: true; violations: Record<string, CrapViolation[]>; advisories: string[] }
+  | { ok: false; result: CrapResult };
 
 function processLang(
   cwd: string,
   candidates: string[],
   adapter: CrapAdapter,
   threshold: number,
+  lang: Lang,
 ): LangOutcome {
   if (!adapter.snapshotExists()) return fail(MISSING_SNAPSHOT_MSG);
 
@@ -171,7 +176,8 @@ function processLang(
   const loaded = adapter.loadSnapshot();
   if ("error" in loaded) return fail(loaded.error);
 
-  return { ok: true, violations: collectViolations(cwd, candidates, adapter, loaded, threshold) };
+  const { violationsByFile, advisories } = collectViolations(cwd, candidates, adapter, loaded, threshold, lang);
+  return { ok: true, violations: violationsByFile, advisories };
 }
 
 function fail(message: string): { ok: false; result: CrapResult } {
@@ -192,19 +198,23 @@ export async function runCrap(opts: {
   if (langs.length === 0) return { status: 0, stderr: "" };
 
   const violationsByFile: Record<string, CrapViolation[]> = {};
+  const advisories: string[] = [];
   for (const lang of langs) {
     const candidates = byLang[lang]!;
     const adapter = adapters[lang];
     if (adapter === undefined) continue;
 
-    const outcome = processLang(cwd, candidates, adapter, threshold);
+    const outcome = processLang(cwd, candidates, adapter, threshold, lang);
     if (!outcome.ok) return outcome.result;
     Object.assign(violationsByFile, outcome.violations);
+    advisories.push(...outcome.advisories);
   }
 
-  if (Object.keys(violationsByFile).length === 0) return { status: 0, stderr: "" };
+  const advisoryText = advisories.length > 0 ? `${advisories.join("\n")}\n` : "";
 
-  return { status: 1, stderr: `${formatReport(violationsByFile, threshold)}\n` };
+  if (Object.keys(violationsByFile).length === 0) return { status: 0, stderr: advisoryText };
+
+  return { status: 1, stderr: `${formatReport(violationsByFile, threshold)}\n${advisoryText}` };
 }
 
 function staleStagedFile(cwd: string, candidates: string[], snapshotMtime: number): string | null {
@@ -215,14 +225,45 @@ function staleStagedFile(cwd: string, candidates: string[], snapshotMtime: numbe
   return null;
 }
 
+function adviseOnComplexityShuffle(
+  cwd: string,
+  rel: string,
+  adapter: CrapAdapter,
+  stagedFns: CrapFunction[],
+  ccThreshold: number,
+): string | null {
+  let headSource: string;
+  try {
+    headSource = gitText(cwd, ["show", `HEAD:${rel}`]);
+  } catch {
+    return null;
+  }
+
+  const headFns = adapter.extractFunctions(rel, headSource);
+  const overThreshold = headFns.filter((f) => f.cc > ccThreshold);
+  if (overThreshold.length === 0) return null;
+  if (stagedFns.some((f) => f.cc > ccThreshold)) return null;
+
+  const dpBefore = decisionPoints(headFns.map((f) => ({ cyclomaticComplexity: f.cc })));
+  const dpAfter = decisionPoints(stagedFns.map((f) => ({ cyclomaticComplexity: f.cc })));
+  if (dpAfter < dpBefore) return null;
+
+  const names = overThreshold.map((f) => f.name).join(", ");
+  return `crap: advisory — ${rel}: ${names} dropped below the cc threshold but total decision points did not fall (${dpBefore} -> ${dpAfter}); the complexity moved, it did not leave.`;
+}
+
 function collectViolations(
   cwd: string,
   candidates: string[],
   adapter: CrapAdapter,
   snapshot: Snapshot,
   threshold: number,
-): Record<string, CrapViolation[]> {
+  lang: Lang,
+): { violationsByFile: Record<string, CrapViolation[]>; advisories: string[] } {
   const violationsByFile: Record<string, CrapViolation[]> = {};
+  const advisories: string[] = [];
+  const ccThreshold = DEFAULT_POLICY[RULE.cc].threshold?.[lang];
+
   for (const rel of candidates) {
     const source = readSource(cwd, rel);
     if (source === null) continue;
@@ -235,8 +276,13 @@ function collectViolations(
     const coverage = snapshot.files[rel] ?? "new";
     const violations = flagCrapViolations({ path: rel, functions, hunks, coverage, threshold });
     if (violations.length > 0) violationsByFile[rel] = violations;
+
+    if (ccThreshold !== undefined) {
+      const advisory = adviseOnComplexityShuffle(cwd, rel, adapter, functions, ccThreshold);
+      if (advisory !== null) advisories.push(advisory);
+    }
   }
-  return violationsByFile;
+  return { violationsByFile, advisories };
 }
 
 async function main(): Promise<void> {
