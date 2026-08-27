@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { formatBlockReason, formatCcNudge, readPack, resolveCcNudge } from "./messages.ts";
+import { CC_DELTA_NUDGE, formatBlockReason, formatCcDeltaNudge, formatCcNudge, readPack, resolveCcNudge } from "./messages.ts";
 import type { CcNudgePhrasing } from "./messages.ts";
 import type { Lang, Nudge } from "./contract.ts";
 
@@ -88,6 +88,33 @@ test("formatCcNudge leaves a template without placeholders untouched", () => {
   const msg = formatCcNudge("say it in one sentence", { name: "f", cc: 9, threshold: 8 });
 
   assert.equal(msg, "say it in one sentence");
+});
+
+test("formatCcDeltaNudge fills name, dpBefore, and dpAfter placeholders", () => {
+  const msg = formatCcDeltaNudge("{name} ({dpBefore}->{dpAfter})", { name: "f", dpBefore: 11, dpAfter: 9 });
+
+  assert.equal(msg, "f (11->9)");
+});
+
+test("formatCcDeltaNudge fills a placeholder appearing more than once", () => {
+  const msg = formatCcDeltaNudge("{name} and {name}", { name: "f", dpBefore: 11, dpAfter: 9 });
+
+  assert.equal(msg, "f and f");
+});
+
+test("formatCcDeltaNudge leaves a template without placeholders untouched", () => {
+  const msg = formatCcDeltaNudge("say it in one sentence", { name: "f", dpBefore: 11, dpAfter: 9 });
+
+  assert.equal(msg, "say it in one sentence");
+});
+
+test("CC_DELTA_NUDGE reads as the coaching guide's dp-invariant voice", () => {
+  const msg = formatCcDeltaNudge(CC_DELTA_NUDGE, { name: "handleRequest", dpBefore: 11, dpAfter: 11 });
+
+  assert.equal(
+    msg,
+    "handleRequest dropped below the complexity threshold, but the file still carries 11 decision points where it carried 11 — the complexity moved, it did not leave. Splitting a tangle into helpers relocates branches without removing any; a reader now chases the same decisions across more functions. Go back to the shape: collapse branches that repeat a pattern into a dispatch/lookup, delete branches the function's one-sentence job does not need, and only keep helpers that stand for a genuinely separate job.",
+  );
 });
 
 test("readPack yields an empty object when the path is undefined", () => {

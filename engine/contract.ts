@@ -3,6 +3,7 @@ export type Severity = "block" | "nudge";
 
 export const RULE = {
   cc: "cc",
+  ccDelta: "cc-delta",
   typeAnnotation: "type-annotation",
   testBody: "test-body",
   discourageComments: "discourage-comments",

@@ -1,15 +1,25 @@
 import type { CommentFacts, Exemption, Lang, Nudge, Rule, RuleConfig, RuleContext, RuleName } from "./contract.ts";
 import { RULE } from "./contract.ts";
-import { ANNOTATION_ADVICE, CC_NUDGE, DOC_COMMENT_FORM, TEST_HELPERS, formatCcNudge } from "./messages.ts";
+import { decisionPoints } from "./decision-points.ts";
+import { ANNOTATION_ADVICE, CC_DELTA_NUDGE, CC_NUDGE, DOC_COMMENT_FORM, TEST_HELPERS, formatCcDeltaNudge, formatCcNudge } from "./messages.ts";
 
 export { RULE } from "./contract.ts";
 export type { Exemption, RuleConfig, RuleName } from "./contract.ts";
 
 export type Policy = Record<RuleName, RuleConfig>;
 
+export function dpDeltaEnabledLangs(flag: string | undefined): Lang[] {
+  return flag !== undefined && flag !== "" ? ["python", "typescript"] : [];
+}
+
 export const DEFAULT_POLICY: Policy = {
   [RULE.cc]: {
     enabled: ["python", "typescript", "cpp"],
+    severity: "nudge",
+    threshold: { python: 8, typescript: 8, cpp: 8 },
+  },
+  [RULE.ccDelta]: {
+    enabled: dpDeltaEnabledLangs(process.env.LIUBAI_DP_DELTA),
     severity: "nudge",
     threshold: { python: 8, typescript: 8, cpp: 8 },
   },
@@ -59,6 +69,32 @@ const ccRule = (cfg: RuleConfig): Rule => ({
       });
     }
     return nudges;
+  },
+});
+
+const ccDeltaRule = (cfg: RuleConfig): Rule => ({
+  name: RULE.ccDelta,
+  run: (ctx: RuleContext): Nudge[] => {
+    const before = ctx.extracted.beforeFunctions;
+    if (before === undefined) return [];
+
+    const threshold = thresholdFor(RULE.ccDelta, cfg, ctx.lang);
+    const overBefore = before.filter((fn) => fn.cyclomaticComplexity > threshold);
+    if (overBefore.length === 0) return [];
+
+    const stillOver = ctx.extracted.functions.some((fn) => fn.cyclomaticComplexity > threshold);
+    if (stillOver) return [];
+
+    const dpBefore = decisionPoints(before);
+    const dpAfter = decisionPoints(ctx.extracted.functions);
+    if (dpAfter < dpBefore) return [];
+
+    const name = overBefore.map((fn) => fn.name).join(", ");
+    return [{
+      rule: RULE.ccDelta,
+      severity: cfg.severity,
+      msg: formatCcDeltaNudge(CC_DELTA_NUDGE, { name, dpBefore, dpAfter }),
+    }];
   },
 });
 
@@ -154,6 +190,7 @@ const typeAnnotationRule = (cfg: RuleConfig): Rule => ({
 
 const IMPLS: Record<RuleName, (cfg: RuleConfig) => Rule> = {
   [RULE.cc]: ccRule,
+  [RULE.ccDelta]: ccDeltaRule,
   [RULE.typeAnnotation]: typeAnnotationRule,
   [RULE.testBody]: testBodyRule,
   [RULE.discourageComments]: discourageCommentsRule,
