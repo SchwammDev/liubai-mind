@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { analyze } from "./analyze.ts";
-import type { CommentFacts, Env, Extracted, FunctionFacts, Lang, Nudge, RuleConfig, RuleName } from "./contract.ts";
+import type { BeforeFunctionFacts, CommentFacts, Env, Extracted, FunctionFacts, Lang, Nudge, RuleConfig, RuleName } from "./contract.ts";
 import { RULE } from "./contract.ts";
-import { buildRules, DEFAULT_POLICY } from "./policy.ts";
+import { buildRules, DEFAULT_POLICY, dpDeltaEnabledLangs } from "./policy.ts";
 
 const PATH_BY_LANG: Record<Lang, string> = {
   python: "app/foo.py",
@@ -74,6 +74,14 @@ function assertNudge(
   assert.equal(n.severity, expected.severity);
   assert.equal(n.line, expected.line);
   for (const pattern of expected.msgMatches) assert.match(n.msg, pattern);
+}
+
+function assertCcDeltaNudge(n: Nudge, nameMatch: RegExp, dpMatch: RegExp): void {
+  assert.equal(n.rule, RULE.ccDelta);
+  assert.equal(n.severity, "nudge");
+  assert.equal(n.line, undefined);
+  assert.match(n.msg, nameMatch);
+  assert.match(n.msg, dpMatch);
 }
 
 function assertSingleError(
@@ -191,6 +199,74 @@ test("the cc threshold is 8 for all langs", async () => {
   for (const lang of ["python", "typescript", "cpp"] as const) {
     await assertCcThresholdIsEight(lang);
   }
+});
+
+function beforeFunc(over: Partial<BeforeFunctionFacts>): BeforeFunctionFacts {
+  return {
+    name: "f",
+    cyclomaticComplexity: 1,
+    ...over,
+  };
+}
+
+function ccFns(ccs: number[]): FunctionFacts[] {
+  return ccs.map((cc, i) => func({ name: `f${i}`, cyclomaticComplexity: cc }));
+}
+
+function withBefore(afterCcs: number[], beforeFunctions: BeforeFunctionFacts[]): Extracted {
+  return { ...functionsOnly(ccFns(afterCcs)), beforeFunctions };
+}
+
+const CC_DELTA_ENABLED_POLICY = {
+  ...DEFAULT_POLICY,
+  [RULE.ccDelta]: { ...(DEFAULT_POLICY[RULE.ccDelta] as RuleConfig), enabled: ["python"] as Lang[] },
+};
+
+const SPLIT_BEFORE: BeforeFunctionFacts[] = [beforeFunc({ name: "handleRequest", cyclomaticComplexity: 12 })];
+
+function ccDeltaResp(extracted: Extracted) {
+  return analyze({ path: "app/foo.py", after: "x" }, envWith(extracted), buildRules(CC_DELTA_ENABLED_POLICY, "python"));
+}
+
+test("dpDeltaEnabledLangs returns no langs when the flag is undefined", () => {
+  assert.deepEqual(dpDeltaEnabledLangs(undefined), []);
+});
+
+test("dpDeltaEnabledLangs enables python and typescript when the flag is a non-empty string", () => {
+  assert.deepEqual(dpDeltaEnabledLangs("1"), ["python", "typescript"]);
+});
+
+test("the cc-delta rule nudges a helper split that hides a violation without lowering decision points", async () => {
+  const resp = await ccDeltaResp(withBefore([4, 4, 4, 3], SPLIT_BEFORE));
+
+  assert.equal(resp.nudges.length, 1);
+  assertCcDeltaNudge(firstNudge(resp), /handleRequest/, /carries 11 decision points where it carried 11/);
+});
+
+test("the cc-delta rule stays silent when the split also lowered decision points", async () => {
+  const resp = await ccDeltaResp(withBefore([4, 4, 3], SPLIT_BEFORE));
+
+  assert.deepEqual(resp.nudges, []);
+});
+
+test("the cc-delta rule stays silent while an after-function is still over threshold", async () => {
+  const resp = await ccDeltaResp(withBefore([9, 4, 1], SPLIT_BEFORE));
+
+  assert.deepEqual(resp.nudges, []);
+});
+
+test("the cc-delta rule stays silent when the extractor found no before-side functions", async () => {
+  const resp = await ccDeltaResp(functionsOnly(ccFns([9])));
+
+  assert.deepEqual(resp.nudges, []);
+});
+
+test("the cc-delta rule stays silent when no before-function exceeded the threshold, even if decision points rose", async () => {
+  const before = [beforeFunc({ name: "a", cyclomaticComplexity: 4 }), beforeFunc({ name: "b", cyclomaticComplexity: 4 })];
+
+  const resp = await ccDeltaResp(withBefore([5, 5, 5], before));
+
+  assert.deepEqual(resp.nudges, []);
 });
 
 test("the test-body rule nudges a touched test function over the lang threshold", async () => {

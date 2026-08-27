@@ -79,6 +79,16 @@ export function formatCcNudge(template: string, facts: { name: string; cc: numbe
     .replaceAll("{threshold}", String(facts.threshold));
 }
 
+export const CC_DELTA_NUDGE =
+  "{name} dropped below the complexity threshold, but the file still carries {dpAfter} decision points where it carried {dpBefore} — the complexity moved, it did not leave. Splitting a tangle into helpers relocates branches without removing any; a reader now chases the same decisions across more functions. Go back to the shape: collapse branches that repeat a pattern into a dispatch/lookup, delete branches the function's one-sentence job does not need, and only keep helpers that stand for a genuinely separate job.";
+
+export function formatCcDeltaNudge(template: string, facts: { name: string; dpBefore: number; dpAfter: number }): string {
+  return template
+    .replaceAll("{name}", facts.name)
+    .replaceAll("{dpBefore}", String(facts.dpBefore))
+    .replaceAll("{dpAfter}", String(facts.dpAfter));
+}
+
 export const CC_NUDGE: Record<Lang, CcNudgePhrasing> = resolveCcNudge(
   DEFAULT_CC_NUDGE,
   readPack(process.env.LIUBAI_PHRASING_PACK, (p) => readFileSync(p, "utf8")),
