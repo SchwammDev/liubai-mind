@@ -187,6 +187,9 @@ function overThresholdFunction(name: string, startLine: number): object {
     bodyLineCount: 2,
     signature: "same",
     body: "changed",
+    controlStatementCount: 0,
+    rawAssertCount: 0,
+    plumbingLines: 0,
   };
 }
 

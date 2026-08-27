@@ -35,6 +35,9 @@ function func(over: Partial<FunctionFacts>): FunctionFacts {
     bodyLineCount: 2,
     signature: "same",
     body: "same",
+    controlStatementCount: 0,
+    rawAssertCount: 0,
+    plumbingLines: 0,
     ...over,
   };
 }
@@ -260,83 +263,91 @@ test("the cc-delta rule stays silent when no before-function exceeded the thresh
   assert.deepEqual(resp.nudges, []);
 });
 
-test("the test-body rule coaches a touched over-threshold test without citing the metric", async () => {
-  const env = envWith({ functions: [func({ name: "f", isTest: true, body: "changed", bodyLineCount: 9, startLine: 4 })], comments: [] });
+test("the test-linearity rule nudges a touched test with a control statement", async () => {
+  const env = envWith({ functions: [func({ name: "f", isTest: true, body: "changed", controlStatementCount: 1, startLine: 4 })], comments: [] });
 
   const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
 
   assert.equal(resp.nudges.length, 1);
-  assertNudge(firstNudge(resp), { rule: RULE.testBody, severity: "nudge", line: 4, msgMatches: [/^f reads as a wall of mechanics/, /domain language/] });
-  assert.doesNotMatch(firstNudge(resp).msg, /threshold|\d+L/i, "coaching nudge must not lead with the line-count metric");
+  assertNudge(firstNudge(resp), { rule: RULE.testLinearity, severity: "nudge", line: 4, msgMatches: [/^f branches/] });
 });
 
-test("the test-body rule stays silent at the threshold", async () => {
-  const env = envWith({ functions: [func({ isTest: true, body: "changed", bodyLineCount: 8 })], comments: [] });
+test("the test-linearity rule stays silent at the threshold (controlStatementCount 0)", async () => {
+  const env = envWith({ functions: [func({ isTest: true, body: "changed", controlStatementCount: 0 })], comments: [] });
 
   const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
 
   assert.deepEqual(resp.nudges, []);
 });
 
-test("the test-body rule ignores an over-threshold test that was not touched", async () => {
-  const env = envWith({ functions: [func({ isTest: true, body: "same", bodyLineCount: 9 })], comments: [] });
+test("the test-linearity rule ignores an over-threshold test that was not touched", async () => {
+  const env = envWith({ functions: [func({ isTest: true, body: "same", controlStatementCount: 1 })], comments: [] });
 
   const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
 
   assert.deepEqual(resp.nudges, []);
 });
 
-test("the test-body rule ignores a non-test function", async () => {
-  const env = envWith({ functions: [func({ isTest: false, body: "changed", bodyLineCount: 9 })], comments: [] });
+test("the test-linearity rule ignores a non-test function", async () => {
+  const env = envWith({ functions: [func({ isTest: false, body: "changed", controlStatementCount: 1 })], comments: [] });
 
   const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
 
   assert.deepEqual(resp.nudges, []);
 });
 
-test("the test-body rule uses the per-lang threshold", async () => {
-  const policy = { ...DEFAULT_POLICY, [RULE.testBody]: { ...(DEFAULT_POLICY[RULE.testBody] as RuleConfig), threshold: { python: 5, typescript: 12, cpp: 8 } } };
-  const env = envWith(functionsOnly([func({ isTest: true, body: "changed", bodyLineCount: 9 })]));
+test("the test-assert-pile rule nudges a touched test over the rawAssertCount threshold", async () => {
+  const env = envWith({ functions: [func({ name: "f", isTest: true, body: "changed", rawAssertCount: 3, startLine: 4 })], comments: [] });
+
+  const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
+
+  assert.equal(resp.nudges.length, 1);
+  assertNudge(firstNudge(resp), { rule: RULE.testAssertPile, severity: "nudge", line: 4, msgMatches: [/^f piles 3 raw asserts/] });
+});
+
+test("the test-assert-pile rule stays silent at the threshold (rawAssertCount 2)", async () => {
+  const env = envWith({ functions: [func({ isTest: true, body: "changed", rawAssertCount: 2 })], comments: [] });
+
+  const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
+
+  assert.deepEqual(resp.nudges, []);
+});
+
+test("the test-data-plumbing rule nudges a touched test over the plumbingLines threshold", async () => {
+  const env = envWith({ functions: [func({ name: "f", isTest: true, body: "changed", plumbingLines: 7, startLine: 4 })], comments: [] });
+
+  const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
+
+  assert.equal(resp.nudges.length, 1);
+  assertNudge(firstNudge(resp), { rule: RULE.testDataPlumbing, severity: "nudge", line: 4, msgMatches: [/^f buries 7 lines of literal data/] });
+});
+
+test("the test-data-plumbing rule stays silent at the threshold (plumbingLines 6)", async () => {
+  const env = envWith({ functions: [func({ isTest: true, body: "changed", plumbingLines: 6 })], comments: [] });
+
+  const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
+
+  assert.deepEqual(resp.nudges, []);
+});
+
+test("the test-data-plumbing rule uses the per-lang threshold", async () => {
+  const policy = { ...DEFAULT_POLICY, [RULE.testDataPlumbing]: { ...(DEFAULT_POLICY[RULE.testDataPlumbing] as RuleConfig), threshold: { python: 5, typescript: 12, cpp: 6 } } };
+  const env = envWith(functionsOnly([func({ isTest: true, body: "changed", plumbingLines: 9 })]));
 
   const py = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(policy, "python"));
   const ts = await analyze({ path: "app/foo.ts", after: "x" }, env, buildRules(policy, "typescript"));
 
-  assert.equal(py.nudges.length, 1, "python threshold 5 flags a 9L test");
-  assert.equal(ts.nudges.length, 0, "typescript threshold 12 lets a 9L test pass");
+  assert.equal(py.nudges.length, 1, "python threshold 5 flags plumbingLines 9");
+  assert.equal(ts.nudges.length, 0, "typescript threshold 12 lets plumbingLines 9 pass");
 });
 
-test("the test-body rule nudges a newly added long test", async () => {
-  const env = envWith({ functions: [func({ isTest: true, signature: "new", body: "new", bodyLineCount: 9 })], comments: [] });
-
-  const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
-
-  assert.equal(resp.nudges.length, 1);
-});
-
-test("the missing-helper hint names the language's own helper convention", async () => {
-  const extracted = { functions: [func({ isTest: true, body: "changed", bodyLineCount: 99 })], comments: [] };
-
-  assert.match(await nudgeFor("python", extracted), /assert_\*\/_\* helpers in tests\//);
-  assert.match(await nudgeFor("typescript", extracted), /assert\*\/expect\* helpers in \*\.test\.ts/);
-  assert.match(await nudgeFor("cpp", extracted), /Assert\*\/Expect\* helpers in \*_test\.cpp/);
-});
-
-test("the helper lookup is asked for the language under analysis", async () => {
-  const asked: Lang[] = [];
-  const env = envWith(functionsOnly([func({ isTest: true, body: "changed", bodyLineCount: 9 })]), (lang) => { asked.push(lang); return []; });
-
-  await analyze({ path: "app/foo.ts", after: "x" }, env, buildRules(DEFAULT_POLICY, "typescript"));
-
-  assert.deepEqual(asked, ["typescript"]);
-});
-
-const TWO_LONG_TESTS: FunctionFacts[] = [
-  func({ name: "test_a", isTest: true, body: "changed", bodyLineCount: 9, startLine: 4 }),
-  func({ name: "test_b", isTest: true, body: "changed", bodyLineCount: 10, startLine: 20 }),
+const TWO_ASSERT_PILE_TESTS: FunctionFacts[] = [
+  func({ name: "test_a", isTest: true, body: "changed", rawAssertCount: 3, startLine: 4 }),
+  func({ name: "test_b", isTest: true, body: "changed", rawAssertCount: 4, startLine: 20 }),
 ];
 
-test("the test-body rule appends helper hint only on the first nudge", async () => {
-  const env = envWith(functionsOnly(TWO_LONG_TESTS), () => ["assert_eq", "assert_throws"]);
+test("the test-assert-pile rule appends helper hint only on the first nudge", async () => {
+  const env = envWith(functionsOnly(TWO_ASSERT_PILE_TESTS), () => ["assert_eq", "assert_throws"]);
 
   const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
 
@@ -346,21 +357,62 @@ test("the test-body rule appends helper hint only on the first nudge", async () 
   assert.doesNotMatch(nthNudge(resp, 1).msg, /No assert_\*\/_\* helpers/);
 });
 
-test("subsequent test-body nudges use the short same-smell form", async () => {
-  const env = envWith(functionsOnly(TWO_LONG_TESTS), () => []);
+test("subsequent test-assert-pile nudges use the short same-smell form", async () => {
+  const env = envWith(functionsOnly(TWO_ASSERT_PILE_TESTS), () => []);
 
   const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
 
   assert.match(nthNudge(resp, 1).msg, /^test_b: same smell/);
 });
 
-test("the test-body rule suggests writing a helper when none exist", async () => {
-  const env = envWith(functionsOnly([func({ name: "f", isTest: true, body: "changed", bodyLineCount: 9, startLine: 4 })]), () => []);
+test("the test-assert-pile rule suggests writing a helper when none exist", async () => {
+  const env = envWith(functionsOnly([func({ name: "f", isTest: true, body: "changed", rawAssertCount: 3, startLine: 4 })]), () => []);
 
   const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
 
   assert.equal(resp.nudges.length, 1);
   assert.match(firstNudge(resp).msg, /No assert_\*\/_\* helpers in tests\/ yet — write one\./);
+});
+
+test("the missing-helper hint names the language's own helper convention", async () => {
+  const extracted = { functions: [func({ isTest: true, body: "changed", rawAssertCount: 99 })], comments: [] };
+
+  assert.match(await nudgeFor("python", extracted), /assert_\*\/_\* helpers in tests\//);
+  assert.match(await nudgeFor("typescript", extracted), /assert\*\/expect\* helpers in \*\.test\.ts/);
+});
+
+test("the helper lookup is asked for the language under analysis", async () => {
+  const asked: Lang[] = [];
+  const env = envWith(functionsOnly([func({ isTest: true, body: "changed", rawAssertCount: 3 })]), (lang) => { asked.push(lang); return []; });
+
+  await analyze({ path: "app/foo.ts", after: "x" }, env, buildRules(DEFAULT_POLICY, "typescript"));
+
+  assert.deepEqual(asked, ["typescript"]);
+});
+
+const TWO_PLUMBING_TESTS: FunctionFacts[] = [
+  func({ name: "test_a", isTest: true, body: "changed", plumbingLines: 7, startLine: 4 }),
+  func({ name: "test_b", isTest: true, body: "changed", plumbingLines: 8, startLine: 20 }),
+];
+
+test("the test-data-plumbing rule uses the first template for the first flagged test and the rest template for later ones", async () => {
+  const env = envWith(functionsOnly(TWO_PLUMBING_TESTS));
+
+  const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
+
+  assert.equal(resp.nudges.length, 2);
+  assert.match(nthNudge(resp, 0).msg, /^test_a buries 7 lines of literal data/);
+  assert.match(nthNudge(resp, 1).msg, /^test_b: same smell/);
+});
+
+test("a test tripping both test-linearity and test-assert-pile yields one nudge from each", async () => {
+  const env = envWith({ functions: [func({ name: "f", isTest: true, body: "changed", controlStatementCount: 1, rawAssertCount: 3, startLine: 4 })], comments: [] });
+
+  const resp = await analyze({ path: "app/foo.py", after: "x" }, env, buildRules(DEFAULT_POLICY, "python"));
+
+  assert.equal(resp.nudges.length, 2);
+  assert.equal(resp.nudges[0]!.rule, RULE.testLinearity);
+  assert.equal(resp.nudges[1]!.rule, RULE.testAssertPile);
 });
 
 function functionsOnly(fns: FunctionFacts[]): Extracted {

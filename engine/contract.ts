@@ -5,7 +5,9 @@ export const RULE = {
   cc: "cc",
   ccDelta: "cc-delta",
   typeAnnotation: "type-annotation",
-  testBody: "test-body",
+  testLinearity: "test-linearity",
+  testAssertPile: "test-assert-pile",
+  testDataPlumbing: "test-data-plumbing",
   discourageComments: "discourage-comments",
 } as const;
 
@@ -39,6 +41,9 @@ export interface FunctionFacts {
   bodyLineCount: number;
   signature: Change;
   body: Change;
+  controlStatementCount: number;
+  rawAssertCount: number;
+  plumbingLines: number;
 }
 
 export interface CommentFacts {

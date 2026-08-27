@@ -115,12 +115,12 @@ test("a comment added through the legacy flat edit shape is still rejected", asy
   assertBlockedFor(outcome, /discourage-comments/);
 });
 
-test("a long test's nudge rides along on the tool result", async () => {
+test("a smelly test's nudge rides along on the tool result", async () => {
   const outcome = await railsSession().apply("long", "edit", editInput(TEST_FILE, "", LONG_TEST), TEST_FILE);
 
   assert.equal(outcome.blocked, false);
   assert.match(outcome.text, /edited 1 file/);
-  assert.match(outcome.text, /wall of mechanics/);
+  assert.match(outcome.text, /buries 8 lines of literal data/);
 });
 
 test("an edit that triggers no rail leaves the result untouched", async () => {

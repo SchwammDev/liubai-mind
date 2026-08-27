@@ -29,6 +29,20 @@ DECISION_NODES = (
 )
 SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
 
+CONTROL_STATEMENT_NODES = tuple(
+    node_type
+    for node_type in (
+        ast.If,
+        ast.For,
+        ast.AsyncFor,
+        ast.While,
+        ast.Try,
+        getattr(ast, "TryStar", None),
+        getattr(ast, "Match", None),
+    )
+    if node_type is not None
+)
+
 SELF_LIKE_NAMES = ("self", "cls")
 RETURN_LABEL = "-> return"
 
@@ -67,6 +81,52 @@ def cyclomatic_complexity(func_node: ast.AST) -> int:
             continue
         visit(child)
     return cc
+
+
+def _own_scope_nodes(func_node: ast.AST) -> list[ast.AST]:
+    found: list[ast.AST] = []
+
+    def visit(node: ast.AST) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, SCOPE_NODES):
+                continue
+            found.append(child)
+            visit(child)
+
+    visit(func_node)
+    return found
+
+
+def control_statement_count(func_node: ast.AST) -> int:
+    return sum(1 for node in _own_scope_nodes(func_node) if isinstance(node, CONTROL_STATEMENT_NODES))
+
+
+def _assert_contribution(node: ast.Assert) -> int:
+    test = node.test
+    if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.And):
+        return len(test.values)
+    return 1
+
+
+def raw_assert_count(func_node: ast.AST) -> int:
+    return sum(_assert_contribution(node) for node in _own_scope_nodes(func_node) if isinstance(node, ast.Assert))
+
+
+def _contains_call(node: ast.AST) -> bool:
+    return any(isinstance(n, ast.Call) for n in ast.walk(node))
+
+
+def plumbing_lines(func_node: ast.AST) -> int:
+    total = 0
+    for node in _own_scope_nodes(func_node):
+        if not isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+            continue
+        value = node.value
+        if value is None or _contains_call(value):
+            continue
+        end = node.end_lineno or node.lineno
+        total += end - node.lineno + 1
+    return total
 
 
 def _lizard_map(after: str, path: str) -> dict[tuple[str, int], int]:
@@ -163,6 +223,9 @@ def _function_facts(tree: ast.AST, lines: list[str], path: str, before_funcs: di
             "bodyLineCount": end - first_body.lineno + 1,
             "signature": signature,
             "body": body,
+            "controlStatementCount": control_statement_count(node),
+            "rawAssertCount": raw_assert_count(node),
+            "plumbingLines": plumbing_lines(node),
         }
         cc = lizard_map.get((node.name, node.lineno))
         if cc is not None:

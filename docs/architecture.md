@@ -44,7 +44,9 @@ An extractor that fails to run (no venv python, no lizard) fails open, but loudl
 Current rules (all deterministic, all on `write`/`edit`, all Python-scoped today — `DEFAULT_POLICY` enables TS/cpp but only the python extractor exists). CC for Python is computed by `lizard` (engine `.venv`, installed by `./setup.sh`); the rest of the Python facts (comments, annotations, test detection, body diff) are still derived from the Python `ast`. If lizard is missing, the extractor hard-fails with a one-line install hint rather than silently degrading.
 
 - `discourage-comments` — block added code comments/docstrings (pragma/`noqa`/shebang exempt).
-- `test-body` — nudge when a test body exceeds the line threshold.
+- `test-linearity` — nudge when a test body branches instead of stating one case as a straight line.
+- `test-assert-pile` — nudge when a test piles raw asserts instead of an intent-named helper.
+- `test-data-plumbing` — nudge when a test buries literal data instead of a named constant or builder.
 - `cc` — nudge past the cyclomatic-complexity threshold.
 - `type-annotation` — nudge for missing return/param annotations.
 

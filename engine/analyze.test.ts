@@ -17,6 +17,9 @@ const TOUCHED_FUNCTION: FunctionFacts = {
   bodyLineCount: 2,
   signature: "changed",
   body: "changed",
+  controlStatementCount: 0,
+  rawAssertCount: 0,
+  plumbingLines: 0,
 };
 
 const ENV: Env = {};
