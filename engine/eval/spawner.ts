@@ -19,7 +19,7 @@ export type PiSpawner = (spec: RunSpec) => Promise<RunOutcome>;
 
 const KILL_GRACE_MS = 5000;
 
-const EXPERIMENT_TOGGLES = ["LIUBAI_RAILS_OFF", "LIUBAI_PHRASING_PACK"];
+const EXPERIMENT_TOGGLES = ["LIUBAI_RAILS_OFF", "LIUBAI_PHRASING_PACK", "LIUBAI_DP_DELTA"];
 
 export function buildSpawnEnv(
   parent: Record<string, string | undefined>,
