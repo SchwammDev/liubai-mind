@@ -126,7 +126,7 @@ test("the cc rule nudges a touched function over the lang threshold", async () =
   const resp = await analyze({ path: "app/foo.py", after: "def f():\n  pass" }, env, rules);
 
   assert.equal(resp.nudges.length, 1);
-  assertNudge(firstNudge(resp), { rule: RULE.cc, severity: "nudge", line: 4, msgMatches: [/f \(CC=9\)/, /Threshold is 8/] });
+  assertNudge(firstNudge(resp), { rule: RULE.cc, severity: "nudge", line: 4, msgMatches: [/^f is making too many decisions/] });
 });
 
 test("the cc rule stays silent when the touched function is under threshold", async () => {
@@ -173,9 +173,9 @@ test("a threshold rule enabled for a lang it has no threshold for reports an err
 test("the cc nudge names the language's own dispatch idiom", async () => {
   const extracted = { functions: [func({ cyclomaticComplexity: 99, body: "changed" })], comments: [] };
 
-  assert.match(await nudgeFor("python", extracted), /dispatch dicts/);
-  assert.match(await nudgeFor("typescript", extracted), /lookup objects/);
-  assert.match(await nudgeFor("cpp", extracted), /dispatch tables/);
+  assert.match(await nudgeFor("python", extracted), /dispatch dict/);
+  assert.match(await nudgeFor("typescript", extracted), /lookup object/);
+  assert.match(await nudgeFor("cpp", extracted), /dispatch table/);
 });
 
 async function assertCcThresholdIsEight(lang: Lang): Promise<void> {

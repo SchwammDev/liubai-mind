@@ -12,16 +12,23 @@ export interface CcNudgePhrasing {
   rest: string;
 }
 
-const DEFAULT_CC_TEMPLATE = "{name} (CC={cc}). Threshold is {threshold}. Extract guard clauses, split branches into named helpers, or ";
-
-function sameForAll(template: string): CcNudgePhrasing {
-  return { first: template, rest: template };
+function coachingGuide(chain: string, idiom: string): CcNudgePhrasing {
+  return {
+    first: [
+      "{name} is making too many decisions at once. The smell is not a number — the function has quietly taken on more than one job, and the count is only the symptom. Work through it in order:",
+      "1. Say what the function does in one sentence. If you cannot, it has more than one responsibility; a branch with no place in that sentence wants its own function.",
+      "2. Lift the guards out first: turn precondition checks into early-return guard clauses so the happy path reads flat.",
+      `3. Change the shape, do not just move it: a long ${chain} on one value is usually a ${idiom}; branches that are genuinely different jobs become functions named for those jobs.`,
+      "Do not split the same tangle into helpers to quiet a checker — that relocates decisions without removing any. The test is whether a first-time reader can hold the function in their head, not whether a number dropped.",
+    ].join("\n"),
+    rest: "{name}: same smell — apply the one-sentence test, lift guards first, reshape rather than relocate.",
+  };
 }
 
 const DEFAULT_CC_NUDGE: Record<Lang, CcNudgePhrasing> = {
-  python: sameForAll(`${DEFAULT_CC_TEMPLATE}replace if/elif chains with dispatch dicts.`),
-  typescript: sameForAll(`${DEFAULT_CC_TEMPLATE}replace if/else chains with lookup objects.`),
-  cpp: sameForAll(`${DEFAULT_CC_TEMPLATE}replace if/else chains with dispatch tables.`),
+  python: coachingGuide("if/elif", "dispatch dict"),
+  typescript: coachingGuide("if/else chain", "lookup object"),
+  cpp: coachingGuide("if/else chain", "dispatch table"),
 };
 
 const KNOWN_LANGS: readonly Lang[] = ["python", "typescript", "cpp"];

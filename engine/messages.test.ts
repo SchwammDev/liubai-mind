@@ -133,7 +133,7 @@ function discourageCommentsNudge(): Nudge {
 test("formatBlockReason for a discourage-comments nudge never mentions cc nudge text", () => {
   const reason = formatBlockReason("app/foo.py", [discourageCommentsNudge()]);
 
-  assert.doesNotMatch(reason, /dispatch dicts|lookup objects|dispatch tables/);
+  assert.doesNotMatch(reason, /dispatch dict|lookup object|dispatch table|too many decisions/);
   assert.match(reason, /fixme/);
 });
 
@@ -235,12 +235,20 @@ test("a phrasing pack gives the first flagged function the full guide and later 
   assert.deepEqual(msgs, ["GUIDE for alpha (cc 9, bar 8)", "beta: SAME"]);
 });
 
-test("without a pack every flagged function carries the same full default advice", () => {
+test("without a pack the first flagged function gets the coaching guide and later ones the short form", () => {
   const stdout = runScript(scriptPrintingCcNudges(), envWithout("LIUBAI_PHRASING_PACK"));
 
   const msgs = JSON.parse(stdout) as string[];
   assert.equal(msgs.length, 2);
-  assert.match(msgs[0]!, /alpha \(CC=9\)\. Threshold is 8\./);
-  assert.match(msgs[1]!, /beta \(CC=9\)\. Threshold is 8\./);
-  assert.match(msgs[1]!, /dispatch dicts/);
+  assert.match(msgs[0]!, /^alpha is making too many decisions/);
+  assert.match(msgs[0]!, /one sentence/);
+  assert.match(msgs[1]!, /^beta: same smell/);
+});
+
+test("the default cc nudge never mentions the count or the threshold", () => {
+  const stdout = runScript(scriptPrintingCcNudges(), envWithout("LIUBAI_PHRASING_PACK"));
+
+  for (const msg of JSON.parse(stdout) as string[]) {
+    assert.doesNotMatch(msg, /CC=|[Tt]hreshold|\b9\b|\b8\b/);
+  }
 });
