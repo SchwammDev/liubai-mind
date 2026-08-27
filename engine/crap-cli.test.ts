@@ -63,6 +63,24 @@ function fakeAdapter(opts: {
   };
 }
 
+const SPLIT_MARKER = "SPLIT_MARKER";
+
+function markerAdapter(headFns: CrapFunction[], stagedFns: CrapFunction[]): CrapAdapter {
+  return {
+    snapshotExists: () => true,
+    snapshotMtime: () => Date.now() / 1000,
+    loadSnapshot: () => ({ files: {} }),
+    extractFunctions: (_path, source) => (source.includes(SPLIT_MARKER) ? stagedFns : headFns),
+  };
+}
+
+function farFn(name: string, cc: number): CrapFunction {
+  return { name, startLine: 9999, endLine: 9999, cc };
+}
+
+const BASE_SOURCE = "function f() {\n  return 1;\n}\n";
+const SPLIT_SOURCE = `// ${SPLIT_MARKER}\nfunction a() {}\nfunction b() {}\nfunction c() {}\n`;
+
 test("no_staged_ts_files_passes_without_needing_coverage", async () => {
   const root = tmpRepo("crap-empty-");
 
@@ -462,6 +480,113 @@ test("python_coverage_cli_error_surfaces_as_a_clean_message", async () => {
 
     assert.equal(res.status, 1);
     assert.match(res.stderr, /coverage CLI not on PATH/);
+  } finally {
+    rmTree(root);
+  }
+});
+
+test("pure_split_that_preserves_decision_points_gets_an_advisory", async () => {
+  const root = tmpRepo("crap-adv-split-");
+  try {
+    stageWithHunk(root, "foo.ts", BASE_SOURCE);
+    amendLine(root, "foo.ts", SPLIT_SOURCE);
+
+    const res = await runCrap({
+      cwd: root,
+      adapters: { typescript: markerAdapter(
+        [farFn("f", 11)],
+        [farFn("a", 4), farFn("b", 4), farFn("c", 5)],
+      ) },
+    });
+
+    assert.equal(res.status, 0);
+    assert.equal(
+      res.stderr,
+      "crap: advisory — foo.ts: f dropped below the cc threshold but total decision points did not fall (10 -> 10); the complexity moved, it did not leave.\n",
+    );
+  } finally {
+    rmTree(root);
+  }
+});
+
+test("genuine_simplification_that_lowers_decision_points_gets_no_advisory", async () => {
+  const root = tmpRepo("crap-adv-simplify-");
+  try {
+    stageWithHunk(root, "foo.ts", BASE_SOURCE);
+    amendLine(root, "foo.ts", SPLIT_SOURCE);
+
+    const res = await runCrap({
+      cwd: root,
+      adapters: { typescript: markerAdapter(
+        [farFn("f", 11)],
+        [farFn("a", 4), farFn("b", 4), farFn("c", 4)],
+      ) },
+    });
+
+    assert.equal(res.status, 0);
+    assert.equal(res.stderr, "");
+  } finally {
+    rmTree(root);
+  }
+});
+
+test("staged_function_still_over_the_cc_threshold_suppresses_the_advisory", async () => {
+  const root = tmpRepo("crap-adv-stillover-");
+  try {
+    stageWithHunk(root, "foo.ts", "function f() {\n  return 1;\n}\n");
+    amendLine(root, "foo.ts", "function f() {\n  return 2;\n}\n");
+
+    const res = await runCrap({
+      cwd: root,
+      adapters: { typescript: fakeAdapter({
+        functions: [HIGH_CC_FN],
+        snapshot: { files: { "foo.ts": { executed: [], missing: [1, 2, 3] } } },
+      }) },
+    });
+
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /^crap: CRAP threshold exceeded/);
+    assert.doesNotMatch(res.stderr, /advisory/);
+  } finally {
+    rmTree(root);
+  }
+});
+
+test("newly_added_file_has_no_head_baseline_so_no_advisory_runs", async () => {
+  const root = tmpRepo("crap-adv-new-");
+  try {
+    stageWithHunk(root, "unrelated.ts", "function u() {\n  return 1;\n}\n");
+    write("foo.ts", root, SPLIT_SOURCE);
+    git(root, ["add", "foo.ts"]);
+
+    const res = await runCrap({
+      cwd: root,
+      adapters: { typescript: markerAdapter([farFn("f", 11)], [farFn("a", 4), farFn("b", 4), farFn("c", 5)]) },
+    });
+
+    assert.equal(res.status, 0);
+    assert.doesNotMatch(res.stderr, /advisory/);
+  } finally {
+    rmTree(root);
+  }
+});
+
+test("head_function_under_the_cc_threshold_gets_no_advisory_even_if_decision_points_rise", async () => {
+  const root = tmpRepo("crap-adv-underthresh-");
+  try {
+    stageWithHunk(root, "foo.ts", BASE_SOURCE);
+    amendLine(root, "foo.ts", SPLIT_SOURCE);
+
+    const res = await runCrap({
+      cwd: root,
+      adapters: { typescript: markerAdapter(
+        [farFn("f", 5)],
+        [farFn("a", 4), farFn("b", 4), farFn("c", 4)],
+      ) },
+    });
+
+    assert.equal(res.status, 0);
+    assert.doesNotMatch(res.stderr, /advisory/);
   } finally {
     rmTree(root);
   }
