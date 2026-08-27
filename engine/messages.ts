@@ -106,6 +106,21 @@ export const ANNOTATION_ADVICE: Record<Lang, string> = {
   cpp: "Spell out parameter and return types instead of leaning on auto.",
 };
 
+export const TEST_BODY_NUDGE = {
+  first: [
+    "{name} reads as a wall of mechanics — a first-time reader cannot see what case it proves. Work through it in order:",
+    '1. Say what behavior this test proves in one sentence, in domain language, not implementation detail. If you need "and", it is testing more than one concept — split it into tests named for each.',
+    "2. Hide assertion mechanics behind a helper named for the domain concept it checks: assert_tile_is_valid(tile) communicates; six raw asserts do not.",
+    "3. Extract shared setup into a fixture or builder; keep only the inputs that make this case different visible in the body.",
+    "Setup / Act / Assert should be visible at a glance. Do not join statements or compress lines to quiet a checker — the test is whether the case reads at a glance, not whether a line count dropped.",
+  ].join("\n"),
+  rest: "{name}: same smell — one-sentence the case, hide mechanics behind intent-named helpers, keep only the interesting variation visible.",
+};
+
+export function formatTestBodyNudge(template: string, facts: { name: string }): string {
+  return template.replaceAll("{name}", facts.name);
+}
+
 export const TEST_HELPERS: Record<Lang, HelperConvention> = {
   python: { pattern: "assert_*/_*", root: "tests/" },
   typescript: { pattern: "assert*/expect*", root: "*.test.ts" },
