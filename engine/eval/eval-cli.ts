@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { runCollect } from "./collect.ts";
 import { runScore } from "./score.ts";
 import { runSecondTouch } from "./second-touch.ts";
+import { routeScore } from "./second-touch-score.ts";
 import type { Tier } from "./eval-contract.ts";
 
 export type ParsedCli =
@@ -305,6 +306,10 @@ async function runScoreCmd(
   return { status: result.status, stdout: result.stdout, stderr: "" };
 }
 
+function autoDetectScore(runsRoot: string): typeof runScore {
+  return (opts) => routeScore(opts, runsRoot);
+}
+
 export async function runEval(
   argv: string[],
   deps?: { collect?: typeof runCollect; secondTouch?: typeof runSecondTouch; score?: typeof runScore },
@@ -318,7 +323,7 @@ export async function runEval(
   try {
     if (parsed.cmd === "collect") return await runCollectCmd(parsed, deps?.collect ?? runCollect, repoRoot, runsRoot);
     if (parsed.cmd === "second-touch") return await runSecondTouchCmd(parsed, deps?.secondTouch ?? runSecondTouch, repoRoot, runsRoot);
-    return await runScoreCmd(parsed, deps?.score ?? runScore, repoRoot, runsRoot);
+    return await runScoreCmd(parsed, deps?.score ?? autoDetectScore(runsRoot), repoRoot, runsRoot);
   } catch (err) {
     return { status: 1, stdout: "", stderr: `${formatError(err)}\n` };
   }
