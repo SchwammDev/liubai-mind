@@ -10,6 +10,11 @@ export type Probe = { args: unknown[]; returns: unknown } | { args: unknown[]; t
 
 export type Tier = "easy" | "hard";
 
+export interface ExtensionSpec {
+  task: string;
+  probes: Probe[];
+}
+
 export interface CaseManifest {
   id: string;
   lang: Lang;
@@ -23,6 +28,7 @@ export interface CaseManifest {
   genuineDpMax?: number;
   probes: Probe[];
   reference?: Record<string, string>;
+  extension?: ExtensionSpec;
 }
 
 export interface BaselineMetrics {
@@ -60,6 +66,12 @@ export interface Provenance {
   collectedAt: string;
 }
 
+export interface SecondTouchInfo {
+  sourceRun: string;
+  sourceRep: number | null;
+  control: boolean;
+}
+
 export interface RawRow {
   caseId: string;
   conditionId: string;
@@ -76,4 +88,5 @@ export interface RawRow {
   cacheReadTokens?: number;
   railFirings?: Record<RuleName, number>;
   agentError?: string;
+  secondTouch?: SecondTouchInfo;
 }

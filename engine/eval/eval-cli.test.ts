@@ -6,6 +6,7 @@ import { parseCliArgs, runEval } from "./eval-cli.ts";
 import type { ParsedCli } from "./eval-cli.ts";
 import type { CollectOpts, CollectResult } from "./collect.ts";
 import type { runScore } from "./score.ts";
+import type { SecondTouchOpts, SecondTouchResult } from "./second-touch.ts";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 
@@ -208,4 +209,97 @@ test("runEval_wraps_a_thrown_dependency_error_into_a_clean_status_one_failure", 
   assert.equal(result.status, 1);
   assert.equal(result.stderr.includes("at "), false);
   assert.match(result.stderr, /ENOENT/);
+});
+
+function secondTouchArgv(...extra: string[]): string[] {
+  return ["second-touch", "--run", "extended", "--source-run", "baseline", "--model", "anthropic/claude-test", ...extra];
+}
+
+function assertParsedSecondTouch(parsed: ParsedCli, over: Partial<Extract<ParsedCli, { cmd: "second-touch" }>>): void {
+  assert.deepEqual(parsed, {
+    cmd: "second-touch",
+    run: "extended",
+    sourceRun: "baseline",
+    model: "anthropic/claude-test",
+    parallel: 1,
+    ...over,
+  });
+}
+
+function recordingSecondTouch(result: SecondTouchResult): { secondTouch: (opts: SecondTouchOpts) => Promise<SecondTouchResult>; calls: SecondTouchOpts[] } {
+  const calls: SecondTouchOpts[] = [];
+  const secondTouch = async (opts: SecondTouchOpts): Promise<SecondTouchResult> => {
+    calls.push(opts);
+    return result;
+  };
+  return { secondTouch, calls };
+}
+
+test("parseCliArgs_parses_a_full_second_touch_invocation", () => {
+  const argv = secondTouchArgv(
+    "--parallel",
+    "3",
+    "--timeout-ms",
+    "60000",
+    ...repeated("--case", ["ts-flag-parser", "ts-order-fulfillment"]),
+    "--condition",
+    "rails-default",
+  );
+
+  const parsed = parseCliArgs(argv);
+
+  assertParsedSecondTouch(parsed, {
+    parallel: 3,
+    timeoutMs: 60000,
+    cases: ["ts-flag-parser", "ts-order-fulfillment"],
+    conditions: ["rails-default"],
+  });
+});
+
+test("parseCliArgs_defaults_second_touch_parallel_to_one_when_omitted", () => {
+  const parsed = parseCliArgs(secondTouchArgv());
+
+  assertParsedSecondTouch(parsed, {});
+});
+
+test("parseCliArgs_reports_error_when_second_touch_is_missing_run", () => {
+  const parsed = parseCliArgs(["second-touch", "--source-run", "baseline", "--model", "anthropic/claude-test"]);
+
+  assert.ok("error" in parsed);
+});
+
+test("parseCliArgs_reports_error_when_second_touch_is_missing_source_run", () => {
+  const parsed = parseCliArgs(["second-touch", "--run", "extended", "--model", "anthropic/claude-test"]);
+
+  assert.ok("error" in parsed);
+});
+
+test("parseCliArgs_reports_error_when_second_touch_is_missing_model", () => {
+  const parsed = parseCliArgs(["second-touch", "--run", "extended", "--source-run", "baseline"]);
+
+  assert.ok("error" in parsed);
+});
+
+function assertSecondTouchRunAndSourceRunResolved(calls: SecondTouchOpts[]): void {
+  assert.equal(calls[0]?.runDir, join(REPO_ROOT, "engine", "eval", "runs", "extended"));
+  assert.equal(calls[0]?.sourceRunDir, join(REPO_ROOT, "engine", "eval", "runs", "baseline"));
+  assert.equal(calls[0]?.sourceRun, "baseline");
+}
+
+test("runEval_routes_second_touch_to_the_dependency_with_resolved_run_and_source_run_dirs", async () => {
+  const { secondTouch, calls } = recordingSecondTouch({ status: 0, rowsWritten: 2, rowsSkipped: 0, stderr: "" });
+
+  const result = await runEval(["second-touch", "--run", "extended", "--source-run", "baseline", "--model", "anthropic/claude-test"], { secondTouch });
+
+  assertSecondTouchRunAndSourceRunResolved(calls);
+  assert.equal(result.stdout, "rows written: 2, skipped: 0");
+});
+
+test("runEval_propagates_second_touch_stderr_and_nonzero_status", async () => {
+  const { secondTouch } = recordingSecondTouch({ status: 1, rowsWritten: 0, rowsSkipped: 0, stderr: "boom" });
+
+  const result = await runEval(["second-touch", "--run", "extended", "--source-run", "baseline", "--model", "anthropic/claude-test"], { secondTouch });
+
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr, "boom");
 });

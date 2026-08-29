@@ -43,7 +43,7 @@ interface WorkItem {
   rep: number;
 }
 
-interface CollectContext {
+export interface CollectContext {
   repoRoot: string;
   corpusDir: string;
   conditionsDir: string;
@@ -55,7 +55,7 @@ interface CollectContext {
   parallel: number;
 }
 
-interface ItemResult {
+export interface ItemResult {
   row?: RawRow;
   stdoutJsonl?: string;
   failure?: string;
@@ -262,23 +262,23 @@ function buildWorkItems(cases: CaseManifest[], conditions: ConditionManifest[], 
   return items;
 }
 
-function loadExistingKeys(rawPath: string): Set<string> {
+export function loadExistingKeys(rawPath: string, keyOfRow: (row: RawRow) => string): Set<string> {
   if (!existsSync(rawPath)) return new Set();
 
   const lines = readFileSync(rawPath, "utf8").split("\n").filter((line) => line.length > 0);
-  return new Set(lines.map((line) => rowKey(JSON.parse(line) as RawRow)));
+  return new Set(lines.map((line) => keyOfRow(JSON.parse(line) as RawRow)));
 }
 
-function packAbsolutePath(conditionsDir: string, condition: ConditionManifest): string | undefined {
+export function packAbsolutePath(conditionsDir: string, condition: ConditionManifest): string | undefined {
   return condition.phrasingPack === undefined ? undefined : join(conditionsDir, condition.phrasingPack);
 }
 
-function buildEnv(condition: ConditionManifest, packPath: string | undefined): Record<string, string> {
+export function buildEnv(condition: ConditionManifest, packPath: string | undefined): Record<string, string> {
   const base = { ...condition.env, LIUBAI_EVAL: "1" };
   return packPath === undefined ? base : { ...base, LIUBAI_PHRASING_PACK: packPath };
 }
 
-function copyCaseFiles(corpusDir: string, kase: CaseManifest, workDir: string): { from: string; to: string }[] {
+export function copyCaseFiles(corpusDir: string, kase: CaseManifest, workDir: string): { from: string; to: string }[] {
   const caseDir = join(corpusDir, kase.id);
   const plan = copyPlan(caseDir, kase, workDir);
   for (const { from, to } of plan) {
@@ -297,7 +297,7 @@ function readFinalFiles(workDir: string, plan: { to: string }[]): Record<string,
   return files;
 }
 
-function snapshotWorkDir(workDir: string, plan: { to: string }[]): WorkDirSnapshot {
+export function snapshotWorkDir(workDir: string, plan: { to: string }[]): WorkDirSnapshot {
   const declared = new Set(plan.map(({ to }) => relative(workDir, to)));
   const extras = snapshotExtras(workDir, declared);
   return { files: { ...readFinalFiles(workDir, plan), ...extras.files }, dropped: extras.dropped };
@@ -308,9 +308,9 @@ function failureMessage(item: WorkItem, err: unknown): string {
   return `${item.kase.id}/${item.condition.id}/${item.rep}: ${reason}`;
 }
 
-async function spawnForItem(
+export async function spawnForItem(
   ctx: CollectContext,
-  item: WorkItem,
+  task: string,
   workDir: string,
   env: Record<string, string>,
 ): Promise<{ outcome: RunOutcome; durationMs: number }> {
@@ -319,23 +319,23 @@ async function spawnForItem(
     cwd: workDir,
     env,
     model: ctx.model,
-    task: item.kase.task,
+    task,
     timeoutMs: ctx.timeoutMs,
   });
   return { outcome, durationMs: Date.now() - start };
 }
 
-function buildRawRow(
+export function buildRawRowCore(
   ctx: CollectContext,
-  item: WorkItem,
+  conditionId: string,
   packPath: string | undefined,
   outcome: RunOutcome,
   durationMs: number,
   snapshot: WorkDirSnapshot,
-): RawRow {
+): Omit<RawRow, "caseId" | "conditionId" | "rep"> {
   const packBytes = packPath === undefined ? null : readFileSync(packPath, "utf8");
   const provenance = buildProvenance({
-    conditionId: item.condition.id,
+    conditionId,
     packBytes,
     repoRoot: ctx.repoRoot,
     model: ctx.model,
@@ -346,9 +346,6 @@ function buildRawRow(
   const tokenUsage = sumTokenUsage(outcome.stdoutJsonl);
 
   return {
-    caseId: item.kase.id,
-    conditionId: item.condition.id,
-    rep: item.rep,
     provenance,
     files: snapshot.files,
     ...(snapshot.dropped.length > 0 ? { snapshotDropped: snapshot.dropped } : {}),
@@ -364,6 +361,22 @@ function buildRawRow(
   };
 }
 
+function buildRawRow(
+  ctx: CollectContext,
+  item: WorkItem,
+  packPath: string | undefined,
+  outcome: RunOutcome,
+  durationMs: number,
+  snapshot: WorkDirSnapshot,
+): RawRow {
+  return {
+    caseId: item.kase.id,
+    conditionId: item.condition.id,
+    rep: item.rep,
+    ...buildRawRowCore(ctx, item.condition.id, packPath, outcome, durationMs, snapshot),
+  };
+}
+
 async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult> {
   const workDir = mkdtempSync(join(ctx.workRoot, "eval-work-"));
   const plan = copyCaseFiles(ctx.corpusDir, item.kase, workDir);
@@ -371,7 +384,7 @@ async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult>
   const env = buildEnv(item.condition, packPath);
 
   try {
-    const { outcome, durationMs } = await spawnForItem(ctx, item, workDir, env);
+    const { outcome, durationMs } = await spawnForItem(ctx, item.kase.task, workDir, env);
     const snapshot = snapshotWorkDir(workDir, plan);
     const row = buildRawRow(ctx, item, packPath, outcome, durationMs, snapshot);
     return { row, stdoutJsonl: outcome.stdoutJsonl };
@@ -380,11 +393,11 @@ async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult>
   }
 }
 
-function transcriptPath(runDir: string, item: WorkItem): string {
-  return join(runDir, "transcripts", `${item.kase.id}.${item.condition.id}.${item.rep}.jsonl`);
+function workItemTranscriptFilename(item: WorkItem): string {
+  return `${item.kase.id}.${item.condition.id}.${item.rep}.jsonl`;
 }
 
-function loadError(message: string): CollectResult {
+export function loadError(message: string): CollectResult {
   return { status: 1, rowsWritten: 0, rowsSkipped: 0, stderr: message };
 }
 
@@ -394,13 +407,23 @@ function filterByTier(cases: CaseManifest[], tier: Tier | undefined): CaseManife
   return filtered.length > 0 ? filtered : { error: `no cases with tier: ${tier}` };
 }
 
-function validateParallel(parallel: number | undefined): CollectResult | undefined {
+export function validateParallel(parallel: number | undefined): CollectResult | undefined {
   if (parallel === undefined) return undefined;
   if (Number.isInteger(parallel) && parallel >= 1) return undefined;
   return loadError(`parallel must be a positive integer, got: ${parallel}`);
 }
 
-function buildContext(opts: CollectOpts, corpusDir: string, conditionsDir: string): CollectContext {
+export interface EngineOptsBase {
+  repoRoot: string;
+  model: string;
+  timeoutMs?: number;
+  spawner?: PiSpawner;
+  workRoot?: string;
+  now?: () => string;
+  parallel?: number;
+}
+
+export function buildContext(opts: EngineOptsBase, corpusDir: string, conditionsDir: string): CollectContext {
   return {
     repoRoot: opts.repoRoot,
     corpusDir,
@@ -414,58 +437,95 @@ function buildContext(opts: CollectOpts, corpusDir: string, conditionsDir: strin
   };
 }
 
-interface CollectCounts {
+export interface CollectCounts {
   rowsWritten: number;
   rowsSkipped: number;
   failures: string[];
 }
 
-function partitionItems(items: WorkItem[], existingKeys: Set<string>): { toRun: WorkItem[]; rowsSkipped: number } {
-  const toRun: WorkItem[] = [];
+export interface EngineOps<T, C extends CollectContext = CollectContext> {
+  keyOf: (item: T) => string;
+  run: (ctx: C, item: T) => Promise<ItemResult>;
+  transcriptFilename: (item: T) => string;
+}
+
+export function partitionItems<T>(
+  items: T[],
+  existingKeys: Set<string>,
+  keyOf: (item: T) => string,
+): { toRun: T[]; rowsSkipped: number } {
+  const toRun: T[] = [];
   let rowsSkipped = 0;
 
   for (const item of items) {
-    if (existingKeys.has(itemKey(item))) rowsSkipped += 1;
+    if (existingKeys.has(keyOf(item))) rowsSkipped += 1;
     else toRun.push(item);
   }
 
   return { toRun, rowsSkipped };
 }
 
-async function dispatchItem(
-  ctx: CollectContext,
+async function dispatchItem<T, C extends CollectContext>(
+  ctx: C,
   runDir: string,
   rawPath: string,
-  item: WorkItem,
+  item: T,
   counts: CollectCounts,
+  ops: EngineOps<T, C>,
 ): Promise<void> {
-  const result = await runItem(ctx, item);
+  const result = await ops.run(ctx, item);
   if (result.failure !== undefined) {
     counts.failures.push(result.failure);
     return;
   }
 
   appendFileSync(rawPath, `${JSON.stringify(result.row)}\n`);
-  writeFileSync(transcriptPath(runDir, item), result.stdoutJsonl ?? "");
+  writeFileSync(join(runDir, "transcripts", ops.transcriptFilename(item)), result.stdoutJsonl ?? "");
   counts.rowsWritten += 1;
 }
 
-async function runLane(
-  ctx: CollectContext,
+async function runLane<T, C extends CollectContext>(
+  ctx: C,
   runDir: string,
   rawPath: string,
-  items: WorkItem[],
+  items: T[],
   cursor: { next: number },
   counts: CollectCounts,
+  ops: EngineOps<T, C>,
 ): Promise<void> {
   while (cursor.next < items.length) {
     const index = cursor.next;
     cursor.next += 1;
     const item = items[index];
     if (item === undefined) continue;
-    await dispatchItem(ctx, runDir, rawPath, item, counts);
+    await dispatchItem(ctx, runDir, rawPath, item, counts, ops);
   }
 }
+
+export async function runItemsConcurrently<T, C extends CollectContext = CollectContext>(
+  ctx: C,
+  runDir: string,
+  rawPath: string,
+  items: T[],
+  existingKeys: Set<string>,
+  ops: EngineOps<T, C>,
+): Promise<CollectCounts> {
+  const { toRun, rowsSkipped } = partitionItems(items, existingKeys, ops.keyOf);
+  const counts: CollectCounts = { rowsWritten: 0, rowsSkipped, failures: [] };
+  const cursor = { next: 0 };
+  const laneCount = Math.min(ctx.parallel, toRun.length);
+  const lanes = Array.from({ length: laneCount }, () => runLane(ctx, runDir, rawPath, toRun, cursor, counts, ops));
+
+  await Promise.all(lanes);
+
+  return counts;
+}
+
+const WORK_ITEM_OPS: EngineOps<WorkItem> = {
+  keyOf: itemKey,
+  run: runItem,
+  transcriptFilename: workItemTranscriptFilename,
+};
 
 async function runWorkItems(
   ctx: CollectContext,
@@ -474,18 +534,10 @@ async function runWorkItems(
   items: WorkItem[],
   existingKeys: Set<string>,
 ): Promise<CollectCounts> {
-  const { toRun, rowsSkipped } = partitionItems(items, existingKeys);
-  const counts: CollectCounts = { rowsWritten: 0, rowsSkipped, failures: [] };
-  const cursor = { next: 0 };
-  const laneCount = Math.min(ctx.parallel, toRun.length);
-  const lanes = Array.from({ length: laneCount }, () => runLane(ctx, runDir, rawPath, toRun, cursor, counts));
-
-  await Promise.all(lanes);
-
-  return counts;
+  return runItemsConcurrently(ctx, runDir, rawPath, items, existingKeys, WORK_ITEM_OPS);
 }
 
-function toCollectResult(counts: CollectCounts): CollectResult {
+export function toCollectResult(counts: CollectCounts): CollectResult {
   return {
     status: counts.failures.length > 0 ? 1 : 0,
     rowsWritten: counts.rowsWritten,
@@ -511,7 +563,7 @@ export async function runCollect(opts: CollectOpts): Promise<CollectResult> {
   if ("error" in tieredCases) return loadError(tieredCases.error);
 
   const rawPath = join(opts.runDir, "raw.jsonl");
-  const existingKeys = loadExistingKeys(rawPath);
+  const existingKeys = loadExistingKeys(rawPath, rowKey);
   mkdirSync(join(opts.runDir, "transcripts"), { recursive: true });
 
   const ctx = buildContext(opts, corpusDir, conditionsDir);

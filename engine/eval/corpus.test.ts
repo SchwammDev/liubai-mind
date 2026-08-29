@@ -1007,3 +1007,76 @@ test("assertReferenceFixIsGenuine_throws_when_the_reference_reduces_dp_but_stays
 
   await assert.rejects(() => assertReferenceFixIsGenuine(dir, "hard-bar-missed"));
 });
+
+function defaultExtension(): Record<string, unknown> {
+  return { task: "Add a --tag flag.", probes: [{ args: [1], returns: 2 }] };
+}
+
+function writeExtension(caseDir: string, extension: unknown): void {
+  writeFileSync(join(caseDir, "extension.json"), JSON.stringify(extension));
+}
+
+test("loadCases_leaves_extension_undefined_when_no_extension_json_is_present", () => {
+  const dir = tempCorpusDir();
+  writeCase(dir, "no-extension", minimalManifest(), minimalFiles());
+
+  const result = loadCases(dir);
+
+  assertLoaded(result);
+  assert.equal(result[0]?.extension, undefined);
+});
+
+test("loadCases_loads_a_valid_extension_json_onto_the_case_manifest", () => {
+  const dir = tempCorpusDir();
+  const caseDir = writeCase(dir, "with-extension", minimalManifest(), minimalFiles());
+  writeExtension(caseDir, defaultExtension());
+
+  const result = loadCases(dir);
+
+  assertLoaded(result);
+  assert.deepEqual(result[0]?.extension, defaultExtension());
+});
+
+test("loadCases_rejects_an_extension_json_with_an_empty_task", () => {
+  const dir = tempCorpusDir();
+  const caseDir = writeCase(dir, "extension-empty-task", minimalManifest(), minimalFiles());
+  writeExtension(caseDir, { ...defaultExtension(), task: "" });
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /extension-empty-task/);
+});
+
+test("loadCases_rejects_an_extension_json_with_an_empty_probes_array", () => {
+  const dir = tempCorpusDir();
+  const caseDir = writeCase(dir, "extension-empty-probes", minimalManifest(), minimalFiles());
+  writeExtension(caseDir, { ...defaultExtension(), probes: [] });
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /extension-empty-probes/);
+});
+
+test("loadCases_rejects_an_extension_json_probe_with_both_returns_and_throws", () => {
+  const dir = tempCorpusDir();
+  const caseDir = writeCase(dir, "extension-probe-both", minimalManifest(), minimalFiles());
+  writeExtension(caseDir, { ...defaultExtension(), probes: [{ args: [], returns: 1, throws: "boom" }] });
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /extension-probe-both/);
+});
+
+test("loadCases_rejects_an_extension_json_that_is_not_a_json_object", () => {
+  const dir = tempCorpusDir();
+  const caseDir = writeCase(dir, "extension-not-object", minimalManifest(), minimalFiles());
+  writeExtension(caseDir, "not an object");
+
+  const result = loadCases(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /extension-not-object/);
+});
