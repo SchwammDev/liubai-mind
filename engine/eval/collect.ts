@@ -114,7 +114,16 @@ function parseAssistantMessageEnd(line: string): AssistantEnd | undefined {
   };
 }
 
-export function detectAgentError(stdoutJsonl: string): string | undefined {
+function silentCrashError(exitCode: number): string | undefined {
+  return exitCode === 0 ? undefined : `agent exited ${exitCode} before any assistant response`;
+}
+
+function terminalAssistantError(lastAssistantEnd: AssistantEnd): string | undefined {
+  if (lastAssistantEnd.stopReason !== "error") return undefined;
+  return lastAssistantEnd.errorMessage ?? FALLBACK_AGENT_ERROR;
+}
+
+export function detectAgentError(stdoutJsonl: string, exitCode = 0): string | undefined {
   const lines = stdoutJsonl.split("\n").filter((line) => line.trim().length > 0);
   let lastAssistantEnd: AssistantEnd | undefined;
 
@@ -124,8 +133,8 @@ export function detectAgentError(stdoutJsonl: string): string | undefined {
     lastAssistantEnd = parseAssistantMessageEnd(line) ?? lastAssistantEnd;
   }
 
-  if (lastAssistantEnd?.stopReason !== "error") return undefined;
-  return lastAssistantEnd.errorMessage ?? FALLBACK_AGENT_ERROR;
+  if (lastAssistantEnd === undefined) return silentCrashError(exitCode);
+  return terminalAssistantError(lastAssistantEnd);
 }
 
 function rowKey(row: { caseId: string; conditionId: string; rep: number }): string {
@@ -228,7 +237,7 @@ function buildRawRow(
     now: ctx.now(),
   });
 
-  const agentError = detectAgentError(outcome.stdoutJsonl);
+  const agentError = detectAgentError(outcome.stdoutJsonl, outcome.exitCode);
 
   return {
     caseId: item.kase.id,

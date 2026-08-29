@@ -436,6 +436,22 @@ test("detectAgentError_reports_a_session_whose_last_assistant_message_ended_in_e
   assert.equal(agentError, "OpenAI API error (404): incompatible model");
 });
 
+test("detectAgentError_reports_a_crash_that_exited_nonzero_before_any_assistant_response", () => {
+  const stdoutJsonl = `${JSON.stringify({ type: "session", version: 3 })}\n`;
+
+  const agentError = detectAgentError(stdoutJsonl, 1);
+
+  assert.equal(agentError, "agent exited 1 before any assistant response");
+});
+
+test("detectAgentError_does_not_label_a_nonzero_exit_that_still_produced_assistant_responses", () => {
+  const stdoutJsonl = messageEndLine("stop");
+
+  const agentError = detectAgentError(stdoutJsonl, 1);
+
+  assert.equal(agentError, undefined);
+});
+
 test("detectAgentError_ignores_a_transient_error_message_that_a_later_assistant_message_recovered_from", () => {
   const stdoutJsonl =
     messageEndLine("error", "ECONNRESET") +
