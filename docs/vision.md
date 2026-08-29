@@ -28,6 +28,12 @@ Not leash *vs* rails. **Two loops, always both** (Böckeler):
 
 Real question = **ratio and placement** of the two, and whether it should **shift with model strength** (more rails on weak, more leash on strong). Core research axis, not a gap. Principle #6 exists to make answering it cheap.
 
+### Evidence so far
+
+- **Wording is a weak lever; the loop is the strong one** (#45). A bare metric one-liner and a long coaching guide produce the same outcomes inside the harness, while the same contrast in a single-shot setting collapses genuine fixes (external repro). The environment — iteration plus deterministic rails — carries the behavior; by #3 the shorter message wins.
+- **Rails must cohere or they induce rule-obsession in the agent** (#60). When nudge advice recommends a shape the judge penalizes, agents spiral into fighting the checker — hunting thresholds, hand-counting branches — instead of finishing. `obsess-over-rules` is an agent failure mode too, and incoherent rails cause it.
+- **Capability scales exploitation** (#59). The stronger eval model probed the harness itself — reading probes and reference solutions; the weaker one never did. Stronger models don't just need fewer rails, they need sealed ones.
+
 ## What the harness fights
 
 Named obstacles the design must assume (Kesseler): context-rot, excess-verbosity, selective-hearing, compliance-bias (agrees but misaligned), negative-bleedthrough, non-determinism, degrades-under-complexity. Density + slim + small-steps are answers to these, not aesthetics.
