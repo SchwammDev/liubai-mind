@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 
 import type { CaseManifest, ConditionManifest, RawRow, Tier } from "./eval-contract.ts";
+import { RULE } from "../contract.ts";
+import type { RuleName } from "../contract.ts";
 import { loadConditions } from "./conditions.ts";
 import { loadCases, copyPlan } from "./corpus.ts";
 import { buildProvenance } from "./provenance.ts";
@@ -112,6 +114,109 @@ function parseAssistantMessageEnd(line: string): AssistantEnd | undefined {
     ...(typeof message.stopReason === "string" ? { stopReason: message.stopReason } : {}),
     ...(typeof message.errorMessage === "string" ? { errorMessage: message.errorMessage } : {}),
   };
+}
+
+function nonEmptyLines(stdoutJsonl: string): string[] {
+  return stdoutJsonl.split("\n").filter((line) => line.trim().length > 0);
+}
+
+function parseJsonLine(line: string): unknown {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+}
+
+export function countTurns(stdoutJsonl: string): number {
+  let turns = 0;
+  for (const line of nonEmptyLines(stdoutJsonl)) {
+    const parsed = parseJsonLine(line);
+    if (typeof parsed === "object" && parsed !== null && (parsed as Record<string, unknown>).type === "turn_start") turns += 1;
+  }
+  return turns;
+}
+
+export interface TokenUsage {
+  tokensIn: number;
+  tokensOut: number;
+  cacheReadTokens: number;
+}
+
+function numberField(obj: Record<string, unknown>, key: string): number {
+  const value = obj[key];
+  return typeof value === "number" ? value : 0;
+}
+
+export function sumTokenUsage(stdoutJsonl: string): TokenUsage {
+  const usage: TokenUsage = { tokensIn: 0, tokensOut: 0, cacheReadTokens: 0 };
+
+  for (const line of nonEmptyLines(stdoutJsonl)) {
+    const message = assistantMessageOf(line);
+    if (message === undefined || typeof message.usage !== "object" || message.usage === null) continue;
+
+    const messageUsage = message.usage as Record<string, unknown>;
+    usage.tokensIn += numberField(messageUsage, "input");
+    usage.tokensOut += numberField(messageUsage, "output");
+    usage.cacheReadTokens += numberField(messageUsage, "cacheRead");
+  }
+
+  return usage;
+}
+
+const RULE_NAMES: readonly RuleName[] = Object.values(RULE);
+
+function emptyRailFirings(): Record<RuleName, number> {
+  return Object.fromEntries(RULE_NAMES.map((rule) => [rule, 0])) as Record<RuleName, number>;
+}
+
+function toolExecutionEndResultOf(line: string): Record<string, unknown> | undefined {
+  const parsed = parseJsonLine(line);
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+
+  const obj = parsed as Record<string, unknown>;
+  if (obj.type !== "tool_execution_end" || typeof obj.result !== "object" || obj.result === null) return undefined;
+
+  return obj.result as Record<string, unknown>;
+}
+
+function textPartOf(part: unknown): string | undefined {
+  if (typeof part !== "object" || part === null) return undefined;
+
+  const { type, text } = part as Record<string, unknown>;
+  return type === "text" && typeof text === "string" ? text : undefined;
+}
+
+function toolResultTexts(line: string): string[] {
+  const result = toolExecutionEndResultOf(line);
+  const content = result?.content;
+  if (!Array.isArray(content)) return [];
+
+  return content.map(textPartOf).filter((text): text is string => text !== undefined);
+}
+
+function countRuleMarkersIn(text: string, marker: string): number {
+  let count = 0;
+  let index = text.indexOf(marker);
+  while (index !== -1) {
+    count += 1;
+    index = text.indexOf(marker, index + marker.length);
+  }
+  return count;
+}
+
+export function countRailFirings(stdoutJsonl: string): Record<RuleName, number> {
+  const counts = emptyRailFirings();
+
+  for (const line of nonEmptyLines(stdoutJsonl)) {
+    for (const text of toolResultTexts(line)) {
+      for (const rule of RULE_NAMES) {
+        counts[rule] += countRuleMarkersIn(text, `[${rule}]`);
+      }
+    }
+  }
+
+  return counts;
 }
 
 function silentCrashError(exitCode: number): string | undefined {
@@ -238,6 +343,7 @@ function buildRawRow(
   });
 
   const agentError = detectAgentError(outcome.stdoutJsonl, outcome.exitCode);
+  const tokenUsage = sumTokenUsage(outcome.stdoutJsonl);
 
   return {
     caseId: item.kase.id,
@@ -249,6 +355,11 @@ function buildRawRow(
     exitCode: outcome.exitCode,
     timedOut: outcome.timedOut,
     durationMs,
+    turns: countTurns(outcome.stdoutJsonl),
+    tokensIn: tokenUsage.tokensIn,
+    tokensOut: tokenUsage.tokensOut,
+    cacheReadTokens: tokenUsage.cacheReadTokens,
+    railFirings: countRailFirings(outcome.stdoutJsonl),
     ...(agentError !== undefined ? { agentError } : {}),
   };
 }

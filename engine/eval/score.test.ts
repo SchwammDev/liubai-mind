@@ -10,6 +10,8 @@ import type { RawRow, Metrics, Verdict, GamedReason, Provenance, JudgeResult, Ti
 import type { JudgedRow } from "./score.ts";
 import { venvPythonAvailable } from "./judge-env.ts";
 import { gitSha } from "./provenance.ts";
+import { RULE } from "../contract.ts";
+import type { RuleName } from "../contract.ts";
 
 const CORPUS_DIR = join(import.meta.dirname, "corpus");
 const FIXTURE_PATH = join(import.meta.dirname, "fixtures", "raw-smoke.jsonl");
@@ -375,6 +377,12 @@ function summaryRow(
     withCreatedFiles: 0,
     contaminated,
     meanDpReduction: null,
+    meanDurationMs: null,
+    meanTurns: null,
+    meanTokensIn: null,
+    meanTokensOut: null,
+    meanRailFirings: null,
+    costAvailable: 0,
     ...judgeEnv(),
   };
 }
@@ -542,6 +550,76 @@ test("aggregate_orders_overall_rollup_before_tier_rollups_before_case_details", 
   assert.deepEqual(summary.map((row) => [row.caseId, row.tier]), [[null, null], [null, "easy"], ["case-a", "easy"]]);
 });
 
+const RULE_NAMES: readonly RuleName[] = Object.values(RULE);
+
+function railFirings(over: Partial<Record<RuleName, number>> = {}): Record<RuleName, number> {
+  const base = Object.fromEntries(RULE_NAMES.map((rule) => [rule, 0])) as Record<RuleName, number>;
+  return { ...base, ...over };
+}
+
+function costJudgedRow(conditionId: string, caseId: string, over: Partial<RawRow> = {}): JudgedRow {
+  const judge: JudgeResult = { verdict: "untouched", before: metrics(), after: metrics(), createdFiles: [], referencedFiles: [] };
+  return { row: rawRow(conditionId, caseId, over), judge, contaminated: false };
+}
+
+function costOf(summary: SummaryRow[], conditionId: string, caseId: string | null): SummaryRow {
+  const found = summary.find((r) => r.conditionId === conditionId && r.caseId === caseId);
+  if (found === undefined) throw new Error(`summary row not found: ${conditionId}/${caseId}`);
+  return found;
+}
+
+test("aggregate_means_duration_across_every_row_in_the_bucket", () => {
+  const judged = [
+    costJudgedRow("rails-default", "case-a", { durationMs: 1000 }),
+    costJudgedRow("rails-default", "case-a", { durationMs: 3000 }),
+  ];
+
+  const summary = aggregate(judged, judgeEnv());
+
+  assert.equal(costOf(summary, "rails-default", null).meanDurationMs, 2000);
+});
+
+test("aggregate_means_turns_and_tokens_only_over_rows_that_report_them", () => {
+  const judged = [
+    costJudgedRow("rails-default", "case-a", { turns: 4, tokensIn: 1000, tokensOut: 200, railFirings: railFirings() }),
+    costJudgedRow("rails-default", "case-a", {}),
+  ];
+
+  const summary = aggregate(judged, judgeEnv());
+
+  const rollup = costOf(summary, "rails-default", null);
+  assert.equal(rollup.meanTurns, 4);
+  assert.equal(rollup.meanTokensIn, 1000);
+  assert.equal(rollup.meanTokensOut, 200);
+  assert.equal(rollup.costAvailable, 1);
+});
+
+test("aggregate_reports_null_cost_means_when_no_row_in_the_bucket_reports_cost_fields", () => {
+  const judged = [costJudgedRow("rails-default", "case-a", {})];
+
+  const summary = aggregate(judged, judgeEnv());
+
+  const rollup = costOf(summary, "rails-default", null);
+  assert.equal(rollup.meanTurns, null);
+  assert.equal(rollup.meanTokensIn, null);
+  assert.equal(rollup.meanTokensOut, null);
+  assert.equal(rollup.meanRailFirings, null);
+  assert.equal(rollup.costAvailable, 0);
+});
+
+test("aggregate_means_rail_firings_per_rule_over_rows_that_report_them", () => {
+  const judged = [
+    costJudgedRow("rails-default", "case-a", { turns: 1, tokensIn: 1, tokensOut: 1, railFirings: railFirings({ cc: 2, "discourage-comments": 1 }) }),
+    costJudgedRow("rails-default", "case-a", { turns: 1, tokensIn: 1, tokensOut: 1, railFirings: railFirings({ cc: 4 }) }),
+  ];
+
+  const summary = aggregate(judged, judgeEnv());
+
+  const rollup = costOf(summary, "rails-default", null);
+  assert.equal(rollup.meanRailFirings?.cc, 3);
+  assert.equal(rollup.meanRailFirings?.["discourage-comments"], 0.5);
+});
+
 test("formatMarkdown_renders_one_line_per_condition_with_counts_and_genuine_rate", () => {
   const summary: SummaryRow[] = [
     summaryRow("rails-default", null, { "genuine-fix": 3, gamed: 1 }, 4),
@@ -598,6 +676,36 @@ test("formatMarkdown_renders_a_dash_for_a_null_mean_dp_cut", () => {
   const table = formatMarkdown(summary);
 
   assertConditionLine(table, "rails-default", "0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0\\.0% \\| -");
+});
+
+test("formatMarkdown_renders_the_cost_columns_after_mean_dp_cut", () => {
+  const summary: SummaryRow[] = [
+    {
+      ...summaryRow("rails-default", null, { "genuine-fix": 1 }, 1),
+      meanDurationMs: 42000,
+      meanTurns: 5,
+      meanTokensIn: 8000,
+      meanTokensOut: 1200,
+      meanRailFirings: railFirings({ cc: 2 }),
+    },
+  ];
+
+  const table = formatMarkdown(summary);
+
+  assert.match(table, /\| mean dp cut \| mean ms \| mean turns \| tokens in \| tokens out \| nudges\/rep \|/);
+  assertConditionLine(
+    table,
+    "rails-default",
+    "1 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 100\\.0% \\| - \\| 42000 \\| 5\\.0 \\| 8000\\.0 \\| 1200\\.0 \\| 2\\.0",
+  );
+});
+
+test("formatMarkdown_renders_dashes_for_cost_columns_when_the_bucket_has_no_cost_data", () => {
+  const summary: SummaryRow[] = [summaryRow("rails-default", null, { "genuine-fix": 1 }, 1)];
+
+  const table = formatMarkdown(summary);
+
+  assertConditionLine(table, "rails-default", "1 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 100\\.0% \\| - \\| - \\| - \\| - \\| - \\| -");
 });
 
 test("formatMarkdown_suffixes_the_condition_cell_with_the_tier_for_a_tier_rollup", () => {

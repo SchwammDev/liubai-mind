@@ -1,7 +1,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { Lang, Extracted } from "../contract.ts";
+import type { Lang, Extracted, RuleName } from "../contract.ts";
+import { RULE } from "../contract.ts";
 import type { CaseManifest } from "./eval-contract.ts";
 import type { RawRow, Metrics, Verdict, GamedReason, JudgeResult, Provenance, Tier } from "./eval-contract.ts";
 import { decisionPoints, classifyVerdict } from "./judge.ts";
@@ -37,6 +38,12 @@ export interface SummaryRow {
   withCreatedFiles: number;
   contaminated: number;
   meanDpReduction: number | null;
+  meanDurationMs: number | null;
+  meanTurns: number | null;
+  meanTokensIn: number | null;
+  meanTokensOut: number | null;
+  meanRailFirings: Record<RuleName, number> | null;
+  costAvailable: number;
   judgedAtSha: string;
   pyCcBackend: string;
 }
@@ -272,6 +279,12 @@ function newSummaryRow(conditionId: string, caseId: string | null, tier: Tier | 
     withCreatedFiles: 0,
     contaminated: 0,
     meanDpReduction: null,
+    meanDurationMs: null,
+    meanTurns: null,
+    meanTokensIn: null,
+    meanTokensOut: null,
+    meanRailFirings: null,
+    costAvailable: 0,
     judgedAtSha: env.judgedAtSha,
     pyCcBackend: env.pyCcBackend,
   };
@@ -310,22 +323,85 @@ function meanDpReductionOf(acc: DpReductionAccumulator): number | null {
   return acc.count === 0 ? null : acc.sum / acc.count;
 }
 
+const RULE_NAMES: readonly RuleName[] = Object.values(RULE);
+
+function zeroRailFirings(): Record<RuleName, number> {
+  return Object.fromEntries(RULE_NAMES.map((rule) => [rule, 0])) as Record<RuleName, number>;
+}
+
+interface CostAccumulator {
+  durationSum: number;
+  turnsSum: number;
+  tokensInSum: number;
+  tokensOutSum: number;
+  railFiringsSum: Record<RuleName, number>;
+  available: number;
+}
+
+function newCostAccumulator(): CostAccumulator {
+  return { durationSum: 0, turnsSum: 0, tokensInSum: 0, tokensOutSum: 0, railFiringsSum: zeroRailFirings(), available: 0 };
+}
+
+function costFieldsPresent(row: RawRow): row is RawRow & { turns: number; tokensIn: number; tokensOut: number; railFirings: Record<RuleName, number> } {
+  return row.turns !== undefined && row.tokensIn !== undefined && row.tokensOut !== undefined && row.railFirings !== undefined;
+}
+
+function addCostMetrics(acc: CostAccumulator, row: RawRow): void {
+  acc.durationSum += row.durationMs;
+  if (!costFieldsPresent(row)) return;
+
+  acc.available += 1;
+  acc.turnsSum += row.turns;
+  acc.tokensInSum += row.tokensIn;
+  acc.tokensOutSum += row.tokensOut;
+  for (const rule of RULE_NAMES) acc.railFiringsSum[rule] += row.railFirings[rule];
+}
+
+function meanOf(sum: number, count: number): number | null {
+  return count === 0 ? null : sum / count;
+}
+
+interface CostSummary {
+  meanDurationMs: number | null;
+  meanTurns: number | null;
+  meanTokensIn: number | null;
+  meanTokensOut: number | null;
+  meanRailFirings: Record<RuleName, number> | null;
+  costAvailable: number;
+}
+
+function finalizeCost(acc: CostAccumulator, totalRows: number): CostSummary {
+  const meanRailFirings =
+    acc.available === 0 ? null : (Object.fromEntries(RULE_NAMES.map((rule) => [rule, acc.railFiringsSum[rule] / acc.available])) as Record<RuleName, number>);
+
+  return {
+    meanDurationMs: meanOf(acc.durationSum, totalRows),
+    meanTurns: meanOf(acc.turnsSum, acc.available),
+    meanTokensIn: meanOf(acc.tokensInSum, acc.available),
+    meanTokensOut: meanOf(acc.tokensOutSum, acc.available),
+    meanRailFirings,
+    costAvailable: acc.available,
+  };
+}
+
 interface SummaryBucket {
   row: SummaryRow;
   dpReduction: DpReductionAccumulator;
+  cost: CostAccumulator;
 }
 
 function newSummaryBucket(conditionId: string, caseId: string | null, tier: Tier | null, env: JudgeEnv): SummaryBucket {
-  return { row: newSummaryRow(conditionId, caseId, tier, env), dpReduction: newDpReductionAccumulator() };
+  return { row: newSummaryRow(conditionId, caseId, tier, env), dpReduction: newDpReductionAccumulator(), cost: newCostAccumulator() };
 }
 
-function addJudgeToBucket(bucket: SummaryBucket, judge: JudgeResult, contaminated: boolean): void {
+function addJudgeToBucket(bucket: SummaryBucket, row: RawRow, judge: JudgeResult, contaminated: boolean): void {
   addJudgeToRow(bucket.row, judge, contaminated);
   addDpReduction(bucket.dpReduction, judge);
+  addCostMetrics(bucket.cost, row);
 }
 
 function finalizeSummaryRow(bucket: SummaryBucket): SummaryRow {
-  return { ...bucket.row, meanDpReduction: meanDpReductionOf(bucket.dpReduction) };
+  return { ...bucket.row, meanDpReduction: meanDpReductionOf(bucket.dpReduction), ...finalizeCost(bucket.cost, bucket.row.total) };
 }
 
 interface AggregationBuckets {
@@ -345,21 +421,22 @@ function upsertBucket(
   caseId: string | null,
   tier: Tier | null,
   env: JudgeEnv,
+  row: RawRow,
   judge: JudgeResult,
   contaminated: boolean,
 ): void {
   const bucket = buckets.get(key) ?? newSummaryBucket(conditionId, caseId, tier, env);
-  addJudgeToBucket(bucket, judge, contaminated);
+  addJudgeToBucket(bucket, row, judge, contaminated);
   buckets.set(key, bucket);
 }
 
 function accumulateRow(buckets: AggregationBuckets, judgedRow: JudgedRow, tier: Tier | null, env: JudgeEnv): void {
   const { row, judge, contaminated } = judgedRow;
-  upsertBucket(buckets.overall, row.conditionId, row.conditionId, null, null, env, judge, contaminated);
+  upsertBucket(buckets.overall, row.conditionId, row.conditionId, null, null, env, row, judge, contaminated);
   if (tier !== null) {
-    upsertBucket(buckets.tier, detailKey(row.conditionId, tier), row.conditionId, null, tier, env, judge, contaminated);
+    upsertBucket(buckets.tier, detailKey(row.conditionId, tier), row.conditionId, null, tier, env, row, judge, contaminated);
   }
-  upsertBucket(buckets.detail, detailKey(row.conditionId, row.caseId), row.conditionId, row.caseId, tier, env, judge, contaminated);
+  upsertBucket(buckets.detail, detailKey(row.conditionId, row.caseId), row.conditionId, row.caseId, tier, env, row, judge, contaminated);
 }
 
 export function aggregate(judged: JudgedRow[], env: JudgeEnv, tierByCaseId: Map<string, Tier> = new Map()): SummaryRow[] {
@@ -385,19 +462,34 @@ function formatMeanDpReduction(value: number | null): string {
   return value === null ? "-" : value.toFixed(1);
 }
 
+function formatMeanMs(value: number | null): string {
+  return value === null ? "-" : Math.round(value).toString();
+}
+
+function formatMean(value: number | null): string {
+  return value === null ? "-" : value.toFixed(1);
+}
+
+function formatNudgesPerRep(value: Record<RuleName, number> | null): string {
+  if (value === null) return "-";
+  const total = Object.values(value).reduce((sum, count) => sum + count, 0);
+  return total.toFixed(1);
+}
+
 function conditionCell(row: SummaryRow): string {
   return row.tier === null ? row.conditionId : `${row.conditionId} [${row.tier}]`;
 }
 
 function markdownRow(row: SummaryRow): string {
   const c = row.counts;
-  return `| ${conditionCell(row)} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["bar-missed"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${row.withCreatedFiles} | ${row.contaminated} | ${formatPercent(genuineRate(row))} | ${formatMeanDpReduction(row.meanDpReduction)} |`;
+  return `| ${conditionCell(row)} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["bar-missed"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${row.withCreatedFiles} | ${row.contaminated} | ${formatPercent(genuineRate(row))} | ${formatMeanDpReduction(row.meanDpReduction)} | ${formatMeanMs(row.meanDurationMs)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanTokensIn)} | ${formatMean(row.meanTokensOut)} | ${formatNudgesPerRep(row.meanRailFirings)} |`;
 }
 
 export function formatMarkdown(summary: SummaryRow[]): string {
   const rollups = summary.filter((r) => r.caseId === null);
-  const header = "| condition | n | genuine-fix | gamed | bar-missed | untouched | broken | behavior-broken | errored | created-files | contaminated | genuine % | mean dp cut |";
-  const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
+  const header =
+    "| condition | n | genuine-fix | gamed | bar-missed | untouched | broken | behavior-broken | errored | created-files | contaminated | genuine % | mean dp cut | mean ms | mean turns | tokens in | tokens out | nudges/rep |";
+  const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
   return [header, divider, ...rollups.map(markdownRow)].join("\n");
 }
 

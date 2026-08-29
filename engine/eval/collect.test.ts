@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, appen
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { runCollect, detectAgentError } from "./collect.ts";
+import { runCollect, detectAgentError, countTurns, sumTokenUsage, countRailFirings } from "./collect.ts";
 import type { CollectOpts } from "./collect.ts";
 import type { RunSpec, RunOutcome, PiSpawner } from "./spawner.ts";
 import { gitSha } from "./provenance.ts";
@@ -481,6 +481,117 @@ test("detectAgentError_skips_unparseable_lines_and_returns_undefined_when_none_i
   const agentError = detectAgentError(stdoutJsonl);
 
   assert.equal(agentError, undefined);
+});
+
+function turnStartLine(): string {
+  return `${JSON.stringify({ type: "turn_start" })}\n`;
+}
+
+test("countTurns_counts_one_turn_per_turn_start_event", () => {
+  const stdoutJsonl = turnStartLine() + turnStartLine() + turnStartLine();
+
+  assert.equal(countTurns(stdoutJsonl), 3);
+});
+
+test("countTurns_returns_zero_for_a_session_with_no_completed_turns", () => {
+  assert.equal(countTurns(""), 0);
+});
+
+function assistantMessageEndLine(usage: Partial<{ input: number; output: number; cacheRead: number }> = {}): string {
+  const message = { role: "assistant", usage: { input: 0, output: 0, cacheRead: 0, ...usage } };
+  return `${JSON.stringify({ type: "message_end", message })}\n`;
+}
+
+test("sumTokenUsage_sums_input_and_output_tokens_across_every_assistant_message", () => {
+  const stdoutJsonl = assistantMessageEndLine({ input: 100, output: 20 }) + assistantMessageEndLine({ input: 150, output: 40 });
+
+  const usage = sumTokenUsage(stdoutJsonl);
+
+  assert.equal(usage.tokensIn, 250);
+  assert.equal(usage.tokensOut, 60);
+});
+
+test("sumTokenUsage_sums_cache_read_tokens_across_every_assistant_message", () => {
+  const stdoutJsonl = assistantMessageEndLine({ cacheRead: 30 }) + assistantMessageEndLine({ cacheRead: 12 });
+
+  assert.equal(sumTokenUsage(stdoutJsonl).cacheReadTokens, 42);
+});
+
+test("sumTokenUsage_ignores_messages_that_are_not_from_the_assistant", () => {
+  const stdoutJsonl = messageEndLine("stop", undefined, "user") + assistantMessageEndLine({ input: 10, output: 5 });
+
+  const usage = sumTokenUsage(stdoutJsonl);
+
+  assert.equal(usage.tokensIn, 10);
+  assert.equal(usage.tokensOut, 5);
+});
+
+function assertZeroUsage(usage: { tokensIn: number; tokensOut: number; cacheReadTokens: number }): void {
+  assert.deepEqual(usage, { tokensIn: 0, tokensOut: 0, cacheReadTokens: 0 });
+}
+
+test("sumTokenUsage_reports_zero_for_a_session_with_no_assistant_messages", () => {
+  assertZeroUsage(sumTokenUsage(""));
+});
+
+function toolExecutionEndLine(texts: string[], isError = false): string {
+  const result = { content: texts.map((text) => ({ type: "text", text })) };
+  return `${JSON.stringify({ type: "tool_execution_end", toolCallId: "1", toolName: "edit", result, isError })}\n`;
+}
+
+test("countRailFirings_counts_a_bracketed_rule_tag_appended_to_a_tool_result", () => {
+  const stdoutJsonl = toolExecutionEndLine(["Successfully replaced 1 block(s).", "\n\n[cc] f (CC=10). too complex."]);
+
+  assert.equal(countRailFirings(stdoutJsonl).cc, 1);
+});
+
+test("countRailFirings_counts_a_blocked_result_as_a_firing_of_its_rule", () => {
+  const stdoutJsonl = toolExecutionEndLine(["[discourage-comments] Blocked: new comments detected"], true);
+
+  assert.equal(countRailFirings(stdoutJsonl)["discourage-comments"], 1);
+});
+
+test("countRailFirings_sums_firings_of_the_same_rule_across_separate_tool_calls", () => {
+  const stdoutJsonl = toolExecutionEndLine(["\n\n[cc] a (CC=9)."]) + toolExecutionEndLine(["\n\n[cc] a (CC=9)."]);
+
+  assert.equal(countRailFirings(stdoutJsonl).cc, 2);
+});
+
+test("countRailFirings_counts_each_rule_independently_when_several_fire_on_one_tool_call", () => {
+  const stdoutJsonl = toolExecutionEndLine(["\n\n[cc] a (CC=9).\n\n[type-annotation] missing return type."]);
+
+  const firings = countRailFirings(stdoutJsonl);
+
+  assert.equal(firings.cc, 1);
+  assert.equal(firings["type-annotation"], 1);
+});
+
+test("countRailFirings_reports_zero_for_a_rule_that_never_fired", () => {
+  const firings = countRailFirings("");
+
+  assert.equal(firings["test-linearity"], 0);
+});
+
+function assertCostMetricsStamped(row: RawRow): void {
+  assert.equal(row.turns, 2);
+  assert.equal(row.tokensIn, 100);
+  assert.equal(row.tokensOut, 20);
+  assert.equal(row.railFirings?.cc, 1);
+  assert.equal(row.railFirings?.["discourage-comments"], 0);
+}
+
+test("runCollect_stamps_turns_tokens_and_rail_firings_from_stdout_onto_the_raw_row", async () => {
+  const stdoutJsonl =
+    turnStartLine() +
+    turnStartLine() +
+    assistantMessageEndLine({ input: 100, output: 20 }) +
+    toolExecutionEndLine(["\n\n[cc] f (CC=9)."]);
+  const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl, timedOut: false });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+
+  await runCollect(opts);
+
+  assertCostMetricsStamped(firstRow(opts.runDir));
 });
 
 test("runCollect_stamps_agentError_into_the_raw_row_when_stdout_reports_a_terminal_retry_failure", async () => {
