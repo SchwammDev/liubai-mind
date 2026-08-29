@@ -1,0 +1,25 @@
+{
+  "task": "Records fed to parse_record may now optionally carry a phone number. When a record includes a phone, it counts as valid only if the phone is a string of exactly 10 digits; a record that is otherwise valid but has a malformed phone is invalid, same as any other bad field. Records that don't include a phone at all are validated exactly as before. When a record is valid and does include a properly formatted phone, carry it through into the parsed output alongside the existing fields. Keep parse_record's signature and every existing behavior unchanged.",
+  "probes": [
+    {
+      "args": [{ "id": "a1", "name": "Ada", "age": 36, "email": "ada@x.io", "phone": "5551234567" }],
+      "returns": { "id": "a1", "name": "Ada", "age": 36, "email": "ada@x.io", "valid": true, "phone": "5551234567" }
+    },
+    {
+      "args": [{ "id": "a1", "name": "Ada", "age": 36, "email": "ada@x.io", "phone": "0123456789" }],
+      "returns": { "id": "a1", "name": "Ada", "age": 36, "email": "ada@x.io", "valid": true, "phone": "0123456789" }
+    },
+    {
+      "args": [{ "id": "a1", "name": "Ada", "age": 36, "email": "ada@x.io", "phone": "12345" }],
+      "returns": { "id": null, "name": "", "age": 0, "email": "", "valid": false }
+    },
+    {
+      "args": [{ "id": "a1", "name": "Ada", "age": 36, "email": "ada@x.io", "phone": "555-123-4567" }],
+      "returns": { "id": null, "name": "", "age": 0, "email": "", "valid": false }
+    },
+    {
+      "args": [{ "id": "a1", "name": "Ada", "age": 36, "email": "ada@x.io", "phone": 5551234567 }],
+      "returns": { "id": null, "name": "", "age": 0, "email": "", "valid": false }
+    }
+  ]
+}

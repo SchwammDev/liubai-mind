@@ -1,0 +1,47 @@
+{
+  "task": "Add a --tag <value> flag to parseFlags that attaches a free-form label to the run, taking the following argument as its value the same way --output and --config do. If --tag is the last argument with no value after it, that's an error. When --tag isn't given, the parsed result is exactly as it is today. Keep parseFlags's signature and every existing flag's behavior unchanged.",
+  "probes": [
+    {
+      "args": [["--tag", "release"]],
+      "returns": {
+        "verbose": false,
+        "quiet": false,
+        "outputPath": null,
+        "format": "text",
+        "maxRetries": 3,
+        "timeoutMs": 30000,
+        "dryRun": false,
+        "force": false,
+        "logLevel": "info",
+        "configPath": null,
+        "parallelism": 1,
+        "color": true,
+        "strict": false,
+        "tag": "release"
+      }
+    },
+    {
+      "args": [["--tag"]],
+      "throws": "--tag requires a value"
+    },
+    {
+      "args": [["--verbose", "--tag", "nightly"]],
+      "returns": {
+        "verbose": true,
+        "quiet": false,
+        "outputPath": null,
+        "format": "text",
+        "maxRetries": 3,
+        "timeoutMs": 30000,
+        "dryRun": false,
+        "force": false,
+        "logLevel": "info",
+        "configPath": null,
+        "parallelism": 1,
+        "color": true,
+        "strict": false,
+        "tag": "nightly"
+      }
+    }
+  ]
+}
