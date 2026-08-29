@@ -1,0 +1,16 @@
+{
+  "CC_NUDGE": {
+    "python": {
+      "first": "{name} is too complex ({cc} > {threshold}).",
+      "rest": "{name} is too complex ({cc} > {threshold})."
+    },
+    "typescript": {
+      "first": "{name} is too complex ({cc} > {threshold}).",
+      "rest": "{name} is too complex ({cc} > {threshold})."
+    },
+    "cpp": {
+      "first": "{name} is too complex ({cc} > {threshold}).",
+      "rest": "{name} is too complex ({cc} > {threshold})."
+    }
+  }
+}
