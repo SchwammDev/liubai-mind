@@ -64,7 +64,7 @@ function silentHandlerLang(lang: Lang): "typescript" | "python" {
   throw new Error(`score: unsupported lang for silent-handler detection: ${lang}`);
 }
 
-function probeLang(lang: Lang): "typescript" | "python" {
+export function probeLang(lang: Lang): "typescript" | "python" {
   if (lang === "typescript") return "typescript";
   if (lang === "python") return "python";
   throw new Error(`score: unsupported lang for probe running: ${lang}`);
@@ -520,7 +520,7 @@ export function compareProvenance(a: Provenance[], b: Provenance[]): string[] {
   return lines;
 }
 
-type ParsedRaw = { rows: RawRow[] } | { error: string };
+export type ParsedRaw = { rows: RawRow[] } | { error: string };
 
 function parseRawLine(line: string, lineNumber: number, runDir: string): { row: RawRow } | { error: string } {
   try {
@@ -531,7 +531,7 @@ function parseRawLine(line: string, lineNumber: number, runDir: string): { row: 
   }
 }
 
-function readRawJsonl(runDir: string): ParsedRaw {
+export function readRawJsonl(runDir: string): ParsedRaw {
   const text = readFileSync(join(runDir, RAW_FILENAME), "utf8");
   const lines = text.split("\n").filter((l) => l.trim().length > 0);
 
