@@ -2,6 +2,7 @@ import { join } from "node:path";
 
 import { runCollect } from "./collect.ts";
 import { runScore } from "./score.ts";
+import { runSecondTouch } from "./second-touch.ts";
 import type { Tier } from "./eval-contract.ts";
 
 export type ParsedCli =
@@ -15,6 +16,16 @@ export type ParsedCli =
       cases?: string[];
       conditions?: string[];
       tier?: Tier;
+    }
+  | {
+      cmd: "second-touch";
+      run: string;
+      sourceRun: string;
+      model: string;
+      parallel: number;
+      timeoutMs?: number;
+      cases?: string[];
+      conditions?: string[];
     }
   | { cmd: "score"; run: string; compare?: string }
   | { error: string };
@@ -31,6 +42,7 @@ const DEFAULT_PARALLEL = 1;
 const USAGE = [
   "Usage:",
   "  liubai eval collect --run <name> --model <provider/id> [--reps N] [--parallel N] [--timeout-ms N] [--case id]... [--condition id]... [--tier <easy|hard>]",
+  "  liubai eval second-touch --run <newRun> --source-run <existingRun> --model <provider/id> [--parallel N] [--timeout-ms N] [--case id]... [--condition id]...",
   "  liubai eval score --run <name> [--compare <otherRunName>]",
 ].join("\n");
 
@@ -45,6 +57,16 @@ interface CollectAccum {
   parallelRaw?: string;
   timeoutMsRaw?: string;
   tierRaw?: string;
+  cases: string[];
+  conditions: string[];
+}
+
+interface SecondTouchAccum {
+  run?: string;
+  sourceRun?: string;
+  model?: string;
+  parallelRaw?: string;
+  timeoutMsRaw?: string;
   cases: string[];
   conditions: string[];
 }
@@ -78,6 +100,18 @@ function collectFlagHandlers(): FlagHandlers<CollectAccum> {
     "--case": (a, v) => { a.cases.push(v); },
     "--condition": (a, v) => { a.conditions.push(v); },
     "--tier": (a, v) => { a.tierRaw = v; },
+  };
+}
+
+function secondTouchFlagHandlers(): FlagHandlers<SecondTouchAccum> {
+  return {
+    "--run": (a, v) => { a.run = v; },
+    "--source-run": (a, v) => { a.sourceRun = v; },
+    "--model": (a, v) => { a.model = v; },
+    "--parallel": (a, v) => { a.parallelRaw = v; },
+    "--timeout-ms": (a, v) => { a.timeoutMsRaw = v; },
+    "--case": (a, v) => { a.cases.push(v); },
+    "--condition": (a, v) => { a.conditions.push(v); },
   };
 }
 
@@ -149,6 +183,41 @@ function parseCollectArgs(args: string[]): ParsedCli {
   return buildCollectResult(accum);
 }
 
+function secondTouchOptionalFields(accum: SecondTouchAccum): Partial<Extract<ParsedCli, { cmd: "second-touch" }>> {
+  const timeoutMs = accum.timeoutMsRaw === undefined ? undefined : Number(accum.timeoutMsRaw);
+
+  return {
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(accum.cases.length > 0 ? { cases: accum.cases } : {}),
+    ...(accum.conditions.length > 0 ? { conditions: accum.conditions } : {}),
+  };
+}
+
+function buildSecondTouchResult(accum: SecondTouchAccum): ParsedCli {
+  if (accum.run === undefined) return usageError("second-touch requires --run");
+  if (accum.sourceRun === undefined) return usageError("second-touch requires --source-run");
+  if (accum.model === undefined) return usageError("second-touch requires --model");
+
+  const parallel = parseParallel(accum.parallelRaw);
+  if ("error" in parallel) return usageError(parallel.error);
+
+  return {
+    cmd: "second-touch",
+    run: accum.run,
+    sourceRun: accum.sourceRun,
+    model: accum.model,
+    parallel: parallel.value,
+    ...secondTouchOptionalFields(accum),
+  };
+}
+
+function parseSecondTouchArgs(args: string[]): ParsedCli {
+  const accum: SecondTouchAccum = { cases: [], conditions: [] };
+  const flagError = consumeFlags(args, secondTouchFlagHandlers(), accum);
+  if (flagError !== undefined) return usageError(flagError.error);
+  return buildSecondTouchResult(accum);
+}
+
 function parseScoreArgs(args: string[]): ParsedCli {
   const accum: ScoreAccum = {};
   const flagError = consumeFlags(args, scoreFlagHandlers(), accum);
@@ -161,6 +230,7 @@ function parseScoreArgs(args: string[]): ParsedCli {
 export function parseCliArgs(argv: string[]): ParsedCli {
   const [sub, ...rest] = argv;
   if (sub === "collect") return parseCollectArgs(rest);
+  if (sub === "second-touch") return parseSecondTouchArgs(rest);
   if (sub === "score") return parseScoreArgs(rest);
   return usageError(`unknown subcommand: ${sub ?? ""}`);
 }
@@ -194,6 +264,31 @@ async function runCollectCmd(
   };
 }
 
+async function runSecondTouchCmd(
+  parsed: Extract<ParsedCli, { cmd: "second-touch" }>,
+  secondTouch: typeof runSecondTouch,
+  repoRoot: string,
+  runsRoot: string,
+): Promise<EvalRunResult> {
+  const result = await secondTouch({
+    repoRoot,
+    runDir: join(runsRoot, parsed.run),
+    sourceRunDir: join(runsRoot, parsed.sourceRun),
+    sourceRun: parsed.sourceRun,
+    parallel: parsed.parallel,
+    model: parsed.model,
+    ...(parsed.timeoutMs !== undefined ? { timeoutMs: parsed.timeoutMs } : {}),
+    ...(parsed.cases !== undefined ? { cases: parsed.cases } : {}),
+    ...(parsed.conditions !== undefined ? { conditions: parsed.conditions } : {}),
+  });
+
+  return {
+    status: result.status,
+    stdout: `rows written: ${result.rowsWritten}, skipped: ${result.rowsSkipped}`,
+    stderr: result.stderr,
+  };
+}
+
 async function runScoreCmd(
   parsed: Extract<ParsedCli, { cmd: "score" }>,
   score: typeof runScore,
@@ -212,7 +307,7 @@ async function runScoreCmd(
 
 export async function runEval(
   argv: string[],
-  deps?: { collect?: typeof runCollect; score?: typeof runScore },
+  deps?: { collect?: typeof runCollect; secondTouch?: typeof runSecondTouch; score?: typeof runScore },
 ): Promise<EvalRunResult> {
   const parsed = parseCliArgs(argv);
   if ("error" in parsed) return { status: 1, stdout: "", stderr: `${parsed.error}\n` };
@@ -222,6 +317,7 @@ export async function runEval(
 
   try {
     if (parsed.cmd === "collect") return await runCollectCmd(parsed, deps?.collect ?? runCollect, repoRoot, runsRoot);
+    if (parsed.cmd === "second-touch") return await runSecondTouchCmd(parsed, deps?.secondTouch ?? runSecondTouch, repoRoot, runsRoot);
     return await runScoreCmd(parsed, deps?.score ?? runScore, repoRoot, runsRoot);
   } catch (err) {
     return { status: 1, stdout: "", stderr: `${formatError(err)}\n` };

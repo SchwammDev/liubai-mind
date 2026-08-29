@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Lang } from "../contract.ts";
-import type { CaseManifest, BaselineMetrics, Probe, Tier } from "./eval-contract.ts";
+import type { CaseManifest, BaselineMetrics, ExtensionSpec, Probe, Tier } from "./eval-contract.ts";
 
 type LoadResult = CaseManifest[] | { error: string };
 
@@ -256,6 +256,26 @@ function loadProbes(caseDir: string): { value: Probe[] } | { error: string } {
   return validateProbes(raw);
 }
 
+const EXTENSION_FILENAME = "extension.json";
+
+function loadExtension(caseDir: string): { value: ExtensionSpec | undefined } | { error: string } {
+  const extensionPath = join(caseDir, EXTENSION_FILENAME);
+  if (!existsSync(extensionPath)) return { value: undefined };
+
+  const raw: unknown = JSON.parse(readFileSync(extensionPath, "utf8"));
+  if (typeof raw !== "object" || raw === null) return { error: `${EXTENSION_FILENAME}: must be a JSON object` };
+
+  const { task, probes } = raw as Record<string, unknown>;
+
+  const taskResult = validateTask(task);
+  if ("error" in taskResult) return { error: `${EXTENSION_FILENAME}: ${taskResult.error}` };
+
+  const probesResult = validateProbes(probes);
+  if ("error" in probesResult) return { error: `${EXTENSION_FILENAME}: ${probesResult.error}` };
+
+  return { value: { task: taskResult.value, probes: probesResult.value } };
+}
+
 function ensureFilesExist(caseDir: string, files: string[]): { error: string } | undefined {
   const missing = files.find((f) => !existsSync(join(caseDir, f)));
   if (missing !== undefined) return { error: `declared file missing on disk: ${missing}` };
@@ -311,11 +331,15 @@ function loadCase(caseDir: string, id: string): { manifest: CaseManifest } | { e
   const reference = loadReference(caseDir, validated.fields.entry, validated.fields.tier);
   if ("error" in reference) return { error: `${id}: ${reference.error}` };
 
+  const extension = loadExtension(caseDir);
+  if ("error" in extension) return { error: `${id}: ${extension.error}` };
+
   return {
     manifest: {
       ...validated.fields,
       probes: probes.value,
       ...(reference.value !== undefined ? { reference: reference.value } : {}),
+      ...(extension.value !== undefined ? { extension: extension.value } : {}),
     },
   };
 }
