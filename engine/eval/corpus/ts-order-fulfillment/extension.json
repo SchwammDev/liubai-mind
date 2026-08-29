@@ -1,0 +1,56 @@
+{
+  "task": "Support returns in processEvents: a return event with an order id puts a shipped order's full quantity back into stock and marks that order returned. Returning an id that was never shipped (unknown, still reserved, backordered, already cancelled, or already returned) is rejected the same way an invalid ship or expire target is. The summary report keeps exactly its existing fields; returned orders appear in the orders map but get no report bucket. Keep processEvents's signature and every existing event type's behavior unchanged.",
+  "probes": [
+    {
+      "args": [{
+        "stock": { "gear": 2 },
+        "events": [
+          { "type": "order", "id": "g1", "item": "gear", "qty": 2 },
+          { "type": "ship", "id": "g1" },
+          { "type": "return", "id": "g1" },
+          { "type": "order", "id": "g2", "item": "gear", "qty": 2 }
+        ]
+      }],
+      "returns": {
+        "ok": true,
+        "orders": { "g1": "returned", "g2": "reserved" },
+        "stock": { "gear": 0 },
+        "queue": [],
+        "rejected": 0,
+        "report": "orders=2;reserved=1;backordered=0;shipped=0;partial=0;cancelled=0;expired=0;rejected=0"
+      }
+    },
+    {
+      "args": [{ "stock": {}, "events": [{ "type": "return", "id": "ghost" }] }],
+      "returns": {
+        "ok": true,
+        "orders": {},
+        "stock": {},
+        "queue": [],
+        "rejected": 1,
+        "report": "orders=0;reserved=0;backordered=0;shipped=0;partial=0;cancelled=0;expired=0;rejected=1"
+      }
+    },
+    {
+      "args": [{
+        "stock": { "a": 5 },
+        "events": [
+          { "type": "order", "id": "r1", "item": "a", "qty": 1 },
+          { "type": "return", "id": "r1" }
+        ]
+      }],
+      "returns": {
+        "ok": true,
+        "orders": { "r1": "reserved" },
+        "stock": { "a": 4 },
+        "queue": [],
+        "rejected": 1,
+        "report": "orders=1;reserved=1;backordered=0;shipped=0;partial=0;cancelled=0;expired=0;rejected=1"
+      }
+    },
+    {
+      "args": [{ "stock": {}, "events": [{ "type": "return", "id": "" }] }],
+      "returns": { "ok": false, "error": "event 0: bad id" }
+    }
+  ]
+}
