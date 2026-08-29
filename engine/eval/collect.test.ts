@@ -278,6 +278,15 @@ test("runCollect_omits_the_phrasing_pack_var_for_packless_conditions", async () 
   assert.equal("LIUBAI_PHRASING_PACK" in (calls[0]?.env ?? {}), false);
 });
 
+test("runCollect_always_sets_LIUBAI_EVAL_so_the_spawned_agent_sandboxes_its_bash_tool", async () => {
+  const { spawner, calls } = recordingSpawner();
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+
+  await runCollect(opts);
+
+  assert.equal(calls[0]?.env.LIUBAI_EVAL, "1");
+});
+
 test("runCollect_records_the_exit_code_and_timedOut_flag_from_the_spawner_outcome", async () => {
   const spawner = fixedOutcomeSpawner({ exitCode: 7, stdoutJsonl: "", timedOut: true });
   const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });

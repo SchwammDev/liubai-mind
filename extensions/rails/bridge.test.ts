@@ -222,3 +222,31 @@ test("LIUBAI_RAILS_OFF lets a would-be-blocked edit through untouched", async ()
   assert.equal(outcome.blocked, false);
   assert.equal(outcome.text, TOOL_RESULT);
 });
+
+function registeredBashTool(): any {
+  const registered: any[] = [];
+  const pi = { on: () => undefined, registerTool: (tool: any) => registered.push(tool) };
+  register(pi as any);
+  return registered.find((tool) => tool.name === "bash");
+}
+
+async function withLiubaiEval<T>(action: () => T): Promise<T> {
+  process.env.LIUBAI_EVAL = "1";
+  try {
+    return await action();
+  } finally {
+    delete process.env.LIUBAI_EVAL;
+  }
+}
+
+test("LIUBAI_EVAL stops the bash tool from exposing session environment guidelines", async () => {
+  const bashTool = await withLiubaiEval(() => registeredBashTool());
+
+  assert.equal(bashTool.promptGuidelines, undefined);
+});
+
+test("an interactive session without LIUBAI_EVAL keeps the bash tool's session environment guidelines", () => {
+  const bashTool = registeredBashTool();
+
+  assert.notEqual(bashTool.promptGuidelines, undefined);
+});

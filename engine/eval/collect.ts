@@ -160,7 +160,8 @@ function packAbsolutePath(conditionsDir: string, condition: ConditionManifest): 
 }
 
 function buildEnv(condition: ConditionManifest, packPath: string | undefined): Record<string, string> {
-  return packPath === undefined ? { ...condition.env } : { ...condition.env, LIUBAI_PHRASING_PACK: packPath };
+  const base = { ...condition.env, LIUBAI_EVAL: "1" };
+  return packPath === undefined ? base : { ...base, LIUBAI_PHRASING_PACK: packPath };
 }
 
 function copyCaseFiles(corpusDir: string, kase: CaseManifest, workDir: string): { from: string; to: string }[] {
