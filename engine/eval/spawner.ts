@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { existsSync, lstatSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 export interface RunSpec {
@@ -42,14 +44,81 @@ export function defaultPiSpawner(repoRoot: string): PiSpawner {
   return (spec) => runPi(repoRoot, spec);
 }
 
+export interface BwrapMountPlan {
+  repoRoot: string;
+  homeDir: string;
+  workDir: string;
+}
+
+const REPO_EXPOSED_PATHS = ["node_modules", "extensions", "engine", "package.json", "tsconfig.json"];
+const HOME_EXPOSED_PATHS = [join(".local", "share", "mise")];
+const PI_AGENT_MASKED_DIRS = ["engine", "extensions", "sessions"];
+const PI_AGENT_MASKED_FILES = ["complexity.json", "liubai-dedup-log.jsonl"];
+
+function roBindIfExists(args: string[], path: string): void {
+  if (existsSync(path)) args.push("--ro-bind", path, path);
+}
+
+function tmpfsMaskIfExists(args: string[], path: string): void {
+  if (existsSync(path)) args.push("--tmpfs", path);
+}
+
+function isRegularFile(path: string): boolean {
+  try {
+    return lstatSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function maskFileIfRegularFile(args: string[], path: string): void {
+  if (isRegularFile(path)) args.push("--ro-bind", "/dev/null", path);
+}
+
+export function buildBwrapArgs({ repoRoot, homeDir, workDir }: BwrapMountPlan): string[] {
+  const args = ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", "/home"];
+
+  for (const relative of HOME_EXPOSED_PATHS) roBindIfExists(args, join(homeDir, relative));
+  for (const relative of REPO_EXPOSED_PATHS) roBindIfExists(args, join(repoRoot, relative));
+  tmpfsMaskIfExists(args, join(repoRoot, "engine", "eval"));
+
+  const piAgentDir = join(homeDir, ".pi", "agent");
+  if (existsSync(piAgentDir)) {
+    args.push("--ro-bind", piAgentDir, piAgentDir);
+    for (const relative of PI_AGENT_MASKED_DIRS) tmpfsMaskIfExists(args, join(piAgentDir, relative));
+    for (const relative of PI_AGENT_MASKED_FILES) maskFileIfRegularFile(args, join(piAgentDir, relative));
+  }
+
+  args.push("--bind", workDir, workDir);
+  args.push("--unshare-user", "--die-with-parent");
+
+  return args;
+}
+
+function bwrapNotFoundError(): Error {
+  return new Error("bwrap not found on PATH; refusing to run the eval agent unsandboxed");
+}
+
 function runPi(repoRoot: string, spec: RunSpec): Promise<RunOutcome> {
   const piBin = join(repoRoot, "node_modules", ".bin", "pi");
+  const bwrapArgs = buildBwrapArgs({ repoRoot, homeDir: homedir(), workDir: spec.cwd });
+  const args = [...bwrapArgs, "--", piBin, ...piArgs(repoRoot, spec)];
 
-  return new Promise((resolve) => {
-    const child = spawn(piBin, piArgs(repoRoot, spec), {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const child = spawn("bwrap", args, {
       cwd: spec.cwd,
       env: buildSpawnEnv(process.env, spec.env),
       stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    child.on("error", (err: NodeJS.ErrnoException) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      if (killTimer !== undefined) clearTimeout(killTimer);
+      reject(err.code === "ENOENT" ? bwrapNotFoundError() : err);
     });
 
     child.stderr?.resume();
@@ -69,6 +138,8 @@ function runPi(repoRoot: string, spec: RunSpec): Promise<RunOutcome> {
     });
 
     child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timeoutTimer);
       if (killTimer !== undefined) clearTimeout(killTimer);
       resolve({ exitCode: code ?? -1, stdoutJsonl: stdout, timedOut });
