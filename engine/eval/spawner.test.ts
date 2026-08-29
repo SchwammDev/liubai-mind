@@ -194,46 +194,56 @@ test("buildBwrapArgs_skips_exposing_repo_paths_that_do_not_exist_on_disk", () =>
 
 const PI_AGENT_SESSION_STATE = ["engine", "extensions", "sessions", "complexity.json", "liubai-dedup-log.jsonl"];
 
-function assertSessionStateMaskedAfterAgentBind(args: string[], agentDir: string): void {
-  const agentBindIndex = indexOfArg(args, agentDir);
-  assert.ok(agentBindIndex >= 0);
-  for (const masked of PI_AGENT_SESSION_STATE) {
-    assert.ok(args.lastIndexOf(join(agentDir, masked)) > agentBindIndex, `expected ${masked} masked after the agent dir bind`);
+function assertAgentDirIsTmpfsWithSessionStateHidden(args: string[], agentDir: string): void {
+  const tmpfsIndex = indexOfArg(args, agentDir);
+  assert.equal(args[tmpfsIndex - 1], "--tmpfs");
+  for (const hidden of PI_AGENT_SESSION_STATE) {
+    assert.equal(args.includes(join(agentDir, hidden)), false, `expected ${hidden} to stay hidden`);
   }
 }
 
-test("buildBwrapArgs_masks_pi_agent_session_state_after_exposing_the_agent_directory", () => {
+test("buildBwrapArgs_replaces_the_agent_dir_with_a_writable_tmpfs_holding_only_config", () => {
   const homeDir = piAgentHomeWithSessionState();
 
   const args = buildBwrapArgs(stubMountPlan({ homeDir }));
 
-  assertSessionStateMaskedAfterAgentBind(args, join(homeDir, ".pi", "agent"));
+  assertAgentDirIsTmpfsWithSessionStateHidden(args, join(homeDir, ".pi", "agent"));
 });
 
-test("buildBwrapArgs_leaves_pi_agent_config_files_visible", () => {
+test("buildBwrapArgs_binds_pi_agent_config_files_into_the_agent_tmpfs", () => {
   const homeDir = piAgentHomeWithSessionState();
 
   const args = buildBwrapArgs(stubMountPlan({ homeDir }));
 
-  assert.equal(args.includes(join(homeDir, ".pi", "agent", "auth.json")), false);
+  assert.equal(args.includes(join(homeDir, ".pi", "agent", "auth.json")), true);
 });
 
-function homeWithSymlinkedComplexityJson(): string {
+function homeWithDotfilesManagedConfig(): { homeDir: string; agentDir: string } {
   const homeDir = mkdtempSync(join(tmpdir(), "bwrap-home-"));
   const agentDir = join(homeDir, ".pi", "agent");
+  const dotfilesDir = join(homeDir, "code", "dotfiles");
   mkdirSync(agentDir, { recursive: true });
-  const realTarget = join(homeDir, "elsewhere-complexity.json");
-  writeFileSync(realTarget, "{}");
-  symlinkSync(realTarget, join(agentDir, "complexity.json"));
-  return homeDir;
+  mkdirSync(dotfilesDir, { recursive: true });
+  writeFileSync(join(dotfilesDir, "models.json"), "{}");
+  symlinkSync(join(dotfilesDir, "models.json"), join(agentDir, "models.json"));
+  symlinkSync(join(dotfilesDir, "missing.json"), join(agentDir, "liubai.json"));
+  return { homeDir, agentDir };
 }
 
-test("buildBwrapArgs_does_not_bind_a_masked_file_that_is_actually_a_symlink", () => {
-  const homeDir = homeWithSymlinkedComplexityJson();
+test("buildBwrapArgs_binds_a_symlinked_config_file_so_bwrap_resolves_its_target", () => {
+  const { homeDir, agentDir } = homeWithDotfilesManagedConfig();
 
   const args = buildBwrapArgs(stubMountPlan({ homeDir }));
 
-  assert.equal(args.includes(join(homeDir, ".pi", "agent", "complexity.json")), false);
+  assert.equal(args.includes(join(agentDir, "models.json")), true);
+});
+
+test("buildBwrapArgs_skips_a_dangling_config_symlink_instead_of_breaking_the_sandbox", () => {
+  const { homeDir, agentDir } = homeWithDotfilesManagedConfig();
+
+  const args = buildBwrapArgs(stubMountPlan({ homeDir }));
+
+  assert.equal(args.includes(join(agentDir, "liubai.json")), false);
 });
 
 function homeWithMiseToolchain(): string {
