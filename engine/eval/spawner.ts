@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, lstatSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -52,8 +52,7 @@ export interface BwrapMountPlan {
 
 const REPO_EXPOSED_PATHS = ["node_modules", "extensions", "engine", "package.json", "tsconfig.json"];
 const HOME_EXPOSED_PATHS = [join(".local", "share", "mise")];
-const PI_AGENT_MASKED_DIRS = ["engine", "extensions", "sessions"];
-const PI_AGENT_MASKED_FILES = ["complexity.json", "liubai-dedup-log.jsonl"];
+const PI_AGENT_HIDDEN_ENTRIES = ["engine", "extensions", "sessions", "complexity.json", "liubai-dedup-log.jsonl"];
 
 function roBindIfExists(args: string[], path: string): void {
   if (existsSync(path)) args.push("--ro-bind", path, path);
@@ -63,16 +62,12 @@ function tmpfsMaskIfExists(args: string[], path: string): void {
   if (existsSync(path)) args.push("--tmpfs", path);
 }
 
-function isRegularFile(path: string): boolean {
-  try {
-    return lstatSync(path).isFile();
-  } catch {
-    return false;
+function bindVisibleAgentConfig(args: string[], piAgentDir: string): void {
+  args.push("--tmpfs", piAgentDir);
+  for (const entry of readdirSync(piAgentDir)) {
+    if (PI_AGENT_HIDDEN_ENTRIES.includes(entry)) continue;
+    roBindIfExists(args, join(piAgentDir, entry));
   }
-}
-
-function maskFileIfRegularFile(args: string[], path: string): void {
-  if (isRegularFile(path)) args.push("--ro-bind", "/dev/null", path);
 }
 
 export function buildBwrapArgs({ repoRoot, homeDir, workDir }: BwrapMountPlan): string[] {
@@ -83,11 +78,7 @@ export function buildBwrapArgs({ repoRoot, homeDir, workDir }: BwrapMountPlan): 
   tmpfsMaskIfExists(args, join(repoRoot, "engine", "eval"));
 
   const piAgentDir = join(homeDir, ".pi", "agent");
-  if (existsSync(piAgentDir)) {
-    args.push("--ro-bind", piAgentDir, piAgentDir);
-    for (const relative of PI_AGENT_MASKED_DIRS) tmpfsMaskIfExists(args, join(piAgentDir, relative));
-    for (const relative of PI_AGENT_MASKED_FILES) maskFileIfRegularFile(args, join(piAgentDir, relative));
-  }
+  if (existsSync(piAgentDir)) bindVisibleAgentConfig(args, piAgentDir);
 
   args.push("--bind", workDir, workDir);
   args.push("--unshare-user", "--die-with-parent");
