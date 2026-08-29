@@ -1,4 +1,4 @@
-import type { Lang } from "../contract.ts";
+import type { Lang, RuleName } from "../contract.ts";
 
 export interface ConditionManifest {
   id: string;
@@ -70,5 +70,10 @@ export interface RawRow {
   exitCode: number;
   timedOut: boolean;
   durationMs: number;
+  turns?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  cacheReadTokens?: number;
+  railFirings?: Record<RuleName, number>;
   agentError?: string;
 }
