@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { analyze } from "./analyze.ts";
 import type { BeforeFunctionFacts, CommentFacts, Env, Extracted, FunctionFacts, Lang, Nudge, RuleConfig, RuleName } from "./contract.ts";
 import { RULE } from "./contract.ts";
-import { buildRules, DEFAULT_POLICY } from "./policy.ts";
+import { buildRules, ccDeltaEnabledLangs, DEFAULT_POLICY } from "./policy.ts";
+import type { Policy } from "./policy.ts";
 
 const PATH_BY_LANG: Record<Lang, string> = {
   python: "app/foo.py",
@@ -230,11 +231,34 @@ test("the cc-delta rule is enabled by default for python and typescript", () => 
   assert.deepEqual(DEFAULT_POLICY[RULE.ccDelta].enabled, ["python", "typescript"]);
 });
 
+test("ccDeltaEnabledLangs enables python and typescript when the flag is undefined", () => {
+  assert.deepEqual(ccDeltaEnabledLangs(undefined), ["python", "typescript"]);
+});
+
+test("ccDeltaEnabledLangs enables python and typescript when the flag is empty", () => {
+  assert.deepEqual(ccDeltaEnabledLangs(""), ["python", "typescript"]);
+});
+
+test("ccDeltaEnabledLangs returns no langs when the flag is a non-empty string", () => {
+  assert.deepEqual(ccDeltaEnabledLangs("1"), []);
+});
+
 test("the cc-delta rule nudges a helper split that hides a violation without lowering decision points", async () => {
   const resp = await ccDeltaResp(withBefore([4, 4, 4, 3], SPLIT_BEFORE));
 
   assert.equal(resp.nudges.length, 1);
   assertCcDeltaNudge(firstNudge(resp), /handleRequest/, /carries 11 decision points where it carried 11/);
+});
+
+const CC_DELTA_OFF_POLICY: Policy = {
+  ...DEFAULT_POLICY,
+  [RULE.ccDelta]: { ...DEFAULT_POLICY[RULE.ccDelta], enabled: ccDeltaEnabledLangs("1") },
+};
+
+test("a helper split draws no cc-delta nudge once the rule is disabled for the language", async () => {
+  const resp = await analyze({ path: "app/foo.py", after: "x" }, envWith(withBefore([4, 4, 4, 3], SPLIT_BEFORE)), buildRules(CC_DELTA_OFF_POLICY, "python"));
+
+  assert.deepEqual(resp.nudges, []);
 });
 
 test("the cc-delta rule stays silent when the split also lowered decision points", async () => {
