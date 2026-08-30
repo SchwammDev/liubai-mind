@@ -14,7 +14,8 @@ export interface CcNudgeEntry {
 }
 
 export interface ValidPack {
-  CC_NUDGE: Partial<Record<Lang, CcNudgeEntry>>;
+  CC_NUDGE?: Partial<Record<Lang, CcNudgeEntry>>;
+  CC_DELTA_NUDGE?: string;
 }
 
 export type ValidatePackResult = { pack: ValidPack } | { error: string };
@@ -60,6 +61,13 @@ function validateCcNudge(ccNudge: unknown): { value: Partial<Record<Lang, CcNudg
   return { value: validated };
 }
 
+function validateCcDeltaNudge(value: unknown): { value: string } | { error: string } {
+  if (typeof value !== "string" || value.length === 0) {
+    return { error: "CC_DELTA_NUDGE must be a non-empty string" };
+  }
+  return { value };
+}
+
 export function validatePack(raw: string): ValidatePackResult {
   const parsed = parseJson(raw);
   if ("error" in parsed) return { error: parsed.error };
@@ -70,15 +78,26 @@ export function validatePack(raw: string): ValidatePackResult {
   }
 
   const entries = value as Record<string, unknown>;
-  const unknownKeys = Object.keys(entries).filter((key) => key !== "CC_NUDGE");
+  const unknownKeys = Object.keys(entries).filter((key) => key !== "CC_NUDGE" && key !== "CC_DELTA_NUDGE");
   if (unknownKeys.length > 0) {
     return { error: `unknown top-level key(s): ${unknownKeys.join(", ")}` };
   }
 
-  const ccNudge = validateCcNudge(entries.CC_NUDGE);
-  if ("error" in ccNudge) return { error: ccNudge.error };
+  const pack: ValidPack = {};
 
-  return { pack: { CC_NUDGE: ccNudge.value } };
+  if ("CC_NUDGE" in entries) {
+    const ccNudge = validateCcNudge(entries.CC_NUDGE);
+    if ("error" in ccNudge) return { error: ccNudge.error };
+    pack.CC_NUDGE = ccNudge.value;
+  }
+
+  if ("CC_DELTA_NUDGE" in entries) {
+    const ccDeltaNudge = validateCcDeltaNudge(entries.CC_DELTA_NUDGE);
+    if ("error" in ccDeltaNudge) return { error: ccDeltaNudge.error };
+    pack.CC_DELTA_NUDGE = ccDeltaNudge.value;
+  }
+
+  return { pack };
 }
 
 export function packHash(bytes: string | null): string | null {

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { CC_DELTA_NUDGE, formatBlockReason, formatCcDeltaNudge, formatCcNudge, readPack, resolveCcNudge } from "./messages.ts";
+import { CC_DELTA_NUDGE, formatBlockReason, formatCcDeltaNudge, formatCcNudge, readPack, resolveCcDeltaNudge, resolveCcNudge } from "./messages.ts";
 import type { CcNudgePhrasing } from "./messages.ts";
 import type { Lang, Nudge } from "./contract.ts";
 
@@ -115,6 +115,32 @@ test("CC_DELTA_NUDGE reads as the coaching guide's dp-invariant voice", () => {
     msg,
     "handleRequest dropped below the complexity threshold, but the file still carries 11 decision points where it carried 11 — the complexity moved, it did not leave. Splitting a tangle into helpers relocates branches without removing any; a reader now chases the same decisions across more functions. Go back to the shape: collapse branches that repeat a pattern into a dispatch/lookup, delete branches the function's one-sentence job does not need, and only keep helpers that stand for a genuinely separate job.",
   );
+});
+
+const DEFAULT_DELTA_TEXT = "default delta text for {name}";
+
+test("resolveCcDeltaNudge returns the default when the pack has no CC_DELTA_NUDGE key", () => {
+  const result = resolveCcDeltaNudge(DEFAULT_DELTA_TEXT, {});
+
+  assert.equal(result, DEFAULT_DELTA_TEXT);
+});
+
+test("resolveCcDeltaNudge returns the pack's string when present", () => {
+  const result = resolveCcDeltaNudge(DEFAULT_DELTA_TEXT, { CC_DELTA_NUDGE: "overridden delta text" });
+
+  assert.equal(result, "overridden delta text");
+});
+
+test("resolveCcDeltaNudge falls back to the default when CC_DELTA_NUDGE is not a string", () => {
+  const result = resolveCcDeltaNudge(DEFAULT_DELTA_TEXT, { CC_DELTA_NUDGE: 42 });
+
+  assert.equal(result, DEFAULT_DELTA_TEXT);
+});
+
+test("resolveCcDeltaNudge falls back to the default when the pack is not an object", () => {
+  const result = resolveCcDeltaNudge(DEFAULT_DELTA_TEXT, "not an object");
+
+  assert.equal(result, DEFAULT_DELTA_TEXT);
 });
 
 test("readPack yields an empty object when the path is undefined", () => {
@@ -281,4 +307,39 @@ test("the default cc nudge never mentions the count or the threshold", () => {
   for (const msg of JSON.parse(stdout) as string[]) {
     assert.doesNotMatch(msg, /CC=|[Tt]hreshold|\b9\b|\b8\b/);
   }
+});
+
+function scriptPrintingCcDeltaNudge(): string {
+  return [
+    `import { buildRules, DEFAULT_POLICY, RULE } from "${POLICY_URL}";`,
+    `const before = [{ name: "handleRequest", cyclomaticComplexity: 12 }];`,
+    `const functions = [4, 4, 4, 3].map((cc, i) => ({ name: \`f\${i}\`, cyclomaticComplexity: cc, body: "changed" }));`,
+    `const ctx = { path: "app/foo.py", lang: "python", after: "x", env: {}, extracted: { functions, comments: [], beforeFunctions: before } };`,
+    `const ccDelta = buildRules(DEFAULT_POLICY, "python").find((r) => r.name === RULE.ccDelta);`,
+    `const nudges = await ccDelta.run(ctx);`,
+    `process.stdout.write(JSON.stringify(nudges.map((n) => n.msg)));`,
+  ].join("\n");
+}
+
+function writeDeltaPack(dir: string, ccDeltaNudge: string): string {
+  const packPath = join(dir, "delta-pack.json");
+  writeFileSync(packPath, JSON.stringify({ CC_DELTA_NUDGE: ccDeltaNudge }));
+  return packPath;
+}
+
+test("a phrasing pack overrides the cc-delta nudge text at rail runtime", () => {
+  const msgs = inTempDir((dir) => {
+    const packPath = writeDeltaPack(dir, "{name} custom delta text ({dpBefore}->{dpAfter})");
+    const stdout = runScript(scriptPrintingCcDeltaNudge(), { ...process.env, LIUBAI_PHRASING_PACK: packPath });
+    return JSON.parse(stdout) as string[];
+  });
+
+  assert.deepEqual(msgs, ["handleRequest custom delta text (11->11)"]);
+});
+
+test("without a pack the cc-delta rule keeps its default text", () => {
+  const stdout = runScript(scriptPrintingCcDeltaNudge(), envWithout("LIUBAI_PHRASING_PACK"));
+
+  const msgs = JSON.parse(stdout) as string[];
+  assert.deepEqual(msgs, [formatCcDeltaNudge(CC_DELTA_NUDGE, { name: "handleRequest", dpBefore: 11, dpAfter: 11 })]);
 });

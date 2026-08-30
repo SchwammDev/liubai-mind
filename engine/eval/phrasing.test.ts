@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
 import { packHash, validatePack } from "./phrasing.ts";
+import type { ValidPack } from "./phrasing.ts";
 
-function assertAccepted(result: ReturnType<typeof validatePack>): asserts result is { pack: { CC_NUDGE: Record<string, { first: string; rest: string }> } } {
+function assertAccepted(result: ReturnType<typeof validatePack>): asserts result is { pack: ValidPack } {
   assert.ok("pack" in result, `expected acceptance, got: ${"error" in result ? result.error : ""}`);
 }
 
@@ -35,6 +36,44 @@ test("validatePack accepts a pack with an empty CC_NUDGE", () => {
 
   assertAccepted(result);
   assert.deepEqual(result.pack.CC_NUDGE, {});
+});
+
+test("validatePack accepts a pack with only CC_DELTA_NUDGE", () => {
+  const result = validatePack('{"CC_DELTA_NUDGE":"the file still carries the same decisions"}');
+
+  assertAccepted(result);
+  assert.equal(result.pack.CC_DELTA_NUDGE, "the file still carries the same decisions");
+  assert.equal(result.pack.CC_NUDGE, undefined);
+});
+
+test("validatePack accepts a pack with neither CC_NUDGE nor CC_DELTA_NUDGE", () => {
+  const result = validatePack("{}");
+
+  assertAccepted(result);
+  assert.equal(result.pack.CC_NUDGE, undefined);
+  assert.equal(result.pack.CC_DELTA_NUDGE, undefined);
+});
+
+test("validatePack accepts a pack with both CC_NUDGE and CC_DELTA_NUDGE", () => {
+  const result = validatePack(JSON.stringify({ CC_NUDGE: { python: nudgeEntry() }, CC_DELTA_NUDGE: "same decisions" }));
+
+  assertAccepted(result);
+  assert.deepEqual(result.pack.CC_NUDGE, { python: nudgeEntry() });
+  assert.equal(result.pack.CC_DELTA_NUDGE, "same decisions");
+});
+
+test("validatePack rejects a non-string CC_DELTA_NUDGE", () => {
+  const result = validatePack('{"CC_DELTA_NUDGE":42}');
+
+  assertRejected(result);
+  assert.match(result.error, /CC_DELTA_NUDGE must be a non-empty string/);
+});
+
+test("validatePack rejects an empty string CC_DELTA_NUDGE", () => {
+  const result = validatePack('{"CC_DELTA_NUDGE":""}');
+
+  assertRejected(result);
+  assert.match(result.error, /CC_DELTA_NUDGE must be a non-empty string/);
 });
 
 test("validatePack rejects an unknown top-level key", () => {
