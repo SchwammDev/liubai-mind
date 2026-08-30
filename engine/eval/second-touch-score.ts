@@ -62,7 +62,7 @@ function lcsLength(a: string[], b: string[]): number {
   return previous[b.length]!;
 }
 
-interface DiffCounts {
+export interface DiffCounts {
   linesAdded: number;
   linesRemoved: number;
 }
@@ -85,6 +85,21 @@ export function computeDiffCounts(seedFiles: Record<string, string>, finalFiles:
     linesRemoved += counts.linesRemoved;
   }
   return { linesAdded, linesRemoved };
+}
+
+function isSourcePath(path: string, lang: CaseManifest["lang"]): boolean {
+  if (path.startsWith("playground/")) return false;
+  if (lang === "typescript") return path.endsWith(".ts");
+  if (lang === "python") return path.endsWith(".py");
+  return false;
+}
+
+function filterToSourceFiles(files: Record<string, string>, lang: CaseManifest["lang"]): Record<string, string> {
+  return Object.fromEntries(Object.entries(files).filter(([path]) => isSourcePath(path, lang)));
+}
+
+export function sourceDiffCounts(seedFiles: Record<string, string>, finalFiles: Record<string, string>, lang: CaseManifest["lang"]): DiffCounts {
+  return computeDiffCounts(filterToSourceFiles(seedFiles, lang), filterToSourceFiles(finalFiles, lang));
 }
 
 function pristineFiles(corpusDir: string, kase: CaseManifest): Record<string, string> {
@@ -194,7 +209,7 @@ export async function judgeSecondTouchRows(rows: RawRow[], sourceRows: RawRow[],
     const kase = caseFor(cases, row.caseId);
     const seedFiles = seedFilesFor(row, kase, corpusDir, sourceRowsByKey);
     const verdict = classifySecondTouchVerdict(kase, row, seedFiles);
-    const { linesAdded, linesRemoved } = computeDiffCounts(seedFiles, row.files);
+    const { linesAdded, linesRemoved } = sourceDiffCounts(seedFiles, row.files, kase.lang);
     const stratum = row.secondTouch?.control ? CONTROL_STRATUM : await sourceVerdictOf(row, corpusDir, sourceRowsByKey, sourceVerdictCache);
     judged.push({ row, judge: { verdict, linesAdded, linesRemoved }, stratum });
   }

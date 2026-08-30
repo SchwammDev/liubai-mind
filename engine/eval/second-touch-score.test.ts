@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import {
   computeDiffCounts,
+  sourceDiffCounts,
   judgeSecondTouchRows,
   aggregateSecondTouch,
   formatSecondTouchMarkdown,
@@ -376,6 +377,36 @@ test("computeDiffCounts_sums_added_and_removed_lines_across_every_file", () => {
 
 test("computeDiffCounts_reports_zero_added_and_removed_for_byte_identical_files", () => {
   const counts = computeDiffCounts({ "a.ts": "one\ntwo\n" }, { "a.ts": "one\ntwo\n" });
+
+  assert.deepEqual(counts, { linesAdded: 0, linesRemoved: 0 });
+});
+
+test("sourceDiffCounts_ignores_a_package_lock_json_added_by_the_solution_for_a_typescript_case", () => {
+  const counts = sourceDiffCounts({ "a.ts": "one\n" }, { "a.ts": "one\n", "package-lock.json": "{\n  \"x\": 1\n}\n" }, "typescript");
+
+  assert.deepEqual(counts, { linesAdded: 0, linesRemoved: 0 });
+});
+
+test("sourceDiffCounts_ignores_a_scratch_file_added_under_playground_for_a_typescript_case", () => {
+  const counts = sourceDiffCounts({ "a.ts": "one\n" }, { "a.ts": "one\n", "playground/scratch.ts": "x\ny\n" }, "typescript");
+
+  assert.deepEqual(counts, { linesAdded: 0, linesRemoved: 0 });
+});
+
+test("sourceDiffCounts_ignores_a_compiled_js_file_while_still_counting_ts_files_for_a_typescript_case", () => {
+  const counts = sourceDiffCounts({ "a.ts": "one\n" }, { "a.ts": "one\ntwo\n", "a.js": "var one;\nvar two;\n" }, "typescript");
+
+  assert.deepEqual(counts, { linesAdded: 1, linesRemoved: 0 });
+});
+
+test("sourceDiffCounts_counts_a_new_py_source_file_for_a_python_case", () => {
+  const counts = sourceDiffCounts({ "a.py": "one\n" }, { "a.py": "one\n", "b.py": "x\ny\n" }, "python");
+
+  assert.deepEqual(counts, { linesAdded: 2, linesRemoved: 0 });
+});
+
+test("sourceDiffCounts_ignores_litter_present_in_the_seed_but_absent_from_final_files", () => {
+  const counts = sourceDiffCounts({ "a.ts": "one\n", "package-lock.json": "{\n  \"x\": 1\n}\n" }, { "a.ts": "one\n" }, "typescript");
 
   assert.deepEqual(counts, { linesAdded: 0, linesRemoved: 0 });
 });
