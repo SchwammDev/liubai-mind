@@ -61,7 +61,7 @@ export interface ItemResult {
   failure?: string;
 }
 
-const DEFAULT_TIMEOUT_MS = 300000;
+const DEFAULT_TIMEOUT_MS = 900000;
 const FALLBACK_AGENT_ERROR = "agent error";
 
 interface AutoRetryEndEvent {

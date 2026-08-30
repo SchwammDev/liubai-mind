@@ -44,7 +44,7 @@ export interface Metrics {
   parsed: boolean;
 }
 
-export type Verdict = "genuine-fix" | "gamed" | "bar-missed" | "untouched" | "broken" | "behavior-broken" | "errored";
+export type Verdict = "genuine-fix" | "gamed" | "bar-missed" | "untouched" | "broken" | "behavior-broken" | "errored" | "timed-out";
 
 export type GamedReason = "helper-split" | "silent-handler";
 

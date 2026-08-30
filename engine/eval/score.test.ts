@@ -356,7 +356,7 @@ test("toJudgedJsonlRow_omits_optional_fields_absent_from_the_judged_row", () => 
 });
 
 function emptyVerdictCounts(): Record<Verdict, number> {
-  return { "genuine-fix": 0, gamed: 0, "bar-missed": 0, untouched: 0, broken: 0, "behavior-broken": 0, errored: 0 };
+  return { "genuine-fix": 0, gamed: 0, "bar-missed": 0, untouched: 0, broken: 0, "behavior-broken": 0, errored: 0, "timed-out": 0 };
 }
 
 function erroredRawRow(conditionId: string, caseId: string, agentError: string, rep: number): RawRow {
@@ -534,6 +534,15 @@ test("aggregate_counts_a_behavior_broken_verdict", () => {
   assert.equal(rollup.counts["behavior-broken"], 1);
 });
 
+test("aggregate_counts_a_timed_out_verdict", () => {
+  const judged = [judgedRow("rails-default", "case-a", "timed-out")];
+
+  const summary = aggregate(judged, judgeEnv());
+
+  const rollup = summary.find((r) => r.conditionId === "rails-default" && r.caseId === null)!;
+  assert.equal(rollup.counts["timed-out"], 1);
+});
+
 function meanDpReductionOf(summary: SummaryRow[], conditionId: string, caseId: string | null): number | null {
   return summary.find((r) => r.conditionId === conditionId && r.caseId === caseId)!.meanDpReduction;
 }
@@ -700,8 +709,8 @@ test("formatMarkdown_renders_one_line_per_condition_with_counts_and_genuine_rate
 
   const table = formatMarkdown(summary);
 
-  assertConditionLine(table, "rails-default", "4 \\| 3 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 75\\.0%");
-  assertConditionLine(table, "control", "2 \\| 0 \\| 0 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0\\.0%");
+  assertConditionLine(table, "rails-default", "4 \\| 3 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 75\\.0%");
+  assertConditionLine(table, "control", "2 \\| 0 \\| 0 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0\\.0%");
   assert.equal(table.split("\n").length, 4);
 });
 
@@ -711,7 +720,16 @@ test("formatMarkdown_renders_the_behavior_broken_column_between_broken_and_error
   const table = formatMarkdown(summary);
 
   assert.match(table, /\| broken \| behavior-broken \| errored \|/);
-  assertConditionLine(table, "rails-default", "6 \\| 0 \\| 0 \\| 0 \\| 0 \\| 1 \\| 3 \\| 2 \\| 0 \\| 0 \\| 0\\.0%");
+  assertConditionLine(table, "rails-default", "6 \\| 0 \\| 0 \\| 0 \\| 0 \\| 1 \\| 3 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0\\.0%");
+});
+
+test("formatMarkdown_renders_the_timed_out_column_between_errored_and_created_files", () => {
+  const summary: SummaryRow[] = [summaryRow("rails-default", null, { errored: 2, "timed-out": 3 }, 5)];
+
+  const table = formatMarkdown(summary);
+
+  assert.match(table, /\| errored \| timed-out \| created-files \|/);
+  assertConditionLine(table, "rails-default", "5 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 2 \\| 3 \\| 0 \\| 0 \\| 0\\.0%");
 });
 
 test("formatMarkdown_renders_the_created_files_column_between_errored_and_contaminated", () => {
@@ -719,8 +737,8 @@ test("formatMarkdown_renders_the_created_files_column_between_errored_and_contam
 
   const table = formatMarkdown(summary);
 
-  assert.match(table, /\| errored \| created-files \| contaminated \|/);
-  assertConditionLine(table, "rails-default", "3 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 2 \\| 0 \\| 66\\.7%");
+  assert.match(table, /\| errored \| timed-out \| created-files \| contaminated \|/);
+  assertConditionLine(table, "rails-default", "3 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 2 \\| 0 \\| 66\\.7%");
 });
 
 test("formatMarkdown_renders_the_contaminated_column_between_created_files_and_genuine_percent", () => {
@@ -729,7 +747,7 @@ test("formatMarkdown_renders_the_contaminated_column_between_created_files_and_g
   const table = formatMarkdown(summary);
 
   assert.match(table, /\| created-files \| contaminated \| genuine % \|/);
-  assertConditionLine(table, "rails-default", "3 \\| 0 \\| 0 \\| 0 \\| 0 \\| 1 \\| 0 \\| 2 \\| 0 \\| 2 \\| 0\\.0%");
+  assertConditionLine(table, "rails-default", "3 \\| 0 \\| 0 \\| 0 \\| 0 \\| 1 \\| 0 \\| 2 \\| 0 \\| 0 \\| 2 \\| 0\\.0%");
 });
 
 test("formatMarkdown_renders_the_mean_dp_cut_column_after_genuine_percent", () => {
@@ -738,7 +756,7 @@ test("formatMarkdown_renders_the_mean_dp_cut_column_after_genuine_percent", () =
   const table = formatMarkdown(summary);
 
   assert.match(table, /\| genuine % \| mean dp cut \|/);
-  assertConditionLine(table, "rails-default", "1 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 100\\.0% \\| 2\\.5");
+  assertConditionLine(table, "rails-default", "1 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 100\\.0% \\| 2\\.5");
 });
 
 test("formatMarkdown_renders_a_dash_for_a_null_mean_dp_cut", () => {
@@ -746,7 +764,7 @@ test("formatMarkdown_renders_a_dash_for_a_null_mean_dp_cut", () => {
 
   const table = formatMarkdown(summary);
 
-  assertConditionLine(table, "rails-default", "0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0\\.0% \\| -");
+  assertConditionLine(table, "rails-default", "0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0\\.0% \\| -");
 });
 
 test("formatMarkdown_renders_the_cost_columns_after_mean_dp_cut", () => {
@@ -767,7 +785,7 @@ test("formatMarkdown_renders_the_cost_columns_after_mean_dp_cut", () => {
   assertConditionLine(
     table,
     "rails-default",
-    "1 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 100\\.0% \\| - \\| 42000 \\| 5\\.0 \\| 8000\\.0 \\| 1200\\.0 \\| 2\\.0",
+    "1 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 100\\.0% \\| - \\| 42000 \\| 5\\.0 \\| 8000\\.0 \\| 1200\\.0 \\| 2\\.0",
   );
 });
 
@@ -776,7 +794,7 @@ test("formatMarkdown_renders_dashes_for_cost_columns_when_the_bucket_has_no_cost
 
   const table = formatMarkdown(summary);
 
-  assertConditionLine(table, "rails-default", "1 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 100\\.0% \\| - \\| - \\| - \\| - \\| - \\| -");
+  assertConditionLine(table, "rails-default", "1 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 100\\.0% \\| - \\| - \\| - \\| - \\| - \\| -");
 });
 
 test("formatMarkdown_suffixes_the_condition_cell_with_the_tier_for_a_tier_rollup", () => {
@@ -813,6 +831,27 @@ test("judgeRows_classifies_a_row_with_agentError_as_errored_without_running_the_
 
   assert.equal(judged[0]!.judge.verdict, "errored");
   assert.equal(judged[0]!.judge.after.parsed, false);
+});
+
+function timedOutRawRow(conditionId: string, caseId: string, rep: number, over: Partial<RawRow> = {}): RawRow {
+  return rawRow(conditionId, caseId, { timedOut: true, files: {}, rep, ...over });
+}
+
+test("judgeRows_classifies_a_timed_out_row_as_timed_out_without_running_the_judge", async () => {
+  const rows = [timedOutRawRow("rails-default", "ts-flag-parser", 1)];
+
+  const judged = await judgeRows(rows, CORPUS_DIR);
+
+  assert.equal(judged[0]!.judge.verdict, "timed-out");
+  assert.equal(judged[0]!.judge.after.parsed, false);
+});
+
+test("judgeRows_classifies_a_timed_out_row_as_timed_out_even_when_it_also_reports_an_agent_error", async () => {
+  const rows = [timedOutRawRow("rails-default", "ts-flag-parser", 1, { agentError: "OpenAI API error (404): model not found", exitCode: 1 })];
+
+  const judged = await judgeRows(rows, CORPUS_DIR);
+
+  assert.equal(judged[0]!.judge.verdict, "timed-out");
 });
 
 test("runScore_classifies_the_ts_fixture_rows_into_the_expected_verdicts", async () => {
