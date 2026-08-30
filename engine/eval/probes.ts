@@ -25,6 +25,7 @@ export interface ProbeRunInput {
   timeoutMs?: number;
   env?: Record<string, string>;
   files?: Record<string, string>;
+  compare?: "exact" | "subset";
 }
 
 interface ProbeResultOk {
@@ -140,7 +141,12 @@ export function runProbesInDir(workDir: string, input: ProbeRunInput): ProbeOutc
   const sourcePath = join(workDir, input.entryFilename);
   writeFileSync(sourcePath, input.source);
 
-  const payload = JSON.stringify({ sourcePath, entrySymbol: input.entrySymbol, probes: input.probes });
+  const payload = JSON.stringify({
+    sourcePath,
+    entrySymbol: input.entrySymbol,
+    probes: input.probes,
+    compare: input.compare ?? "exact",
+  });
   const env = buildChildEnv(input.env);
   const res = spawnRunner(input.lang, payload, timeoutMs, env);
 
