@@ -5,9 +5,9 @@ import {
   type ExtensionContext,
   type ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
-import { readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { classify, mergeRules, type CommandRules } from "./command-gate.ts";
 import {
@@ -31,6 +31,7 @@ import { withoutDuplicateToolCalls } from "./duplicate-delivery.ts";
 import { cleanProse } from "./prose-gate.ts";
 import { injectWebSearch, loadWebSearchConfig, LIUBAI_CONFIG } from "./web-search.ts";
 import { analyze } from "../../engine/analyze.ts";
+import type { RuleName } from "../../engine/contract.ts";
 import { defaultEnv } from "../../engine/env.ts";
 import { detectLang } from "../../engine/lang.ts";
 import { formatBlockReason } from "../../engine/messages.ts";
@@ -60,6 +61,30 @@ const railsDisabled = (): boolean => Boolean(process.env.LIUBAI_RAILS_OFF);
 // Dedup ships log-only: detectors observe and log until LIUBAI_DEDUP_ENFORCE
 // flips no-ops, replays, and escalations on.
 const dedupEnforced = (): boolean => Boolean(process.env.LIUBAI_DEDUP_ENFORCE);
+
+export function parseShadowRules(value: string | undefined): Set<string> {
+  const trimmed = value?.trim();
+  if (!trimmed) return new Set();
+  return new Set(
+    trimmed
+      .split(",")
+      .map((rule) => rule.trim())
+      .filter((rule) => rule.length > 0),
+  );
+}
+
+export type ShadowLogEntry = { rule: RuleName; path: string };
+export type ShadowLog = (entry: ShadowLogEntry) => void;
+
+function createShadowLog(cwd: string): ShadowLog {
+  const path = join(cwd, ".liubai", "shadow.jsonl");
+  return (entry) => {
+    try {
+      mkdirSync(dirname(path), { recursive: true });
+      appendFileSync(path, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n");
+    } catch {}
+  };
+}
 
 // A missing or malformed file yields no rules, so the gate stays open rather
 // than bricking the agent on a typo.
@@ -101,6 +126,7 @@ export type RailsDeps = {
   exec?: Exec;
   readTargetFile?: (path: string) => Promise<string>;
   logDedup?: DedupLog;
+  logShadow?: ShadowLog;
 };
 
 export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
@@ -115,6 +141,7 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
   const exec = deps?.exec ?? createExec(cwd);
   const readTargetFile = deps?.readTargetFile ?? createTargetReader(cwd);
   const logDedup = deps?.logDedup ?? createFileLog();
+  const logShadow = deps?.logShadow ?? createShadowLog(cwd);
 
   pi.registerTool(
     withBashDedup(bashTool, {
@@ -235,16 +262,22 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
       analyzeRules,
     );
 
+    const shadowRules = parseShadowRules(process.env.LIUBAI_SHADOW_RULES);
+    const visibleNudges = resp.nudges.filter((n) => !shadowRules.has(n.rule));
+    for (const n of resp.nudges) {
+      if (shadowRules.has(n.rule)) logShadow({ rule: n.rule, path: states.path });
+    }
+
     for (const err of resp.errors) {
       reportRailFailure("extract:python", event.toolName, err.msg, ctx);
     }
 
-    const blockNudges = resp.nudges.filter((n) => n.severity === "block");
+    const blockNudges = visibleNudges.filter((n) => n.severity === "block");
     if (blockNudges.length) {
       return { block: true, reason: `[discourage-comments] ${formatBlockReason(states.path, blockNudges)}` };
     }
 
-    const railNudges = resp.nudges.map((n) => `[${n.rule}] ${n.msg}`);
+    const railNudges = visibleNudges.map((n) => `[${n.rule}] ${n.msg}`);
     if (railNudges.length) pendingNudges.set(event.toolCallId, railNudges);
     return undefined;
   }

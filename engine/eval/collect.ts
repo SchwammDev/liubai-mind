@@ -219,6 +219,22 @@ export function countRailFirings(stdoutJsonl: string): Record<RuleName, number> 
   return counts;
 }
 
+export function countShadowFirings(logContents: string): Record<RuleName, number> {
+  const counts = emptyRailFirings();
+
+  for (const line of nonEmptyLines(logContents)) {
+    const parsed = parseJsonLine(line);
+    if (typeof parsed !== "object" || parsed === null) continue;
+
+    const rule = (parsed as Record<string, unknown>).rule;
+    if (typeof rule === "string" && RULE_NAMES.includes(rule as RuleName)) {
+      counts[rule as RuleName] += 1;
+    }
+  }
+
+  return counts;
+}
+
 function silentCrashError(exitCode: number): string | undefined {
   return exitCode === 0 ? undefined : `agent exited ${exitCode} before any assistant response`;
 }
@@ -325,6 +341,12 @@ export async function spawnForItem(
   return { outcome, durationMs: Date.now() - start };
 }
 
+function readShadowFirings(workDir: string): Record<RuleName, number> | undefined {
+  const shadowLogPath = join(workDir, ".liubai", "shadow.jsonl");
+  if (!existsSync(shadowLogPath)) return undefined;
+  return countShadowFirings(readFileSync(shadowLogPath, "utf8"));
+}
+
 export function buildRawRowCore(
   ctx: CollectContext,
   conditionId: string,
@@ -332,6 +354,7 @@ export function buildRawRowCore(
   outcome: RunOutcome,
   durationMs: number,
   snapshot: WorkDirSnapshot,
+  shadowFirings?: Record<RuleName, number>,
 ): Omit<RawRow, "caseId" | "conditionId" | "rep"> {
   const packBytes = packPath === undefined ? null : readFileSync(packPath, "utf8");
   const provenance = buildProvenance({
@@ -357,6 +380,7 @@ export function buildRawRowCore(
     tokensOut: tokenUsage.tokensOut,
     cacheReadTokens: tokenUsage.cacheReadTokens,
     railFirings: countRailFirings(outcome.stdoutJsonl),
+    ...(shadowFirings !== undefined ? { shadowFirings } : {}),
     ...(agentError !== undefined ? { agentError } : {}),
   };
 }
@@ -368,12 +392,13 @@ function buildRawRow(
   outcome: RunOutcome,
   durationMs: number,
   snapshot: WorkDirSnapshot,
+  shadowFirings: Record<RuleName, number> | undefined,
 ): RawRow {
   return {
     caseId: item.kase.id,
     conditionId: item.condition.id,
     rep: item.rep,
-    ...buildRawRowCore(ctx, item.condition.id, packPath, outcome, durationMs, snapshot),
+    ...buildRawRowCore(ctx, item.condition.id, packPath, outcome, durationMs, snapshot, shadowFirings),
   };
 }
 
@@ -386,7 +411,8 @@ async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult>
   try {
     const { outcome, durationMs } = await spawnForItem(ctx, item.kase.task, workDir, env);
     const snapshot = snapshotWorkDir(workDir, plan);
-    const row = buildRawRow(ctx, item, packPath, outcome, durationMs, snapshot);
+    const shadowFirings = readShadowFirings(workDir);
+    const row = buildRawRow(ctx, item, packPath, outcome, durationMs, snapshot, shadowFirings);
     return { row, stdoutJsonl: outcome.stdoutJsonl };
   } catch (err) {
     return { failure: failureMessage(item, err) };

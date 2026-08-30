@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { existsSync, renameSync } from "node:fs";
 import { join } from "node:path";
 
-import { register } from "./index.ts";
+import { parseShadowRules, register } from "./index.ts";
+import type { ShadowLogEntry } from "./index.ts";
 import type { DedupLog } from "./dedup.ts";
 
 const MODULE_FILE = "/tmp/liubai-rails/subject.py";
@@ -46,8 +47,10 @@ const railFailures = (logs: LogEntry[]) => logs.filter((entry) => entry.kind ===
 function railsSession(ctx?: unknown, files = new Map<string, string>()) {
   const { pi, handlers } = fakePi();
   const logs: LogEntry[] = [];
+  const shadowLogs: ShadowLogEntry[] = [];
   register(pi, {
     logDedup: (entry) => logs.push(entry),
+    logShadow: (entry) => shadowLogs.push(entry),
     readTargetFile: (path: string) => Promise.resolve(files.get(path) ?? ""),
   });
 
@@ -77,7 +80,7 @@ function railsSession(ctx?: unknown, files = new Map<string, string>()) {
   const write = (callId: string, path: string, content: string) =>
     apply(callId, "write", { path, content }, path);
 
-  return { apply, write, logs, files };
+  return { apply, write, logs, shadowLogs, files };
 }
 
 function editInput(path: string, oldText: string, newText: string) {
@@ -221,6 +224,65 @@ test("LIUBAI_RAILS_OFF lets a would-be-blocked edit through untouched", async ()
 
   assert.equal(outcome.blocked, false);
   assert.equal(outcome.text, TOOL_RESULT);
+});
+
+test("parseShadowRules_yields_an_empty_set_when_the_variable_is_unset", () => {
+  assert.equal(parseShadowRules(undefined).size, 0);
+});
+
+test("parseShadowRules_yields_an_empty_set_for_an_empty_string", () => {
+  assert.equal(parseShadowRules("").size, 0);
+});
+
+test("parseShadowRules_parses_a_single_rule_name", () => {
+  assert.deepEqual(parseShadowRules("cc-delta"), new Set(["cc-delta"]));
+});
+
+test("parseShadowRules_parses_several_comma_separated_rule_names", () => {
+  assert.deepEqual(parseShadowRules("cc-delta, discourage-comments"), new Set(["cc-delta", "discourage-comments"]));
+});
+
+async function withShadowRules<T>(rules: string, action: () => Promise<T>): Promise<T> {
+  process.env.LIUBAI_SHADOW_RULES = rules;
+  try {
+    return await action();
+  } finally {
+    delete process.env.LIUBAI_SHADOW_RULES;
+  }
+}
+
+test("a shadowed nudge-severity rule never rides along on the tool result, but its firing is logged", async () => {
+  const session = railsSession();
+
+  const outcome = await withShadowRules("test-data-plumbing", () =>
+    session.apply("shadowed-nudge", "edit", editInput(TEST_FILE, "", LONG_TEST), TEST_FILE),
+  );
+
+  assert.equal(outcome.blocked, false);
+  assert.doesNotMatch(outcome.text, /buries 8 lines of literal data/);
+  assert.deepEqual(session.shadowLogs, [{ rule: "test-data-plumbing", path: TEST_FILE }]);
+});
+
+test("a shadowed block-severity rule never blocks the edit, but its firing is logged", async () => {
+  const session = sessionWithFile(MODULE_FILE, "x = 1");
+
+  const outcome = await withShadowRules("discourage-comments", () =>
+    session.apply("shadowed-block", "edit", editInput(MODULE_FILE, "x = 1", "x = 1  # noise"), MODULE_FILE),
+  );
+
+  assert.equal(outcome.blocked, false);
+  assert.deepEqual(session.shadowLogs, [{ rule: "discourage-comments", path: MODULE_FILE }]);
+});
+
+test("a rule not named in LIUBAI_SHADOW_RULES still blocks and is not logged as shadowed", async () => {
+  const session = sessionWithFile(MODULE_FILE, "x = 1");
+
+  const outcome = await withShadowRules("cc-delta", () =>
+    session.apply("unshadowed-block", "edit", editInput(MODULE_FILE, "x = 1", "x = 1  # noise"), MODULE_FILE),
+  );
+
+  assert.equal(outcome.blocked, true);
+  assert.deepEqual(session.shadowLogs, []);
 });
 
 function registeredBashTool(): any {
