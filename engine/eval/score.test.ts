@@ -4,8 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { judgeRows, aggregate, formatMarkdown, compareProvenance, runScore } from "./score.ts";
-import type { SummaryRow, JudgeEnv } from "./score.ts";
+import { judgeRows, aggregate, formatMarkdown, compareProvenance, runScore, toJudgedJsonlRow } from "./score.ts";
+import type { SummaryRow, JudgeEnv, JudgedJsonlRow } from "./score.ts";
 import type { RawRow, Metrics, Verdict, GamedReason, Provenance, JudgeResult, Tier } from "./eval-contract.ts";
 import type { JudgedRow } from "./score.ts";
 import { venvPythonAvailable } from "./judge-env.ts";
@@ -222,6 +222,11 @@ function readSummary(runDir: string): SummaryRow[] {
   return lines.map((line) => JSON.parse(line) as SummaryRow);
 }
 
+function readJudgedJsonl(runDir: string): JudgedJsonlRow[] {
+  const lines = readFileSync(join(runDir, "judged.jsonl"), "utf8").trim().split("\n");
+  return lines.map((line) => JSON.parse(line) as JudgedJsonlRow);
+}
+
 function assistantBashToolCallLine(command: string): string {
   return JSON.stringify({
     type: "message_end",
@@ -283,6 +288,72 @@ function judgedRow(
   };
   return { row: rawRow(conditionId, caseId), judge, contaminated };
 }
+
+function fullyPopulatedJudgedRow(): JudgedRow {
+  return {
+    row: rawRow("rails-default", "case-a", {
+      rep: 2,
+      turns: 4,
+      tokensIn: 100,
+      tokensOut: 50,
+      railFirings: railFirings({ cc: 1 }),
+      durationMs: 5000,
+      timedOut: true,
+    }),
+    judge: {
+      verdict: "gamed",
+      gamedReason: "helper-split",
+      probesPassed: true,
+      before: metrics({ decisionPoints: 5 }),
+      after: metrics({ decisionPoints: 2 }),
+      createdFiles: [],
+      referencedFiles: [],
+    },
+    contaminated: true,
+  };
+}
+
+test("toJudgedJsonlRow_maps_verdict_dp_and_cost_fields_from_a_fully_populated_judged_row", () => {
+  const judged = fullyPopulatedJudgedRow();
+
+  const row = toJudgedJsonlRow(judged);
+
+  assert.deepEqual(row, {
+    caseId: "case-a",
+    conditionId: "rails-default",
+    rep: 2,
+    verdict: "gamed",
+    gamedReason: "helper-split",
+    contaminated: true,
+    dpBefore: 5,
+    dpAfter: 2,
+    probesPassed: true,
+    turns: 4,
+    tokensIn: 100,
+    tokensOut: 50,
+    railFirings: railFirings({ cc: 1 }),
+    durationMs: 5000,
+    timedOut: true,
+  });
+});
+
+test("toJudgedJsonlRow_omits_optional_fields_absent_from_the_judged_row", () => {
+  const judged = judgedRow("rails-default", "case-a", "untouched");
+
+  const row = toJudgedJsonlRow(judged);
+
+  assert.deepEqual(row, {
+    caseId: "case-a",
+    conditionId: "rails-default",
+    rep: 1,
+    verdict: "untouched",
+    contaminated: false,
+    dpBefore: 4,
+    dpAfter: 4,
+    durationMs: 1,
+    timedOut: false,
+  });
+});
 
 function emptyVerdictCounts(): Record<Verdict, number> {
   return { "genuine-fix": 0, gamed: 0, "bar-missed": 0, untouched: 0, broken: 0, "behavior-broken": 0, errored: 0 };
@@ -956,6 +1027,21 @@ test("runScore_writes_summary_jsonl_beside_raw_jsonl", async () => {
 
   const parsed = readSummary(runDir);
   assert.ok(parsed.some((r) => r.conditionId === "rails-default" && r.caseId === null));
+});
+
+test("runScore_writes_judged_jsonl_with_one_row_per_raw_row_in_raw_jsonl_order", async () => {
+  const rows = tsOnlyRows(readFixtureRows());
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, rows);
+
+  await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+  const judged = readJudgedJsonl(runDir);
+  assert.deepEqual(judged.map((r) => r.caseId), rows.map((r) => r.caseId));
+  assert.deepEqual(
+    judged.map((r) => r.verdict),
+    ["genuine-fix", "gamed", "untouched", "broken", "errored", "behavior-broken"],
+  );
 });
 
 test("runScore_flags_a_row_whose_transcript_touches_the_repo_root_as_contaminated", async () => {
