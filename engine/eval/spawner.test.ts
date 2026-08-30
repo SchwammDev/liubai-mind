@@ -30,7 +30,7 @@ function spec(over: Partial<RunSpec> = {}): RunSpec {
 }
 
 test("buildSpawnEnv_strips_experiment_toggles_inherited_from_the_parent_shell", () => {
-  const parent = { PATH: "/bin", LIUBAI_RAILS_OFF: "1", LIUBAI_PHRASING_PACK: "/tmp/pack.json" };
+  const parent = { PATH: "/bin", LIUBAI_RAILS_OFF: "1", LIUBAI_PHRASING_PACK: "/tmp/pack.json", LIUBAI_CC_DELTA_OFF: "1" };
 
   const env = buildSpawnEnv(parent, {});
 
