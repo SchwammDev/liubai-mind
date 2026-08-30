@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  computeDiffSize,
+  computeDiffCounts,
   judgeSecondTouchRows,
   aggregateSecondTouch,
   formatSecondTouchMarkdown,
@@ -338,40 +338,46 @@ test("judgeSecondTouchRows_stratifies_every_control_row_into_the_control_stratum
   assert.equal(judged.stratum, "control");
 });
 
-test("computeDiffSize_counts_only_the_appended_lines_when_lines_are_added", () => {
-  const size = computeDiffSize({ "a.ts": "one\ntwo\n" }, { "a.ts": "one\ntwo\nthree\nfour\n" });
+test("computeDiffCounts_reports_only_added_lines_when_lines_are_appended", () => {
+  const counts = computeDiffCounts({ "a.ts": "one\ntwo\n" }, { "a.ts": "one\ntwo\nthree\nfour\n" });
 
-  assert.equal(size, 2);
+  assert.deepEqual(counts, { linesAdded: 2, linesRemoved: 0 });
 });
 
-test("computeDiffSize_counts_only_the_removed_lines_when_lines_are_removed", () => {
-  const size = computeDiffSize({ "a.ts": "one\ntwo\nthree\nfour\n" }, { "a.ts": "one\ntwo\n" });
+test("computeDiffCounts_reports_only_removed_lines_when_lines_are_deleted", () => {
+  const counts = computeDiffCounts({ "a.ts": "one\ntwo\nthree\nfour\n" }, { "a.ts": "one\ntwo\n" });
 
-  assert.equal(size, 2);
+  assert.deepEqual(counts, { linesAdded: 0, linesRemoved: 2 });
 });
 
-test("computeDiffSize_counts_every_line_of_a_newly_created_file", () => {
-  const size = computeDiffSize({ "a.ts": "one\n" }, { "a.ts": "one\n", "b.ts": "x\ny\nz\n" });
+test("computeDiffCounts_counts_every_line_of_a_newly_created_file_as_added", () => {
+  const counts = computeDiffCounts({ "a.ts": "one\n" }, { "a.ts": "one\n", "b.ts": "x\ny\nz\n" });
 
-  assert.equal(size, 3);
+  assert.deepEqual(counts, { linesAdded: 3, linesRemoved: 0 });
 });
 
-test("computeDiffSize_counts_every_line_of_a_deleted_file", () => {
-  const size = computeDiffSize({ "a.ts": "one\n", "b.ts": "x\ny\nz\n" }, { "a.ts": "one\n" });
+test("computeDiffCounts_counts_every_line_of_a_file_dropped_from_final_as_removed", () => {
+  const counts = computeDiffCounts({ "a.ts": "one\n", "b.ts": "x\ny\nz\n" }, { "a.ts": "one\n" });
 
-  assert.equal(size, 3);
+  assert.deepEqual(counts, { linesAdded: 0, linesRemoved: 3 });
 });
 
-test("computeDiffSize_sums_changes_across_every_file", () => {
-  const size = computeDiffSize({ "a.ts": "one\ntwo\n", "b.ts": "x\n" }, { "a.ts": "one\ntwo\nthree\n", "b.ts": "y\n" });
+test("computeDiffCounts_counts_a_modified_line_as_one_removed_and_one_added", () => {
+  const counts = computeDiffCounts({ "a.ts": "one\n" }, { "a.ts": "two\n" });
 
-  assert.equal(size, 3);
+  assert.deepEqual(counts, { linesAdded: 1, linesRemoved: 1 });
 });
 
-test("computeDiffSize_is_zero_for_byte_identical_files", () => {
-  const size = computeDiffSize({ "a.ts": "one\ntwo\n" }, { "a.ts": "one\ntwo\n" });
+test("computeDiffCounts_sums_added_and_removed_lines_across_every_file", () => {
+  const counts = computeDiffCounts({ "a.ts": "one\ntwo\n", "b.ts": "x\n" }, { "a.ts": "one\ntwo\nthree\n", "b.ts": "y\n" });
 
-  assert.equal(size, 0);
+  assert.deepEqual(counts, { linesAdded: 2, linesRemoved: 1 });
+});
+
+test("computeDiffCounts_reports_zero_added_and_removed_for_byte_identical_files", () => {
+  const counts = computeDiffCounts({ "a.ts": "one\ntwo\n" }, { "a.ts": "one\ntwo\n" });
+
+  assert.deepEqual(counts, { linesAdded: 0, linesRemoved: 0 });
 });
 
 function judgedSecondTouchRow(
@@ -380,9 +386,9 @@ function judgedSecondTouchRow(
   verdict: SecondTouchVerdict,
   stratum: string,
   over: Partial<RawRow> = {},
-  diffSize = 0,
+  diffCounts: { linesAdded: number; linesRemoved: number } = { linesAdded: 0, linesRemoved: 0 },
 ): JudgedSecondTouchRow {
-  return { row: seededRow(caseId, { conditionId, ...over }), judge: { verdict, diffSize }, stratum };
+  return { row: seededRow(caseId, { conditionId, ...over }), judge: { verdict, ...diffCounts }, stratum };
 }
 
 function rollupOf(summary: SecondTouchSummaryRow[], conditionId: string): SecondTouchSummaryRow {
@@ -483,15 +489,17 @@ test("aggregateSecondTouch_reports_null_extension_success_rate_when_every_row_er
   assert.equal(rollupOf(summary, "rails-default").extensionSuccessRate, null);
 });
 
-test("aggregateSecondTouch_means_diff_size_across_the_bucket", () => {
+test("aggregateSecondTouch_means_lines_added_and_lines_removed_across_the_bucket", () => {
   const judged = [
-    judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix", {}, 4),
-    judgedSecondTouchRow("rails-default", "case-b", "extended", "genuine-fix", {}, 8),
+    judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix", {}, { linesAdded: 4, linesRemoved: 2 }),
+    judgedSecondTouchRow("rails-default", "case-b", "extended", "genuine-fix", {}, { linesAdded: 8, linesRemoved: 6 }),
   ];
 
   const summary = aggregateSecondTouch(judged);
 
-  assert.equal(rollupOf(summary, "rails-default").meanDiffSize, 6);
+  const rollup = rollupOf(summary, "rails-default");
+  assert.equal(rollup.meanLinesAdded, 6);
+  assert.equal(rollup.meanLinesRemoved, 4);
 });
 
 function railFirings(over: Partial<Record<RuleName, number>> = {}): Record<RuleName, number> {
@@ -539,7 +547,7 @@ test("formatSecondTouchMarkdown_renders_a_dash_for_null_cost_fields_never_a_zero
 
   const table = formatSecondTouchMarkdown(summary);
 
-  assert.match(table, /\| rails-default \| 1 \| 1 \| 0 \| 0 \| 0 \| 0 \| 0 \| 100\.0% \| 0\.0 \| - \| - \|/);
+  assert.match(table, /\| rails-default \| 1 \| 1 \| 0 \| 0 \| 0 \| 0 \| 0 \| 100\.0% \| 0\.0 \| 0\.0 \| - \| - \|/);
 });
 
 test("formatSecondTouchMarkdown_includes_stratum_rollups_suffixed_with_the_stratum_name", () => {
