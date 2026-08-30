@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, appen
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { runCollect, detectAgentError, countTurns, sumTokenUsage, countRailFirings } from "./collect.ts";
+import { runCollect, detectAgentError, countTurns, sumTokenUsage, countRailFirings, countShadowFirings } from "./collect.ts";
 import type { CollectOpts } from "./collect.ts";
 import type { RunSpec, RunOutcome, PiSpawner } from "./spawner.ts";
 import { gitSha } from "./provenance.ts";
@@ -572,6 +572,41 @@ test("countRailFirings_reports_zero_for_a_rule_that_never_fired", () => {
   assert.equal(firings["test-linearity"], 0);
 });
 
+function shadowLogLine(rule: string, path: string): string {
+  return `${JSON.stringify({ ts: "2026-08-30T00:00:00.000Z", rule, path })}\n`;
+}
+
+test("countShadowFirings_counts_a_shadowed_rule_firing_once", () => {
+  const log = shadowLogLine("cc-delta", "a.py");
+
+  assert.equal(countShadowFirings(log)["cc-delta"], 1);
+});
+
+test("countShadowFirings_sums_firings_of_the_same_rule_across_lines", () => {
+  const log = shadowLogLine("cc-delta", "a.py") + shadowLogLine("cc-delta", "b.py");
+
+  assert.equal(countShadowFirings(log)["cc-delta"], 2);
+});
+
+test("countShadowFirings_ignores_a_rule_name_the_engine_does_not_know", () => {
+  const log = shadowLogLine("not-a-real-rule", "a.py");
+
+  const firings = countShadowFirings(log);
+
+  assert.equal(firings.cc, 0);
+  assert.equal(firings["cc-delta"], 0);
+});
+
+test("countShadowFirings_skips_a_malformed_line_without_losing_the_valid_ones", () => {
+  const log = "{ not json\n" + shadowLogLine("cc-delta", "a.py");
+
+  assert.equal(countShadowFirings(log)["cc-delta"], 1);
+});
+
+test("countShadowFirings_reports_zero_for_an_empty_log", () => {
+  assert.equal(countShadowFirings("")["cc-delta"], 0);
+});
+
 function assertCostMetricsStamped(row: RawRow): void {
   assert.equal(row.turns, 2);
   assert.equal(row.tokensIn, 100);
@@ -592,6 +627,33 @@ test("runCollect_stamps_turns_tokens_and_rail_firings_from_stdout_onto_the_raw_r
   await runCollect(opts);
 
   assertCostMetricsStamped(firstRow(opts.runDir));
+});
+
+function shadowLogSpawner(lines: string[]): PiSpawner {
+  return async (spec) => {
+    const shadowDir = join(spec.cwd, ".liubai");
+    mkdirSync(shadowDir, { recursive: true });
+    writeFileSync(join(shadowDir, "shadow.jsonl"), lines.join(""));
+    return { exitCode: 0, stdoutJsonl: "", timedOut: false };
+  };
+}
+
+test("runCollect_stamps_shadowFirings_from_the_workdirs_shadow_log_onto_the_raw_row", async () => {
+  const spawner = shadowLogSpawner([shadowLogLine("cc-delta", "a.py"), shadowLogLine("cc-delta", "b.py")]);
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+
+  await runCollect(opts);
+
+  assert.equal(firstRow(opts.runDir).shadowFirings?.["cc-delta"], 2);
+});
+
+test("runCollect_omits_shadowFirings_from_the_raw_row_when_no_shadow_log_was_written", async () => {
+  const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+
+  await runCollect(opts);
+
+  assert.equal(firstRow(opts.runDir).shadowFirings, undefined);
 });
 
 test("runCollect_stamps_agentError_into_the_raw_row_when_stdout_reports_a_terminal_retry_failure", async () => {

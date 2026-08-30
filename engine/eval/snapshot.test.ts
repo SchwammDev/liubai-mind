@@ -50,6 +50,12 @@ function fixtureWithIgnoredDirectoriesAndPycFiles(): string {
   return workDir;
 }
 
+function fixtureWithShadowLogDirectory(): string {
+  const workDir = tempWorkDir();
+  writeUtf8(workDir, ".liubai/shadow.jsonl", '{"ts":"now","rule":"cc-delta","path":"a.py"}\n');
+  return workDir;
+}
+
 function fixtureFillingTheTotalBudgetThenOneMore(): string {
   const workDir = tempWorkDir();
   for (let i = 0; i < FILLER_COUNT; i += 1) writeUtf8(workDir, fillerFileName(i), FILLER_CONTENT);
@@ -106,6 +112,14 @@ test("snapshotExtras_captures_extra_files_recursively_in_lexicographic_key_order
 
 test("snapshotExtras_never_captures_or_lists_ignored_directories_and_pyc_files", () => {
   const workDir = fixtureWithIgnoredDirectoriesAndPycFiles();
+
+  const snapshot = snapshotExtras(workDir, new Set());
+
+  assertDroppedOnly(snapshot, []);
+});
+
+test("snapshotExtras_never_captures_or_lists_the_shadow_log_directory", () => {
+  const workDir = fixtureWithShadowLogDirectory();
 
   const snapshot = snapshotExtras(workDir, new Set());
 
