@@ -1,0 +1,17 @@
+{
+  "task": "Add two fields to qc_series's result. 'outliers': a list of the 0-based indices whose per-point label (from the existing spike classification already returned in 'labels') is 'severe' or 'invalid', in ascending order. 'alert': a boolean, true when the existing 'streak' value (the longest run of consecutive non-clean points, already returned) is 3 or greater, false otherwise. A run counts toward 'streak' and thus 'alert' regardless of which non-clean label it consists of, but only 'severe' and 'invalid' points count as 'outliers' — 'minor' and 'moderate' points never appear in 'outliers' even while contributing to a streak. Keep every existing field, threshold, and behavior unchanged; keep qc_series's signature unchanged.",
+  "probes": [
+    {
+      "args": [{ "values": [50, 50, 62, 50, 50], "timestamps": [0, 10, 20, 30, 40], "expected_step": 10, "hard_limit": 30 }],
+      "returns": { "ok": true, "outliers": [2], "alert": false }
+    },
+    {
+      "args": [{ "values": [50, 50, 56, 50, 57, 50, 50], "timestamps": [0, 10, 20, 30, 40, 50, 60], "expected_step": 10, "hard_limit": 30 }],
+      "returns": { "ok": true, "streak": 3, "outliers": [], "alert": true }
+    },
+    {
+      "args": [{ "values": [50, 50, 50], "timestamps": [0, 10, 20], "expected_step": 10, "hard_limit": 30 }],
+      "returns": { "ok": true, "outliers": [], "alert": false }
+    }
+  ]
+}
