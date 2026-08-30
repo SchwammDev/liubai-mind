@@ -9,7 +9,7 @@ import { runProbes } from "./probes.ts";
 import { sourceParses } from "./parse-check.ts";
 import { readRawJsonl, judgeRows, runScore, probeLang } from "./score.ts";
 
-export type SecondTouchVerdict = "extended" | "extension-failed" | "regressed" | "broken" | "untouched" | "errored";
+export type SecondTouchVerdict = "extended" | "extension-failed" | "regressed" | "broken" | "untouched" | "errored" | "timed-out";
 
 export interface SecondTouchJudgeResult {
   verdict: SecondTouchVerdict;
@@ -38,7 +38,7 @@ export interface SecondTouchSummaryRow {
   costAvailable: number;
 }
 
-const SECOND_TOUCH_VERDICTS: readonly SecondTouchVerdict[] = ["extended", "extension-failed", "regressed", "broken", "untouched", "errored"];
+const SECOND_TOUCH_VERDICTS: readonly SecondTouchVerdict[] = ["extended", "extension-failed", "regressed", "broken", "untouched", "errored", "timed-out"];
 const RULE_NAMES: readonly RuleName[] = Object.values(RULE);
 const SUMMARY_FILENAME = "summary.jsonl";
 const CONTROL_STRATUM = "control";
@@ -131,6 +131,7 @@ function probesPassFor(kase: CaseManifest, probes: Probe[], entrySource: string,
 }
 
 function classifySecondTouchVerdict(kase: CaseManifest, row: RawRow, seedFiles: Record<string, string>): SecondTouchVerdict {
+  if (row.timedOut === true) return "timed-out";
   if (row.agentError !== undefined) return "errored";
 
   const entrySource = row.files[kase.entry];
@@ -258,8 +259,8 @@ function meanOf(sum: number, count: number): number | null {
 }
 
 function extensionSuccessRateOf(counts: Record<SecondTouchVerdict, number>, total: number): number | null {
-  const nonErrored = total - counts.errored;
-  return nonErrored === 0 ? null : (counts.extended / nonErrored) * 100;
+  const denominator = total - counts.errored - counts["timed-out"];
+  return denominator === 0 ? null : (counts.extended / denominator) * 100;
 }
 
 function finalizeRow(conditionId: string, caseId: string | null, stratum: string | null, acc: SecondTouchAccumulator): SecondTouchSummaryRow {
@@ -335,14 +336,14 @@ function conditionCell(row: SecondTouchSummaryRow): string {
 
 function markdownRow(row: SecondTouchSummaryRow): string {
   const c = row.counts;
-  return `| ${conditionCell(row)} | ${row.total} | ${c.extended} | ${c["extension-failed"]} | ${c.regressed} | ${c.broken} | ${c.untouched} | ${c.errored} | ${formatPercent(row.extensionSuccessRate)} | ${formatMean(row.meanLinesAdded)} | ${formatMean(row.meanLinesRemoved)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanRailFiringsTotal)} |`;
+  return `| ${conditionCell(row)} | ${row.total} | ${c.extended} | ${c["extension-failed"]} | ${c.regressed} | ${c.broken} | ${c.untouched} | ${c.errored} | ${c["timed-out"]} | ${formatPercent(row.extensionSuccessRate)} | ${formatMean(row.meanLinesAdded)} | ${formatMean(row.meanLinesRemoved)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanRailFiringsTotal)} |`;
 }
 
 export function formatSecondTouchMarkdown(summary: SecondTouchSummaryRow[]): string {
   const rollups = summary.filter((r) => r.caseId === null);
   const header =
-    "| condition | n | extended | extension-failed | regressed | broken | untouched | errored | extension % | mean added | mean removed | mean turns | mean rails |";
-  const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
+    "| condition | n | extended | extension-failed | regressed | broken | untouched | errored | timed-out | extension % | mean added | mean removed | mean turns | mean rails |";
+  const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
   return [header, divider, ...rollups.map(markdownRow)].join("\n");
 }
 

@@ -198,6 +198,26 @@ test("judgeSecondTouchRows_classifies_an_agent_errored_row_as_errored_before_any
   assert.equal(judged.judge.verdict, "errored");
 });
 
+test("judgeSecondTouchRows_classifies_a_timed_out_row_as_timed_out_before_checking_the_entry_file", async () => {
+  const caseId = "second-touch-timed-out";
+  const corpusDir = extendableCorpusDir(caseId);
+  const row = seededRow(caseId, { timedOut: true, files: {} });
+
+  const judged = await judgeOne(corpusDir, row, [sourceRow(caseId)]);
+
+  assert.equal(judged.judge.verdict, "timed-out");
+});
+
+test("judgeSecondTouchRows_prefers_timed_out_over_errored_when_both_apply", async () => {
+  const caseId = "second-touch-timed-out-and-errored";
+  const corpusDir = extendableCorpusDir(caseId);
+  const row = seededRow(caseId, { timedOut: true, agentError: "boom", files: { "thing.ts": GARBAGE_SOURCE } });
+
+  const judged = await judgeOne(corpusDir, row, [sourceRow(caseId)]);
+
+  assert.equal(judged.judge.verdict, "timed-out");
+});
+
 test("judgeSecondTouchRows_classifies_a_missing_entry_file_as_broken", async () => {
   const caseId = "second-touch-missing-entry";
   const corpusDir = extendableCorpusDir(caseId);
@@ -512,6 +532,17 @@ test("aggregateSecondTouch_computes_extension_success_rate_over_non_errored_rows
   assert.equal(rollupOf(summary, "rails-default").extensionSuccessRate, 50);
 });
 
+test("aggregateSecondTouch_excludes_timed_out_rows_from_the_extension_success_rate_denominator", () => {
+  const judged = [
+    judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix"),
+    judgedSecondTouchRow("rails-default", "case-b", "timed-out", "genuine-fix"),
+  ];
+
+  const summary = aggregateSecondTouch(judged);
+
+  assert.equal(rollupOf(summary, "rails-default").extensionSuccessRate, 100);
+});
+
 test("aggregateSecondTouch_reports_null_extension_success_rate_when_every_row_errored", () => {
   const judged = [judgedSecondTouchRow("rails-default", "case-a", "errored", "genuine-fix")];
 
@@ -578,7 +609,20 @@ test("formatSecondTouchMarkdown_renders_a_dash_for_null_cost_fields_never_a_zero
 
   const table = formatSecondTouchMarkdown(summary);
 
-  assert.match(table, /\| rails-default \| 1 \| 1 \| 0 \| 0 \| 0 \| 0 \| 0 \| 100\.0% \| 0\.0 \| 0\.0 \| - \| - \|/);
+  assert.match(table, /\| rails-default \| 1 \| 1 \| 0 \| 0 \| 0 \| 0 \| 0 \| 0 \| 100\.0% \| 0\.0 \| 0\.0 \| - \| - \|/);
+});
+
+test("formatSecondTouchMarkdown_names_timed_out_as_its_own_column", () => {
+  const judged = [
+    judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix"),
+    judgedSecondTouchRow("rails-default", "case-b", "timed-out", "genuine-fix"),
+  ];
+  const summary = aggregateSecondTouch(judged);
+
+  const table = formatSecondTouchMarkdown(summary);
+
+  assert.match(table, /\| timed-out \|/);
+  assert.match(table, /\| rails-default \| 2 \| 1 \| 0 \| 0 \| 0 \| 0 \| 0 \| 1 \| 100\.0% \|/);
 });
 
 test("formatSecondTouchMarkdown_includes_stratum_rollups_suffixed_with_the_stratum_name", () => {
