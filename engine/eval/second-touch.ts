@@ -130,6 +130,7 @@ function buildSeededItems(rows: RawRow[], inputs: LoadedInputs, seedEntryContent
   const items: SecondTouchItem[] = [];
   for (const row of rows) {
     if (row.agentError !== undefined) continue;
+    if (row.timedOut) continue;
     const kase = inputs.casesWithExtension.get(row.caseId)!;
     if (row.files[kase.entry] === undefined) continue;
     if (isUntouchedRow(row, kase, seedEntryContent)) continue;
