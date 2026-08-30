@@ -51,6 +51,7 @@ export interface SummaryRow {
 const VERDICTS: readonly Verdict[] = ["genuine-fix", "gamed", "bar-missed", "untouched", "broken", "behavior-broken", "errored"];
 const GAMED_REASONS: readonly GamedReason[] = ["helper-split", "silent-handler"];
 const SUMMARY_FILENAME = "summary.jsonl";
+const JUDGED_FILENAME = "judged.jsonl";
 const RAW_FILENAME = "raw.jsonl";
 const ERROR_STATUS = 1;
 const OK_STATUS = 0;
@@ -549,6 +550,50 @@ function writeSummaryJsonl(runDir: string, summary: SummaryRow[]): void {
   writeFileSync(join(runDir, SUMMARY_FILENAME), content);
 }
 
+export interface JudgedJsonlRow {
+  caseId: string;
+  conditionId: string;
+  rep: number;
+  verdict: Verdict;
+  gamedReason?: GamedReason;
+  contaminated: boolean;
+  dpBefore: number;
+  dpAfter: number;
+  probesPassed?: boolean;
+  turns?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  railFirings?: Record<RuleName, number>;
+  durationMs: number;
+  timedOut: boolean;
+}
+
+export function toJudgedJsonlRow(judgedRow: JudgedRow): JudgedJsonlRow {
+  const { row, judge, contaminated } = judgedRow;
+  return {
+    caseId: row.caseId,
+    conditionId: row.conditionId,
+    rep: row.rep,
+    verdict: judge.verdict,
+    ...(judge.gamedReason !== undefined ? { gamedReason: judge.gamedReason } : {}),
+    contaminated,
+    dpBefore: judge.before.decisionPoints,
+    dpAfter: judge.after.decisionPoints,
+    ...(judge.probesPassed !== undefined ? { probesPassed: judge.probesPassed } : {}),
+    ...(row.turns !== undefined ? { turns: row.turns } : {}),
+    ...(row.tokensIn !== undefined ? { tokensIn: row.tokensIn } : {}),
+    ...(row.tokensOut !== undefined ? { tokensOut: row.tokensOut } : {}),
+    ...(row.railFirings !== undefined ? { railFirings: row.railFirings } : {}),
+    durationMs: row.durationMs,
+    timedOut: row.timedOut,
+  };
+}
+
+function writeJudgedJsonl(runDir: string, judged: JudgedRow[]): void {
+  const content = judged.map((judgedRow) => JSON.stringify(toJudgedJsonlRow(judgedRow))).join("\n") + "\n";
+  writeFileSync(join(runDir, JUDGED_FILENAME), content);
+}
+
 function anyRowNeedsPython(rows: RawRow[], cases: CaseManifest[]): boolean {
   const langById = new Map(cases.map((c) => [c.id, c.lang]));
   return rows.some((row) => langById.get(row.caseId) === "python");
@@ -639,7 +684,7 @@ async function judgeAndSummarize(
   corpusDir: string,
   env: JudgeEnv,
   contamination: ContaminationCheck,
-): Promise<{ summary: SummaryRow[]; tierByCaseId: Map<string, Tier> } | { error: string }> {
+): Promise<{ judged: JudgedRow[]; summary: SummaryRow[]; tierByCaseId: Map<string, Tier> } | { error: string }> {
   let judged: JudgedRow[];
   try {
     judged = await judgeRows(rows, corpusDir, contamination);
@@ -650,7 +695,7 @@ async function judgeAndSummarize(
   const tierMap = loadTierByCaseId(corpusDir);
   if ("error" in tierMap) return tierMap;
 
-  return { summary: aggregate(judged, env, tierMap.map), tierByCaseId: tierMap.map };
+  return { judged, summary: aggregate(judged, env, tierMap.map), tierByCaseId: tierMap.map };
 }
 
 export async function runScore(opts: {
@@ -674,8 +719,9 @@ export async function runScore(opts: {
   const judgeResult = await judgeAndSummarize(parsedRaw.rows, opts.corpusDir, judgeEnv.env, contamination);
   if ("error" in judgeResult) return { status: ERROR_STATUS, stdout: judgeResult.error };
 
-  const { summary, tierByCaseId: tierMap } = judgeResult;
+  const { judged, summary, tierByCaseId: tierMap } = judgeResult;
   writeSummaryJsonl(opts.runDir, summary);
+  writeJudgedJsonl(opts.runDir, judged);
   const table = formatMarkdown(summary);
 
   if (opts.compareRunDir === undefined) return { status: OK_STATUS, stdout: table };
