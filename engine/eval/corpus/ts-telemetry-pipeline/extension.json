@@ -1,0 +1,38 @@
+{
+  "task": "Detect flatlines in processBatch: a flatline is a run of 3 or more consecutive entries in the input readings array that belong to the same channel and normalize to the same millivolt value. For each maximal flatline run, append one alert of the form '<channel>:flatline' to the result's alerts list, placed after all existing critical/loaded/negative alerts, in the order each run's first reading appears in the input. A run breaks the moment an intervening reading (even from a different channel) interrupts the matching sequence — readings of the same channel and value that are not adjacent in the input never count as a run. Keep every existing alert type, channel summary field, and per-reading label unchanged; the report field keeps its existing computation, so its alerts count reflects the final alerts list with flatline alerts included. Keep processBatch's signature unchanged.",
+  "probes": [
+    {
+      "args": [{ "readings": [
+        { "channel": "x", "unit": "mV", "value": 10, "at": 0 },
+        { "channel": "x", "unit": "mV", "value": 10, "at": 10 },
+        { "channel": "x", "unit": "mV", "value": 10, "at": 20 }
+      ] }],
+      "returns": { "ok": true, "alerts": ["x:flatline"], "report": "readings=3;channels=1;alerts=1;worst=standby" }
+    },
+    {
+      "args": [{ "readings": [
+        { "channel": "c1", "unit": "mV", "value": 950, "at": 0 },
+        { "channel": "c2", "unit": "mV", "value": 5, "at": 0 },
+        { "channel": "c2", "unit": "mV", "value": 5, "at": 10 },
+        { "channel": "c2", "unit": "mV", "value": 5, "at": 20 }
+      ] }],
+      "returns": { "ok": true, "alerts": ["c1:critical", "c2:flatline"], "report": "readings=4;channels=2;alerts=2;worst=critical" }
+    },
+    {
+      "args": [{ "readings": [
+        { "channel": "y", "unit": "mV", "value": 20, "at": 0 },
+        { "channel": "y", "unit": "mV", "value": 20, "at": 10 }
+      ] }],
+      "returns": { "ok": true, "alerts": [], "report": "readings=2;channels=1;alerts=0;worst=standby" }
+    },
+    {
+      "args": [{ "readings": [
+        { "channel": "z", "unit": "mV", "value": 5, "at": 0 },
+        { "channel": "w", "unit": "mV", "value": 5, "at": 0 },
+        { "channel": "z", "unit": "mV", "value": 5, "at": 10 },
+        { "channel": "z", "unit": "mV", "value": 5, "at": 20 }
+      ] }],
+      "returns": { "ok": true, "alerts": [], "report": "readings=4;channels=2;alerts=0;worst=standby" }
+    }
+  ]
+}
