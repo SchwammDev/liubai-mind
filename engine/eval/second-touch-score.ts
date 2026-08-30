@@ -13,7 +13,8 @@ export type SecondTouchVerdict = "extended" | "extension-failed" | "regressed" |
 
 export interface SecondTouchJudgeResult {
   verdict: SecondTouchVerdict;
-  diffSize: number;
+  linesAdded: number;
+  linesRemoved: number;
 }
 
 export interface JudgedSecondTouchRow {
@@ -30,7 +31,8 @@ export interface SecondTouchSummaryRow {
   counts: Record<SecondTouchVerdict, number>;
   total: number;
   extensionSuccessRate: number | null;
-  meanDiffSize: number | null;
+  meanLinesAdded: number | null;
+  meanLinesRemoved: number | null;
   meanTurns: number | null;
   meanRailFiringsTotal: number | null;
   costAvailable: number;
@@ -60,20 +62,29 @@ function lcsLength(a: string[], b: string[]): number {
   return previous[b.length]!;
 }
 
-function changedLineCount(before: string, after: string): number {
-  if (before === after) return 0;
-  const a = splitLines(before);
-  const b = splitLines(after);
-  return a.length + b.length - 2 * lcsLength(a, b);
+interface DiffCounts {
+  linesAdded: number;
+  linesRemoved: number;
 }
 
-export function computeDiffSize(seedFiles: Record<string, string>, finalFiles: Record<string, string>): number {
+function changedLineCounts(before: string, after: string): DiffCounts {
+  if (before === after) return { linesAdded: 0, linesRemoved: 0 };
+  const a = splitLines(before);
+  const b = splitLines(after);
+  const common = lcsLength(a, b);
+  return { linesAdded: b.length - common, linesRemoved: a.length - common };
+}
+
+export function computeDiffCounts(seedFiles: Record<string, string>, finalFiles: Record<string, string>): DiffCounts {
   const keys = new Set([...Object.keys(seedFiles), ...Object.keys(finalFiles)]);
-  let total = 0;
+  let linesAdded = 0;
+  let linesRemoved = 0;
   for (const key of keys) {
-    total += changedLineCount(seedFiles[key] ?? "", finalFiles[key] ?? "");
+    const counts = changedLineCounts(seedFiles[key] ?? "", finalFiles[key] ?? "");
+    linesAdded += counts.linesAdded;
+    linesRemoved += counts.linesRemoved;
   }
-  return total;
+  return { linesAdded, linesRemoved };
 }
 
 function pristineFiles(corpusDir: string, kase: CaseManifest): Record<string, string> {
@@ -183,9 +194,9 @@ export async function judgeSecondTouchRows(rows: RawRow[], sourceRows: RawRow[],
     const kase = caseFor(cases, row.caseId);
     const seedFiles = seedFilesFor(row, kase, corpusDir, sourceRowsByKey);
     const verdict = classifySecondTouchVerdict(kase, row, seedFiles);
-    const diffSize = computeDiffSize(seedFiles, row.files);
+    const { linesAdded, linesRemoved } = computeDiffCounts(seedFiles, row.files);
     const stratum = row.secondTouch?.control ? CONTROL_STRATUM : await sourceVerdictOf(row, corpusDir, sourceRowsByKey, sourceVerdictCache);
-    judged.push({ row, judge: { verdict, diffSize }, stratum });
+    judged.push({ row, judge: { verdict, linesAdded, linesRemoved }, stratum });
   }
   return judged;
 }
@@ -197,14 +208,15 @@ function emptySecondTouchCounts(): Record<SecondTouchVerdict, number> {
 interface SecondTouchAccumulator {
   counts: Record<SecondTouchVerdict, number>;
   total: number;
-  diffSizeSum: number;
+  linesAddedSum: number;
+  linesRemovedSum: number;
   turnsSum: number;
   railFiringsTotalSum: number;
   costAvailable: number;
 }
 
 function newAccumulator(): SecondTouchAccumulator {
-  return { counts: emptySecondTouchCounts(), total: 0, diffSizeSum: 0, turnsSum: 0, railFiringsTotalSum: 0, costAvailable: 0 };
+  return { counts: emptySecondTouchCounts(), total: 0, linesAddedSum: 0, linesRemovedSum: 0, turnsSum: 0, railFiringsTotalSum: 0, costAvailable: 0 };
 }
 
 function railFiringsTotal(railFirings: Record<RuleName, number>): number {
@@ -218,7 +230,8 @@ function costFieldsPresent(row: RawRow): row is RawRow & { turns: number; railFi
 function addRow(acc: SecondTouchAccumulator, judged: JudgedSecondTouchRow): void {
   acc.counts[judged.judge.verdict] += 1;
   acc.total += 1;
-  acc.diffSizeSum += judged.judge.diffSize;
+  acc.linesAddedSum += judged.judge.linesAdded;
+  acc.linesRemovedSum += judged.judge.linesRemoved;
   if (!costFieldsPresent(judged.row)) return;
   acc.costAvailable += 1;
   acc.turnsSum += judged.row.turns;
@@ -243,7 +256,8 @@ function finalizeRow(conditionId: string, caseId: string | null, stratum: string
     counts: acc.counts,
     total: acc.total,
     extensionSuccessRate: extensionSuccessRateOf(acc.counts, acc.total),
-    meanDiffSize: meanOf(acc.diffSizeSum, acc.total),
+    meanLinesAdded: meanOf(acc.linesAddedSum, acc.total),
+    meanLinesRemoved: meanOf(acc.linesRemovedSum, acc.total),
     meanTurns: meanOf(acc.turnsSum, acc.costAvailable),
     meanRailFiringsTotal: meanOf(acc.railFiringsTotalSum, acc.costAvailable),
     costAvailable: acc.costAvailable,
@@ -306,14 +320,14 @@ function conditionCell(row: SecondTouchSummaryRow): string {
 
 function markdownRow(row: SecondTouchSummaryRow): string {
   const c = row.counts;
-  return `| ${conditionCell(row)} | ${row.total} | ${c.extended} | ${c["extension-failed"]} | ${c.regressed} | ${c.broken} | ${c.untouched} | ${c.errored} | ${formatPercent(row.extensionSuccessRate)} | ${formatMean(row.meanDiffSize)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanRailFiringsTotal)} |`;
+  return `| ${conditionCell(row)} | ${row.total} | ${c.extended} | ${c["extension-failed"]} | ${c.regressed} | ${c.broken} | ${c.untouched} | ${c.errored} | ${formatPercent(row.extensionSuccessRate)} | ${formatMean(row.meanLinesAdded)} | ${formatMean(row.meanLinesRemoved)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanRailFiringsTotal)} |`;
 }
 
 export function formatSecondTouchMarkdown(summary: SecondTouchSummaryRow[]): string {
   const rollups = summary.filter((r) => r.caseId === null);
   const header =
-    "| condition | n | extended | extension-failed | regressed | broken | untouched | errored | extension % | mean diff | mean turns | mean rails |";
-  const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
+    "| condition | n | extended | extension-failed | regressed | broken | untouched | errored | extension % | mean added | mean removed | mean turns | mean rails |";
+  const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
   return [header, divider, ...rollups.map(markdownRow)].join("\n");
 }
 
