@@ -97,6 +97,21 @@ function fileCapturingSpawner(filename: string): { spawner: PiSpawner; capturedC
   return { spawner, capturedContents };
 }
 
+test("runSecondTouch_never_seeds_from_a_timed_out_source_row", async () => {
+  const rows = [
+    sourceRow({ conditionId: "rails-default", rep: 1, timedOut: true }),
+    sourceRow({ conditionId: "rails-default", rep: 2 }),
+  ];
+  const sourceRunDir = writeSourceRun(rows);
+  const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
+  const opts = baseOpts(sourceRunDir, { spawner });
+
+  await runSecondTouch(opts);
+
+  const identities = readRawRows(opts.runDir).map(rowIdentity).sort();
+  assert.deepEqual(identities, ["ts-flag-parser/rails-default/control", "ts-flag-parser/rails-default/seed:2"]);
+});
+
 test("runSecondTouch_derives_one_seeded_item_per_touched_non_errored_source_row_and_one_control_item_per_arm", async () => {
   const rows = [
     sourceRow({ conditionId: "rails-default", rep: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } }),
