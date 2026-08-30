@@ -69,6 +69,49 @@ function extendableCorpusDir(caseId: string): string {
   return corpusDir;
 }
 
+function identityObjectSource(): string {
+  return "export function f(x: number): { value: number } {\n  return { value: x };\n}\n";
+}
+
+function shapeWideningObjectSource(): string {
+  return [
+    "export function f(x: number, double?: boolean): { value: number; tag: null } {",
+    "  const value = double ? x * 2 : x;",
+    "  return { value, tag: null };",
+    "}",
+    "",
+  ].join("\n");
+}
+
+function extendableObjectCorpusDir(caseId: string): string {
+  const corpusDir = tempDir("eval-second-touch-score-corpus-");
+  const caseDir = join(corpusDir, caseId);
+  mkdirSync(caseDir, { recursive: true });
+  writeFileSync(
+    join(caseDir, "manifest.json"),
+    JSON.stringify({
+      id: caseId,
+      lang: "typescript",
+      files: ["thing.ts.case"],
+      entry: "thing.ts",
+      entrySymbol: "f",
+      task: "Improve thing.ts. Keep the public function signature and behavior unchanged.",
+      tier: "easy",
+      baseline: { decisionPoints: 0, functions: 1, silentHandlers: 0 },
+    }),
+  );
+  writeFileSync(join(caseDir, "probes.json"), JSON.stringify([{ args: [1], returns: { value: 1 } }]));
+  writeFileSync(
+    join(caseDir, "extension.json"),
+    JSON.stringify({
+      task: "Add an optional double parameter that doubles the result when true.",
+      probes: [{ args: [2, true], returns: { value: 4 } }],
+    }),
+  );
+  writeFileSync(join(caseDir, "thing.ts.case"), identityObjectSource());
+  return corpusDir;
+}
+
 function noExtensionCorpusDir(caseId: string): string {
   const corpusDir = tempDir("eval-second-touch-score-corpus-");
   const caseDir = join(corpusDir, caseId);
@@ -241,6 +284,16 @@ test("judgeSecondTouchRows_classifies_both_probe_sets_green_as_extended", async 
   const row = seededRow(caseId, { files: { "thing.ts": extendedSource() } });
 
   const judged = await judgeOne(corpusDir, row, [sourceRow(caseId)]);
+
+  assert.equal(judged.judge.verdict, "extended");
+});
+
+test("judgeSecondTouchRows_classifies_a_solution_that_widens_the_returned_shape_as_extended_not_regressed", async () => {
+  const caseId = "second-touch-shape-widening";
+  const corpusDir = extendableObjectCorpusDir(caseId);
+  const row = seededRow(caseId, { files: { "thing.ts": shapeWideningObjectSource() } });
+
+  const judged = await judgeOne(corpusDir, row, [sourceRow(caseId, { files: { "thing.ts": identityObjectSource() } })]);
 
   assert.equal(judged.judge.verdict, "extended");
 });

@@ -99,6 +99,7 @@ function probesPassFor(kase: CaseManifest, probes: Probe[], entrySource: string,
     entrySymbol: kase.entrySymbol,
     probes,
     files,
+    compare: "subset",
   });
   return outcome.passed;
 }

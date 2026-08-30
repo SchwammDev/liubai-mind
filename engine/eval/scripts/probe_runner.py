@@ -4,8 +4,10 @@ from __future__ import annotations
 import json
 import sys
 import trace
+from collections.abc import Callable
 from os import environ
 from pathlib import Path
+from typing import Any
 
 SENTINEL_PREFIX = "LIUBAI_PROBE_RESULT:"
 
@@ -26,34 +28,40 @@ def _category(value: object) -> str:
     return "other"
 
 
-def _lists_equal(actual: list, expected: list) -> bool:
+def _lists_equal(actual: list, expected: list, compare: str) -> bool:
     if len(actual) != len(expected):
         return False
-    return all(_deep_equal(a, e) for a, e in zip(actual, expected))
+    return all(_deep_equal(a, e, compare) for a, e in zip(actual, expected))
 
 
-def _dicts_equal(actual: dict, expected: dict) -> bool:
+def _dicts_equal(actual: dict, expected: dict, compare: str) -> bool:
     if set(actual.keys()) != set(expected.keys()):
         return False
-    return all(_deep_equal(actual[key], expected[key]) for key in actual)
+    return all(_deep_equal(actual[key], expected[key], compare) for key in actual)
 
 
-_EQUALITY_BY_CATEGORY = {
-    "bool": lambda a, e: a == e,
-    "number": lambda a, e: a == e,
-    "str": lambda a, e: a == e,
-    "none": lambda a, e: True,
+def _dicts_subset(actual: dict, expected: dict, compare: str) -> bool:
+    if not set(expected.keys()) <= set(actual.keys()):
+        return False
+    return all(_deep_equal(actual[key], expected[key], compare) for key in expected)
+
+
+_EQUALITY_BY_CATEGORY: dict[str, Callable[[Any, Any, str], bool]] = {
+    "bool": lambda a, e, compare: a == e,
+    "number": lambda a, e, compare: a == e,
+    "str": lambda a, e, compare: a == e,
+    "none": lambda a, e, compare: True,
     "list": _lists_equal,
-    "dict": _dicts_equal,
-    "other": lambda a, e: False,
+    "dict": lambda a, e, compare: _dicts_subset(a, e, compare) if compare == "subset" else _dicts_equal(a, e, compare),
+    "other": lambda a, e, compare: False,
 }
 
 
-def _deep_equal(actual: object, expected: object) -> bool:
+def _deep_equal(actual: object, expected: object, compare: str = "exact") -> bool:
     category = _category(actual)
     if category != _category(expected):
         return False
-    return _EQUALITY_BY_CATEGORY[category](actual, expected)
+    return _EQUALITY_BY_CATEGORY[category](actual, expected, compare)
 
 
 def _safe_json(value: object) -> str:
@@ -67,7 +75,7 @@ def _error_message(exc: BaseException) -> str:
     return str(exc)
 
 
-def _load_entry(source_path: str, entry_symbol: str) -> tuple[object, str | None]:
+def _load_entry(source_path: str, entry_symbol: str) -> tuple[Callable[..., object] | None, str | None]:
     sys.path.insert(0, str(Path(source_path).parent))
     module_globals: dict[str, object] = {"__name__": Path(source_path).stem, "__file__": source_path}
     try:
@@ -84,19 +92,19 @@ def _load_entry(source_path: str, entry_symbol: str) -> tuple[object, str | None
     return fn, None
 
 
-def _run_returns_probe(fn: object, probe: dict, number: int) -> dict:
+def _run_returns_probe(fn: Callable[..., object], probe: dict, number: int, compare: str) -> dict:
     try:
         actual = fn(*probe["args"])
     except Exception as exc:
         reason = f'probe {number}: expected {_safe_json(probe["returns"])}, got throw "{_error_message(exc)}"'
         return {"pass": False, "reason": reason}
-    if _deep_equal(actual, probe["returns"]):
+    if _deep_equal(actual, probe["returns"], compare):
         return {"pass": True}
     reason = f'probe {number}: expected {_safe_json(probe["returns"])}, got {_safe_json(actual)}'
     return {"pass": False, "reason": reason}
 
 
-def _run_throws_probe(fn: object, probe: dict, number: int) -> dict:
+def _run_throws_probe(fn: Callable[..., object], probe: dict, number: int) -> dict:
     try:
         actual = fn(*probe["args"])
     except Exception as exc:
@@ -109,20 +117,20 @@ def _run_throws_probe(fn: object, probe: dict, number: int) -> dict:
     return {"pass": False, "reason": reason}
 
 
-def _run_probe(fn: object, probe: dict, number: int) -> dict:
+def _run_probe(fn: Callable[..., object], probe: dict, number: int, compare: str) -> dict:
     if "throws" in probe:
         return _run_throws_probe(fn, probe, number)
-    return _run_returns_probe(fn, probe, number)
+    return _run_returns_probe(fn, probe, number, compare)
 
 
-def _run_all_probes(fn: object, probes: list[dict]) -> list[dict]:
-    return [_run_probe(fn, probe, i + 1) for i, probe in enumerate(probes)]
+def _run_all_probes(fn: Callable[..., object], probes: list[dict], compare: str) -> list[dict]:
+    return [_run_probe(fn, probe, i + 1, compare) for i, probe in enumerate(probes)]
 
 
 def _write_trace(tracer: trace.Trace, source_path: str, trace_out_path: str) -> None:
     counts = tracer.results().counts
     executed = sorted({line for (filename, line) in counts if filename == source_path})
-    executable = sorted(trace._find_executable_linenos(source_path))
+    executable = sorted(getattr(trace, "_find_executable_linenos")(source_path))
     with open(trace_out_path, "w", encoding="utf-8") as f:
         json.dump({"executed": executed, "executable": executable}, f)
 
@@ -136,18 +144,19 @@ def main() -> None:
     source_path = payload["sourcePath"]
     entry_symbol = payload["entrySymbol"]
     probes = payload["probes"]
+    compare = payload.get("compare", "exact")
 
     trace_out_path = environ.get("LIUBAI_PROBE_TRACE_OUT")
     tracer = trace.Trace(count=1, trace=0) if trace_out_path else None
     run = tracer.runfunc if tracer is not None else lambda f, *args: f(*args)
 
     fn, load_error = run(_load_entry, source_path, entry_symbol)
-    if load_error is not None:
+    if load_error is not None or fn is None:
         _print_sentinel({"loadError": load_error})
         return
 
-    results = run(_run_all_probes, fn, probes)
-    if tracer is not None:
+    results = run(_run_all_probes, fn, probes, compare)
+    if tracer is not None and trace_out_path is not None:
         _write_trace(tracer, source_path, trace_out_path)
 
     _print_sentinel({"results": results})

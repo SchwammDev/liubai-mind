@@ -15,10 +15,13 @@ interface ThrowsProbe {
 
 type ProbeSpec = ReturnsProbe | ThrowsProbe;
 
+type CompareMode = "exact" | "subset";
+
 interface ProbeRunnerInput {
   sourcePath: string;
   entrySymbol: string;
   probes: ProbeSpec[];
+  compare: CompareMode;
 }
 
 interface ProbeResultOk {
@@ -36,6 +39,26 @@ type EntryFn = (...args: unknown[]) => unknown;
 
 function isThrowsProbe(probe: ProbeSpec): probe is ThrowsProbe {
   return "throws" in probe;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isSubsetMatch(actual: unknown, expected: unknown): boolean {
+  if (Array.isArray(expected)) {
+    if (!Array.isArray(actual) || actual.length !== expected.length) return false;
+    return expected.every((expectedItem, i) => isSubsetMatch(actual[i], expectedItem));
+  }
+  if (isPlainObject(expected)) {
+    if (!isPlainObject(actual)) return false;
+    return Object.keys(expected).every((key) => isSubsetMatch(actual[key], expected[key]));
+  }
+  return isDeepStrictEqual(actual, expected);
+}
+
+function valuesMatch(actual: unknown, expected: unknown, compare: CompareMode): boolean {
+  return compare === "subset" ? isSubsetMatch(actual, expected) : isDeepStrictEqual(actual, expected);
 }
 
 function readStdin(): Promise<string> {
@@ -59,14 +82,14 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function runReturnsProbe(fn: EntryFn, probe: ReturnsProbe, number: number): ProbeResult {
+function runReturnsProbe(fn: EntryFn, probe: ReturnsProbe, number: number, compare: CompareMode): ProbeResult {
   let actual: unknown;
   try {
     actual = fn(...probe.args);
   } catch (err) {
     return { pass: false, reason: `probe ${number}: expected ${safeStringify(probe.returns)}, got throw "${errorMessage(err)}"` };
   }
-  if (isDeepStrictEqual(actual, probe.returns)) return { pass: true };
+  if (valuesMatch(actual, probe.returns, compare)) return { pass: true };
   return { pass: false, reason: `probe ${number}: expected ${safeStringify(probe.returns)}, got ${safeStringify(actual)}` };
 }
 
@@ -82,8 +105,8 @@ function runThrowsProbe(fn: EntryFn, probe: ThrowsProbe, number: number): ProbeR
   return { pass: false, reason: `probe ${number}: expected throw "${probe.throws}", got return ${safeStringify(actual)}` };
 }
 
-function runProbe(fn: EntryFn, probe: ProbeSpec, number: number): ProbeResult {
-  return isThrowsProbe(probe) ? runThrowsProbe(fn, probe, number) : runReturnsProbe(fn, probe, number);
+function runProbe(fn: EntryFn, probe: ProbeSpec, number: number, compare: CompareMode): ProbeResult {
+  return isThrowsProbe(probe) ? runThrowsProbe(fn, probe, number) : runReturnsProbe(fn, probe, number, compare);
 }
 
 function printSentinel(payload: unknown): void {
@@ -109,7 +132,7 @@ async function main(): Promise<void> {
   }
 
   const entryFn = fn as EntryFn;
-  const results = input.probes.map((probe, i) => runProbe(entryFn, probe, i + 1));
+  const results = input.probes.map((probe, i) => runProbe(entryFn, probe, i + 1, input.compare));
   printSentinel({ results });
 }
 

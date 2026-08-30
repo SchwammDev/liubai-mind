@@ -119,6 +119,62 @@ test("runProbes_times_out_a_hanging_source_as_failed", () => {
   assertFailedWithReason(outcome, /timed out after 1000ms/);
 });
 
+test("runProbes_subset_mode_accepts_an_extra_top_level_key", () => {
+  const source = "export function makeThing(): unknown {\n  return { a: 1, b: 2 };\n}\n";
+
+  const outcome = tsProbeOutcome("makeThing", source, [{ args: [], returns: { a: 1 } }], { compare: "subset" });
+
+  assertPassed(outcome);
+});
+
+test("runProbes_subset_mode_accepts_an_extra_nested_key", () => {
+  const source = "export function makeThing(): unknown {\n  return { outer: { a: 1, b: 2 } };\n}\n";
+
+  const outcome = tsProbeOutcome("makeThing", source, [{ args: [], returns: { outer: { a: 1 } } }], { compare: "subset" });
+
+  assertPassed(outcome);
+});
+
+test("runProbes_subset_mode_still_fails_on_a_changed_expected_value", () => {
+  const source = "export function makeThing(): unknown {\n  return { a: 2 };\n}\n";
+
+  const outcome = tsProbeOutcome("makeThing", source, [{ args: [], returns: { a: 1 } }], { compare: "subset" });
+
+  assertFailedWithReason(outcome, /expected .*"a":1.*, got .*"a":2/);
+});
+
+test("runProbes_subset_mode_still_fails_on_a_missing_expected_key", () => {
+  const source = "export function makeThing(): unknown {\n  return { a: 1 };\n}\n";
+
+  const outcome = tsProbeOutcome("makeThing", source, [{ args: [], returns: { a: 1, b: 2 } }], { compare: "subset" });
+
+  assertFailedWithReason(outcome, /expected .*"a":1,"b":2.*, got .*"a":1/);
+});
+
+test("runProbes_array_length_mismatch_fails_in_subset_mode", () => {
+  const source = "export function makeThing(): unknown {\n  return [1, 2];\n}\n";
+
+  const outcome = tsProbeOutcome("makeThing", source, [{ args: [], returns: [1, 2, 3] }], { compare: "subset" });
+
+  assertFailedWithReason(outcome, /expected .*\[1,2,3\].*, got .*\[1,2\]/);
+});
+
+test("runProbes_default_exact_mode_still_rejects_extra_keys", () => {
+  const source = "export function makeThing(): unknown {\n  return { a: 1, b: 2 };\n}\n";
+
+  const outcome = tsProbeOutcome("makeThing", source, [{ args: [], returns: { a: 1 } }]);
+
+  assertFailedWithReason(outcome, /expected .*"a":1.*, got .*"a":1,"b":2/);
+});
+
+test("runProbes_python_subset_mode_accepts_an_extra_dict_key", { skip: !venvPythonAvailable() }, () => {
+  const source = "def make_thing(_ignored=None):\n    return {'a': 1, 'b': 2}\n";
+
+  const outcome = pyProbeOutcome("make_thing", source, [{ args: [], returns: { a: 1 } }], { compare: "subset" });
+
+  assertPassed(outcome);
+});
+
 test("runProbes_python_passes_on_a_matching_return", { skip: !venvPythonAvailable() }, () => {
   const source = ["def double(n):", "    return n * 2", ""].join("\n");
 
