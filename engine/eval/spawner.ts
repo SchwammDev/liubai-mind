@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export interface RunSpec {
   cwd: string;
@@ -70,11 +70,37 @@ function bindVisibleAgentConfig(args: string[], piAgentDir: string): void {
   }
 }
 
+function resolvePythonInstallRoot(resolvedVenv: string): string | undefined {
+  try {
+    const resolvedPython = realpathSync(join(resolvedVenv, "bin", "python"));
+    return dirname(dirname(resolvedPython));
+  } catch {
+    return undefined;
+  }
+}
+
+function resolvedVenvBinds(repoRoot: string): string[] {
+  const venvPath = join(repoRoot, "engine", ".venv");
+  if (!existsSync(venvPath)) return [];
+
+  let resolvedVenv: string;
+  try {
+    resolvedVenv = realpathSync(venvPath);
+  } catch {
+    return [];
+  }
+  if (resolvedVenv === venvPath) return [];
+
+  const pythonInstallRoot = resolvePythonInstallRoot(resolvedVenv);
+  return pythonInstallRoot === undefined ? [resolvedVenv] : [resolvedVenv, pythonInstallRoot];
+}
+
 export function buildBwrapArgs({ repoRoot, homeDir, workDir }: BwrapMountPlan): string[] {
   const args = ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", "/home"];
 
   for (const relative of HOME_EXPOSED_PATHS) roBindIfExists(args, join(homeDir, relative));
   for (const relative of REPO_EXPOSED_PATHS) roBindIfExists(args, join(repoRoot, relative));
+  for (const path of resolvedVenvBinds(repoRoot)) roBindIfExists(args, path);
   tmpfsMaskIfExists(args, join(repoRoot, "engine", "eval"));
 
   const piAgentDir = join(homeDir, ".pi", "agent");

@@ -318,6 +318,51 @@ function homeWithUvToolchain(): string {
   return homeDir;
 }
 
+function foreignHomeWithInstalledVenv(): { installedVenv: string; pythonInstall: string } {
+  const foreignHome = mkdtempSync(join(tmpdir(), "bwrap-foreign-home-"));
+  const pythonInstall = join(foreignHome, ".local", "share", "uv", "python", "cpython-3.12.9");
+  mkdirSync(join(pythonInstall, "bin"), { recursive: true });
+  writeFileSync(join(pythonInstall, "bin", "python3.12"), "");
+  const installedVenv = join(foreignHome, ".pi", "agent", "engine", ".venv");
+  mkdirSync(join(installedVenv, "bin"), { recursive: true });
+  symlinkSync(join(pythonInstall, "bin", "python3.12"), join(installedVenv, "bin", "python"));
+  return { installedVenv, pythonInstall };
+}
+
+function repoWithVenvSymlinkedInto(installedVenv: string): string {
+  const plan = stubMountPlan();
+  withRepoDir(plan.repoRoot, "engine");
+  symlinkSync(installedVenv, join(plan.repoRoot, "engine", ".venv"));
+  return plan.repoRoot;
+}
+
+test("buildBwrapArgs_exposes_a_venv_symlinked_into_another_users_home", () => {
+  const { installedVenv, pythonInstall } = foreignHomeWithInstalledVenv();
+  const repoRoot = repoWithVenvSymlinkedInto(installedVenv);
+
+  const args = buildBwrapArgs(stubMountPlan({ repoRoot }));
+
+  assert.equal(args.includes(installedVenv), true, "resolved venv target is not bound into the sandbox");
+  assert.equal(args.includes(pythonInstall), true, "python installation the venv resolves to is not bound into the sandbox");
+});
+
+function foreignHomeWithVenvMissingPython(): string {
+  const foreignHome = mkdtempSync(join(tmpdir(), "bwrap-foreign-home-"));
+  const installedVenv = join(foreignHome, ".pi", "agent", "engine", ".venv");
+  mkdirSync(join(installedVenv, "bin"), { recursive: true });
+  symlinkSync(join(foreignHome, "no-such-interpreter"), join(installedVenv, "bin", "python"));
+  return installedVenv;
+}
+
+test("buildBwrapArgs_skips_the_python_install_bind_when_the_venvs_python_symlink_is_dangling", () => {
+  const installedVenv = foreignHomeWithVenvMissingPython();
+  const repoRoot = repoWithVenvSymlinkedInto(installedVenv);
+
+  const args = buildBwrapArgs(stubMountPlan({ repoRoot }));
+
+  assert.equal(args.includes(installedVenv), true, "venv itself should still be exposed");
+});
+
 test("buildBwrapArgs_exposes_the_uv_toolchain_the_python_venv_resolves_from", () => {
   const homeDir = homeWithUvToolchain();
 
