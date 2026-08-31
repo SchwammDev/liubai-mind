@@ -21,10 +21,16 @@ function validateEnv(env: unknown): { value: Record<string, string> } | { error:
   return { value: env };
 }
 
-function validatePhrasingPackField(phrasingPack: unknown): { value: string | undefined } | { error: string } {
-  if (phrasingPack === undefined) return { value: undefined };
-  if (typeof phrasingPack !== "string") return { error: "condition phrasingPack must be a string" };
-  return { value: phrasingPack };
+function validateOptionalString(value: unknown, label: string): { value: string | undefined } | { error: string } {
+  if (value === undefined) return { value: undefined };
+  if (typeof value !== "string") return { error: `condition ${label} must be a string` };
+  return { value };
+}
+
+function validateOptionalBoolean(value: unknown, label: string): { value: boolean | undefined } | { error: string } {
+  if (value === undefined) return { value: undefined };
+  if (typeof value !== "boolean") return { error: `condition ${label} must be a boolean` };
+  return { value };
 }
 
 function validateManifest(raw: unknown, filename: string): { manifest: ConditionManifest } | { error: string } {
@@ -32,7 +38,7 @@ function validateManifest(raw: unknown, filename: string): { manifest: Condition
     return { error: `${filename}: condition manifest must be a JSON object` };
   }
 
-  const { id, env, phrasingPack } = raw as Record<string, unknown>;
+  const { id, env, phrasingPack, expectedZeroFirings } = raw as Record<string, unknown>;
 
   const idResult = validateId(id);
   if ("error" in idResult) return { error: `${filename}: ${idResult.error}` };
@@ -40,14 +46,18 @@ function validateManifest(raw: unknown, filename: string): { manifest: Condition
   const envResult = validateEnv(env);
   if ("error" in envResult) return { error: `${filename}: ${envResult.error}` };
 
-  const packResult = validatePhrasingPackField(phrasingPack);
+  const packResult = validateOptionalString(phrasingPack, "phrasingPack");
   if ("error" in packResult) return { error: `${filename}: ${packResult.error}` };
+
+  const expectedZeroFiringsResult = validateOptionalBoolean(expectedZeroFirings, "expectedZeroFirings");
+  if ("error" in expectedZeroFiringsResult) return { error: `${filename}: ${expectedZeroFiringsResult.error}` };
 
   return {
     manifest: {
       id: idResult.value,
       env: envResult.value,
       ...(packResult.value !== undefined ? { phrasingPack: packResult.value } : {}),
+      ...(expectedZeroFiringsResult.value !== undefined ? { expectedZeroFirings: expectedZeroFiringsResult.value } : {}),
     },
   };
 }

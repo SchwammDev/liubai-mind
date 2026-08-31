@@ -255,6 +255,20 @@ function provenance(over: Partial<Provenance> = {}): Provenance {
   };
 }
 
+type Delivered = NonNullable<RawRow["delivered"]>;
+
+function deliveredStamp(over: Partial<Delivered> = {}): Delivered {
+  return { packHash: "a".repeat(64), liveRules: [], shadowRules: [], ...over };
+}
+
+function writeConditionsDir(conditions: Record<string, Partial<{ expectedZeroFirings: boolean }>>): string {
+  const dir = mkdtempSync(join(tmpdir(), "eval-score-conditions-"));
+  for (const [id, extra] of Object.entries(conditions)) {
+    writeFileSync(join(dir, `${id}.json`), JSON.stringify({ id, env: {}, ...extra }));
+  }
+  return dir;
+}
+
 function rawRow(conditionId: string, caseId: string, over: Partial<RawRow> = {}): RawRow {
   return {
     caseId,
@@ -1337,4 +1351,125 @@ test("runScore_fails_the_run_with_an_actionable_message_when_the_py_cc_backend_p
   const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, pythonBin: "/nonexistent/python" });
 
   assertScoreFailedBeforeWritingATable(result, runDir);
+});
+
+test("runScore_refuses_a_row_whose_delivered_pack_hash_does_not_match_the_claimed_pack_hash", async () => {
+  const conditionId = "delivery-mismatch";
+  const conditionsDir = writeConditionsDir({ [conditionId]: {} });
+  const row = rawRow(conditionId, "any-case", { delivered: deliveredStamp({ packHash: "b".repeat(64) }) });
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [row]);
+
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /\[not-delivered\]/);
+  assert.match(result.stdout, new RegExp(`${conditionId}/any-case#1`));
+  assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
+});
+
+test("runScore_refuses_a_run_where_some_rows_carry_a_delivery_stamp_and_others_dont", async () => {
+  const conditionId = "mixed-stamp";
+  const conditionsDir = writeConditionsDir({ [conditionId]: {} });
+  const stamped = rawRow(conditionId, "case-a", { rep: 1, delivered: deliveredStamp() });
+  const unstamped = rawRow(conditionId, "case-b", { rep: 2 });
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [stamped, unstamped]);
+
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /\[missing-stamp\]/);
+  assert.match(result.stdout, new RegExp(`${conditionId}/case-b#2`));
+  assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
+});
+
+test("runScore_warns_and_scores_normally_when_no_row_in_the_run_carries_a_delivery_stamp", async () => {
+  const rows = tsOnlyRows(readFixtureRows());
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, rows);
+
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /delivery validity is unverifiable/);
+  assert.ok(existsSync(join(runDir, "summary.jsonl")));
+});
+
+test("runScore_refuses_an_arm_whose_delivered_live_rules_never_fired", async () => {
+  const conditionId = "live-silent";
+  const conditionsDir = writeConditionsDir({ [conditionId]: {} });
+  const row = rawRow(conditionId, "case-a", { delivered: deliveredStamp({ liveRules: ["cc"] }), railFirings: railFirings() });
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [row]);
+
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /\[live-rules-silent\]/);
+  assert.match(result.stdout, new RegExp(conditionId));
+  assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
+});
+
+test("runScore_treats_a_silent_arm_as_valid_when_its_condition_declares_expectedZeroFirings", async () => {
+  const conditionId = "rails-off-expected";
+  const conditionsDir = writeConditionsDir({ [conditionId]: { expectedZeroFirings: true } });
+  const packHash = "a".repeat(64);
+  const row = tsFlagParserRow(
+    {},
+    {
+      conditionId,
+      provenance: provenance({ conditionId, phrasingPackHash: packHash }),
+      delivered: deliveredStamp({ packHash, liveRules: ["cc"] }),
+      railFirings: railFirings(),
+    },
+  );
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [row]);
+
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+
+  assert.equal(result.status, 0);
+  assert.ok(existsSync(join(runDir, "summary.jsonl")));
+});
+
+test("runScore_refuses_an_arm_whose_delivered_shadow_rules_never_fired", async () => {
+  const conditionId = "shadow-silent";
+  const conditionsDir = writeConditionsDir({ [conditionId]: {} });
+  const row = rawRow(conditionId, "case-a", { delivered: deliveredStamp({ shadowRules: ["cc"] }), shadowFirings: railFirings() });
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [row]);
+
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /\[shadow-rules-silent\]/);
+  assert.match(result.stdout, new RegExp(conditionId));
+  assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
+});
+
+test("runScore_writes_a_summary_and_prints_a_validity_block_for_a_fully_delivered_run", async () => {
+  const conditionId = "rails-verified";
+  const conditionsDir = writeConditionsDir({ [conditionId]: {} });
+  const packHash = "a".repeat(64);
+  const row = tsFlagParserRow(
+    {},
+    {
+      conditionId,
+      provenance: provenance({ conditionId, phrasingPackHash: packHash }),
+      delivered: deliveredStamp({ packHash, liveRules: ["cc"] }),
+      railFirings: railFirings({ cc: 2 }),
+    },
+  );
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [row]);
+
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, new RegExp(`${conditionId}: reps=1 liveFirings=2 shadowFirings=0 delivered=ok`));
+  const blockIndex = result.stdout.indexOf("delivery validity");
+  const tableIndex = result.stdout.indexOf("| condition |");
+  assert.ok(blockIndex >= 0 && tableIndex > blockIndex);
+  assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });

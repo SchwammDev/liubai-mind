@@ -89,3 +89,33 @@ test("loadConditions_accepts_a_condition_with_a_valid_phrasing_pack", () => {
   assertLoaded(result);
   assert.equal(result[0]?.phrasingPack, "packs/pack.json");
 });
+
+test("loadConditions_reads_expectedZeroFirings_true_from_its_manifest", () => {
+  const dir = tempConditionsDir();
+  writeCondition(dir, "zero.json", { id: "zero-firings", env: {}, expectedZeroFirings: true });
+
+  const result = loadConditions(dir);
+
+  assertLoaded(result);
+  assert.equal(result[0]?.expectedZeroFirings, true);
+});
+
+test("loadConditions_leaves_expectedZeroFirings_undefined_when_the_manifest_omits_it", () => {
+  const dir = tempConditionsDir();
+  writeCondition(dir, "plain.json", { id: "plain", env: {} });
+
+  const result = loadConditions(dir);
+
+  assertLoaded(result);
+  assert.equal(result[0]?.expectedZeroFirings, undefined);
+});
+
+test("loadConditions_rejects_a_non_boolean_expectedZeroFirings", () => {
+  const dir = tempConditionsDir();
+  writeCondition(dir, "bad.json", { id: "bad-zero", env: {}, expectedZeroFirings: "true" });
+
+  const result = loadConditions(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /expectedZeroFirings must be a boolean/);
+});
