@@ -44,19 +44,43 @@ function collectStrings(value: unknown, out: string[]): void {
   }
 }
 
-function toolCallMentionsHarnessPath(toolCall: ToolCallPart, harnessPathPrefixes: string[]): boolean {
+function toolCallStrings(toolCall: ToolCallPart): string[] {
   const strings: string[] = [];
   collectStrings(toolCall.arguments, strings);
-  return strings.some((s) => harnessPathPrefixes.some((prefix) => s.includes(prefix)));
+  return strings;
+}
+
+function transcriptToolCallStrings(transcriptJsonl: string): string[] {
+  const lines = transcriptJsonl.split("\n").filter((line) => line.trim().length > 0);
+
+  const strings: string[] = [];
+  for (const line of lines) {
+    for (const toolCall of assistantToolCallsOf(line)) {
+      strings.push(...toolCallStrings(toolCall));
+    }
+  }
+  return strings;
+}
+
+function matchesAnyPrefix(strings: string[], prefixes: string[]): boolean {
+  return strings.some((s) => prefixes.some((prefix) => s.includes(prefix)));
 }
 
 export function transcriptIsContaminated(transcriptJsonl: string, harnessPathPrefixes: string[]): boolean {
-  const lines = transcriptJsonl.split("\n").filter((line) => line.trim().length > 0);
+  return matchesAnyPrefix(transcriptToolCallStrings(transcriptJsonl), harnessPathPrefixes);
+}
 
-  for (const line of lines) {
-    for (const toolCall of assistantToolCallsOf(line)) {
-      if (toolCallMentionsHarnessPath(toolCall, harnessPathPrefixes)) return true;
-    }
-  }
-  return false;
+export interface TranscriptClassification {
+  contaminated: boolean;
+  consultedRail: boolean;
+}
+
+export function classifyTranscript(
+  transcriptJsonl: string,
+  opts: { answerKeyPrefixes: string[]; railPrefixes: string[] },
+): TranscriptClassification {
+  const strings = transcriptToolCallStrings(transcriptJsonl);
+  const contaminated = matchesAnyPrefix(strings, opts.answerKeyPrefixes);
+  const consultedRail = !contaminated && matchesAnyPrefix(strings, opts.railPrefixes);
+  return { contaminated, consultedRail };
 }

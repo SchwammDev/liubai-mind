@@ -15,12 +15,13 @@ import { typescriptExtractor } from "../extract-typescript.ts";
 import { pythonExtractor } from "../extract-python.ts";
 import { probePyCcBackend } from "./judge-env.ts";
 import { gitSha } from "./provenance.ts";
-import { transcriptIsContaminated } from "./contamination.ts";
+import { classifyTranscript } from "./contamination.ts";
 
 export interface JudgedRow {
   row: RawRow;
   judge: JudgeResult;
   contaminated: boolean;
+  consultedRail: boolean;
 }
 
 export interface JudgeEnv {
@@ -37,6 +38,7 @@ export interface SummaryRow {
   total: number;
   withCreatedFiles: number;
   contaminated: number;
+  railConsults: number;
   meanDpReduction: number | null;
   meanDurationMs: number | null;
   meanTurns: number | null;
@@ -57,7 +59,8 @@ const ERROR_STATUS = 1;
 const OK_STATUS = 0;
 const FALLBACK_AGENT_ERROR = "agent error";
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
-const HARNESS_PATH_PREFIXES = [REPO_ROOT, "/.pi/", "~/.pi"];
+const ANSWER_KEY_PREFIXES = [join(REPO_ROOT, "engine", "eval"), ".pi/agent/engine/eval"];
+const RAIL_PATH_PREFIXES = [REPO_ROOT, "/.pi/", "~/.pi"];
 
 function silentHandlerLang(lang: Lang): "typescript" | "python" {
   if (lang === "typescript") return "typescript";
@@ -208,7 +211,8 @@ function runCaseProbes(kase: CaseManifest, afterSource: string, files: Record<st
 
 export interface ContaminationCheck {
   runDir: string;
-  harnessPathPrefixes: string[];
+  answerKeyPrefixes: string[];
+  railPrefixes: string[];
 }
 
 function transcriptPathFor(runDir: string, row: RawRow): string {
@@ -223,19 +227,26 @@ function readTranscriptIfPresent(path: string): string | undefined {
   }
 }
 
-function rowIsContaminated(row: RawRow, contamination: ContaminationCheck | undefined): boolean {
-  if (contamination === undefined) return false;
+interface RowContamination {
+  contaminated: boolean;
+  consultedRail: boolean;
+}
+
+const ROW_NOT_CONTAMINATED: RowContamination = { contaminated: false, consultedRail: false };
+
+function classifyRow(row: RawRow, contamination: ContaminationCheck | undefined): RowContamination {
+  if (contamination === undefined) return ROW_NOT_CONTAMINATED;
 
   const transcript = readTranscriptIfPresent(transcriptPathFor(contamination.runDir, row));
-  if (transcript === undefined) return false;
+  if (transcript === undefined) return ROW_NOT_CONTAMINATED;
 
-  return transcriptIsContaminated(transcript, contamination.harnessPathPrefixes);
+  return classifyTranscript(transcript, { answerKeyPrefixes: contamination.answerKeyPrefixes, railPrefixes: contamination.railPrefixes });
 }
 
 async function judgeRow(row: RawRow, cases: CaseManifest[], corpusDir: string, contamination: ContaminationCheck | undefined): Promise<JudgedRow> {
-  const contaminated = rowIsContaminated(row, contamination);
-  if (row.timedOut === true) return { row, judge: timedOutJudgeResult(), contaminated };
-  if (row.agentError !== undefined) return { row, judge: erroredJudgeResult(), contaminated };
+  const { contaminated, consultedRail } = classifyRow(row, contamination);
+  if (row.timedOut === true) return { row, judge: timedOutJudgeResult(), contaminated, consultedRail };
+  if (row.agentError !== undefined) return { row, judge: erroredJudgeResult(), contaminated, consultedRail };
 
   const kase = findCase(cases, row.caseId);
   const beforeSource = readBeforeSource(corpusDir, kase);
@@ -252,7 +263,7 @@ async function judgeRow(row: RawRow, cases: CaseManifest[], corpusDir: string, c
   const probesPassed = shouldRunProbes(entryChanged, after, afterSource) ? runCaseProbes(kase, afterSource, row.files) : undefined;
 
   const judge = buildJudgeResult(before, after, entryChanged, probesPassed, createdFiles, scan.referenced, kase.genuineDpMax);
-  return { row, judge, contaminated };
+  return { row, judge, contaminated, consultedRail };
 }
 
 export async function judgeRows(rows: RawRow[], corpusDir: string, contamination?: ContaminationCheck): Promise<JudgedRow[]> {
@@ -284,6 +295,7 @@ function newSummaryRow(conditionId: string, caseId: string | null, tier: Tier | 
     total: 0,
     withCreatedFiles: 0,
     contaminated: 0,
+    railConsults: 0,
     meanDpReduction: null,
     meanDurationMs: null,
     meanTurns: null,
@@ -296,12 +308,13 @@ function newSummaryRow(conditionId: string, caseId: string | null, tier: Tier | 
   };
 }
 
-function addJudgeToRow(bucket: SummaryRow, judge: JudgeResult, contaminated: boolean): void {
+function addJudgeToRow(bucket: SummaryRow, judge: JudgeResult, contaminated: boolean, consultedRail: boolean): void {
   bucket.counts[judge.verdict] += 1;
   bucket.total += 1;
   if (judge.gamedReason !== undefined) bucket.gamedReasons[judge.gamedReason] += 1;
   if (judge.createdFiles.length > 0) bucket.withCreatedFiles += 1;
   if (contaminated) bucket.contaminated += 1;
+  if (consultedRail) bucket.railConsults += 1;
 }
 
 function detailKey(conditionId: string, caseId: string): string {
@@ -400,8 +413,8 @@ function newSummaryBucket(conditionId: string, caseId: string | null, tier: Tier
   return { row: newSummaryRow(conditionId, caseId, tier, env), dpReduction: newDpReductionAccumulator(), cost: newCostAccumulator() };
 }
 
-function addJudgeToBucket(bucket: SummaryBucket, row: RawRow, judge: JudgeResult, contaminated: boolean): void {
-  addJudgeToRow(bucket.row, judge, contaminated);
+function addJudgeToBucket(bucket: SummaryBucket, row: RawRow, judge: JudgeResult, contaminated: boolean, consultedRail: boolean): void {
+  addJudgeToRow(bucket.row, judge, contaminated, consultedRail);
   addDpReduction(bucket.dpReduction, judge);
   addCostMetrics(bucket.cost, row);
 }
@@ -430,19 +443,20 @@ function upsertBucket(
   row: RawRow,
   judge: JudgeResult,
   contaminated: boolean,
+  consultedRail: boolean,
 ): void {
   const bucket = buckets.get(key) ?? newSummaryBucket(conditionId, caseId, tier, env);
-  addJudgeToBucket(bucket, row, judge, contaminated);
+  addJudgeToBucket(bucket, row, judge, contaminated, consultedRail);
   buckets.set(key, bucket);
 }
 
 function accumulateRow(buckets: AggregationBuckets, judgedRow: JudgedRow, tier: Tier | null, env: JudgeEnv): void {
-  const { row, judge, contaminated } = judgedRow;
-  upsertBucket(buckets.overall, row.conditionId, row.conditionId, null, null, env, row, judge, contaminated);
+  const { row, judge, contaminated, consultedRail } = judgedRow;
+  upsertBucket(buckets.overall, row.conditionId, row.conditionId, null, null, env, row, judge, contaminated, consultedRail);
   if (tier !== null) {
-    upsertBucket(buckets.tier, detailKey(row.conditionId, tier), row.conditionId, null, tier, env, row, judge, contaminated);
+    upsertBucket(buckets.tier, detailKey(row.conditionId, tier), row.conditionId, null, tier, env, row, judge, contaminated, consultedRail);
   }
-  upsertBucket(buckets.detail, detailKey(row.conditionId, row.caseId), row.conditionId, row.caseId, tier, env, row, judge, contaminated);
+  upsertBucket(buckets.detail, detailKey(row.conditionId, row.caseId), row.conditionId, row.caseId, tier, env, row, judge, contaminated, consultedRail);
 }
 
 export function aggregate(judged: JudgedRow[], env: JudgeEnv, tierByCaseId: Map<string, Tier> = new Map()): SummaryRow[] {
@@ -488,14 +502,14 @@ function conditionCell(row: SummaryRow): string {
 
 function markdownRow(row: SummaryRow): string {
   const c = row.counts;
-  return `| ${conditionCell(row)} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["bar-missed"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${c["timed-out"]} | ${row.withCreatedFiles} | ${row.contaminated} | ${formatPercent(genuineRate(row))} | ${formatMeanDpReduction(row.meanDpReduction)} | ${formatMeanMs(row.meanDurationMs)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanTokensIn)} | ${formatMean(row.meanTokensOut)} | ${formatNudgesPerRep(row.meanRailFirings)} |`;
+  return `| ${conditionCell(row)} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["bar-missed"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${c["timed-out"]} | ${row.withCreatedFiles} | ${row.contaminated} | ${row.railConsults} | ${formatPercent(genuineRate(row))} | ${formatMeanDpReduction(row.meanDpReduction)} | ${formatMeanMs(row.meanDurationMs)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanTokensIn)} | ${formatMean(row.meanTokensOut)} | ${formatNudgesPerRep(row.meanRailFirings)} |`;
 }
 
 export function formatMarkdown(summary: SummaryRow[]): string {
   const rollups = summary.filter((r) => r.caseId === null);
   const header =
-    "| condition | n | genuine-fix | gamed | bar-missed | untouched | broken | behavior-broken | errored | timed-out | created-files | contaminated | genuine % | mean dp cut | mean ms | mean turns | tokens in | tokens out | nudges/rep |";
-  const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
+    "| condition | n | genuine-fix | gamed | bar-missed | untouched | broken | behavior-broken | errored | timed-out | created-files | contaminated | rail-consults | genuine % | mean dp cut | mean ms | mean turns | tokens in | tokens out | nudges/rep |";
+  const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
   return [header, divider, ...rollups.map(markdownRow)].join("\n");
 }
 
@@ -562,6 +576,7 @@ export interface JudgedJsonlRow {
   verdict: Verdict;
   gamedReason?: GamedReason;
   contaminated: boolean;
+  consultedRail: boolean;
   dpBefore: number;
   dpAfter: number;
   probesPassed?: boolean;
@@ -574,7 +589,7 @@ export interface JudgedJsonlRow {
 }
 
 export function toJudgedJsonlRow(judgedRow: JudgedRow): JudgedJsonlRow {
-  const { row, judge, contaminated } = judgedRow;
+  const { row, judge, contaminated, consultedRail } = judgedRow;
   return {
     caseId: row.caseId,
     conditionId: row.conditionId,
@@ -582,6 +597,7 @@ export function toJudgedJsonlRow(judgedRow: JudgedRow): JudgedJsonlRow {
     verdict: judge.verdict,
     ...(judge.gamedReason !== undefined ? { gamedReason: judge.gamedReason } : {}),
     contaminated,
+    consultedRail,
     dpBefore: judge.before.decisionPoints,
     dpAfter: judge.after.decisionPoints,
     ...(judge.probesPassed !== undefined ? { probesPassed: judge.probesPassed } : {}),
@@ -720,7 +736,7 @@ export async function runScore(opts: {
   const judgeEnv = resolveJudgeEnv(parsedRaw.rows, opts.corpusDir, opts.repoRoot, opts.pythonBin);
   if ("error" in judgeEnv) return { status: ERROR_STATUS, stdout: judgeEnv.error };
 
-  const contamination: ContaminationCheck = { runDir: opts.runDir, harnessPathPrefixes: HARNESS_PATH_PREFIXES };
+  const contamination: ContaminationCheck = { runDir: opts.runDir, answerKeyPrefixes: ANSWER_KEY_PREFIXES, railPrefixes: RAIL_PATH_PREFIXES };
   const judgeResult = await judgeAndSummarize(parsedRaw.rows, opts.corpusDir, judgeEnv.env, contamination);
   if ("error" in judgeResult) return { status: ERROR_STATUS, stdout: judgeResult.error };
 
