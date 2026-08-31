@@ -4,7 +4,7 @@ import { existsSync, renameSync } from "node:fs";
 import { join } from "node:path";
 
 import { parseShadowRules, register } from "./index.ts";
-import type { ShadowLogEntry } from "./index.ts";
+import type { RailsDeps, ShadowLogEntry } from "./index.ts";
 import type { DedupLog } from "./dedup.ts";
 
 const MODULE_FILE = "/tmp/liubai-rails/subject.py";
@@ -44,7 +44,7 @@ function notifyingCtx(notices: string[]) {
 
 const railFailures = (logs: LogEntry[]) => logs.filter((entry) => entry.kind === "rail-error");
 
-function railsSession(ctx?: unknown, files = new Map<string, string>()) {
+function railsSession(ctx?: unknown, files = new Map<string, string>(), overrides: RailsDeps = {}) {
   const { pi, handlers } = fakePi();
   const logs: LogEntry[] = [];
   const shadowLogs: ShadowLogEntry[] = [];
@@ -52,6 +52,7 @@ function railsSession(ctx?: unknown, files = new Map<string, string>()) {
     logDedup: (entry) => logs.push(entry),
     logShadow: (entry) => shadowLogs.push(entry),
     readTargetFile: (path: string) => Promise.resolve(files.get(path) ?? ""),
+    ...overrides,
   });
 
   async function apply(
@@ -311,4 +312,39 @@ test("an interactive session without LIUBAI_EVAL keeps the bash tool's session e
   const bashTool = registeredBashTool();
 
   assert.notEqual(bashTool.promptGuidelines, undefined);
+});
+
+function abortSpy() {
+  const messages: string[] = [];
+  return { abort: (message: string) => messages.push(message), messages };
+}
+
+function assertAbortedNamingRailAndReason(messages: string[], rail: string): void {
+  assert.equal(messages.length, 1);
+  assert.match(messages[0] ?? "", new RegExp(`^\\[rail-abort\\] ${rail} failed under eval: .+`));
+}
+
+function assertFailedOpenWithoutAborting(outcome: ToolOutcome, messages: string[], logs: LogEntry[]): void {
+  assert.equal(outcome.blocked, false);
+  assert.deepEqual(messages, []);
+  assert.deepEqual(railFailures(logs).map((entry) => entry.key), ["extract:python"]);
+}
+
+test("an extractor failure under LIUBAI_EVAL kills the rep through the abort seam instead of degrading the rail", async () => {
+  const { abort, messages } = abortSpy();
+  const session = railsSession(undefined, new Map(), { abort });
+
+  await withLiubaiEval(() => withoutPython(() => session.write("eval-abort", MODULE_FILE, "x = 1\n")));
+
+  assertAbortedNamingRailAndReason(messages, "extract:python");
+  assert.deepEqual(railFailures(session.logs), []);
+});
+
+test("an extractor failure without LIUBAI_EVAL leaves the abort seam untouched and keeps failing open", async () => {
+  const { abort, messages } = abortSpy();
+  const session = railsSession(undefined, new Map(), { abort });
+
+  const outcome = await withoutPython(() => session.write("no-eval-abort", MODULE_FILE, "x = 1\n"));
+
+  assertFailedOpenWithoutAborting(outcome, messages, session.logs);
 });

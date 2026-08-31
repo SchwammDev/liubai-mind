@@ -32,6 +32,7 @@ import { cleanProse } from "./prose-gate.ts";
 import { injectWebSearch, loadWebSearchConfig, LIUBAI_CONFIG } from "./web-search.ts";
 import { analyze } from "../../engine/analyze.ts";
 import type { RuleName } from "../../engine/contract.ts";
+import { EVAL_ABORT_EXIT_CODE } from "../../engine/contract.ts";
 import { defaultEnv } from "../../engine/env.ts";
 import { detectLang } from "../../engine/lang.ts";
 import { formatBlockReason } from "../../engine/messages.ts";
@@ -127,7 +128,13 @@ export type RailsDeps = {
   readTargetFile?: (path: string) => Promise<string>;
   logDedup?: DedupLog;
   logShadow?: ShadowLog;
+  abort?: (message: string) => void;
 };
+
+function abortProcess(message: string): void {
+  process.stderr.write(message + "\n");
+  process.exit(EVAL_ABORT_EXIT_CODE);
+}
 
 export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
   const pendingNudges = new Map<string, string[]>();
@@ -142,6 +149,7 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
   const readTargetFile = deps?.readTargetFile ?? createTargetReader(cwd);
   const logDedup = deps?.logDedup ?? createFileLog();
   const logShadow = deps?.logShadow ?? createShadowLog(cwd);
+  const abort = deps?.abort ?? abortProcess;
 
   pi.registerTool(
     withBashDedup(bashTool, {
@@ -214,6 +222,10 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
   // be noise, and the agent can do nothing with the news either way.
   let railFailureNotified = false;
   const reportRailFailure = (rail: string, tool: string, reason: string, ctx?: ExtensionContext) => {
+    if (process.env.LIUBAI_EVAL) {
+      abort(`[rail-abort] ${rail} failed under eval: ${reason}`);
+      return;
+    }
     logDedup({ kind: "rail-error", tool, key: rail, action: reason });
     if (!ctx?.hasUI || railFailureNotified) return;
     railFailureNotified = true;

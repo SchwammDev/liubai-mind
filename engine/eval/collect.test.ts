@@ -457,10 +457,34 @@ test("detectAgentError_reports_a_crash_that_exited_nonzero_before_any_assistant_
   assert.equal(agentError, "agent exited 1 before any assistant response");
 });
 
-test("detectAgentError_does_not_label_a_nonzero_exit_that_still_produced_assistant_responses", () => {
+test("detectAgentError_labels_a_nonzero_exit_that_produced_assistant_responses", () => {
   const stdoutJsonl = messageEndLine("stop");
 
   const agentError = detectAgentError(stdoutJsonl, 1);
+
+  assert.match(agentError ?? "", /agent exited 1 after a partial run/);
+});
+
+test("detectAgentError_flags_exit_17_with_assistant_responses_as_rail_abort", () => {
+  const stdoutJsonl = messageEndLine("stop");
+
+  const agentError = detectAgentError(stdoutJsonl, 17);
+
+  assert.match(agentError ?? "", /rail aborted.*exit 17/);
+});
+
+test("detectAgentError_flags_other_nonzero_exit_codes_with_assistant_responses", () => {
+  const stdoutJsonl = messageEndLine("stop");
+
+  const agentError = detectAgentError(stdoutJsonl, 3);
+
+  assert.match(agentError ?? "", /agent exited 3 after a partial run/);
+});
+
+test("detectAgentError_still_returns_undefined_for_exit_0_with_assistant_responses_and_clean_stop", () => {
+  const stdoutJsonl = messageEndLine("stop");
+
+  const agentError = detectAgentError(stdoutJsonl, 0);
 
   assert.equal(agentError, undefined);
 });

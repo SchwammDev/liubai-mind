@@ -1,6 +1,8 @@
 export type Lang = "python" | "typescript" | "cpp";
 export type Severity = "block" | "nudge";
 
+export const EVAL_ABORT_EXIT_CODE = 17;
+
 export const RULE = {
   cc: "cc",
   ccDelta: "cc-delta",
