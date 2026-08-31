@@ -1,0 +1,5 @@
+{
+  "id": "cc-delta-prompt",
+  "delivery": "prompt",
+  "env": { "LIUBAI_RAILS_OFF": "1" }
+}
