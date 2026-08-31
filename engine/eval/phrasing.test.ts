@@ -2,8 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
-import { packHash, validatePack } from "./phrasing.ts";
+import { validatePack } from "./phrasing.ts";
 import type { ValidPack } from "./phrasing.ts";
+import { packHash } from "../contract.ts";
 
 function assertAccepted(result: ReturnType<typeof validatePack>): asserts result is { pack: ValidPack } {
   assert.ok("pack" in result, `expected acceptance, got: ${"error" in result ? result.error : ""}`);

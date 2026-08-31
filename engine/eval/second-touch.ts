@@ -14,6 +14,7 @@ import {
   loadError,
   loadExistingKeys,
   packAbsolutePath,
+  readDelivered,
   readPackContent,
   runItemsConcurrently,
   snapshotWorkDir,
@@ -203,8 +204,9 @@ function buildSecondTouchRow(
   outcome: RunOutcome,
   durationMs: number,
   snapshot: WorkDirSnapshot,
+  delivered: RawRow["delivered"],
 ): RawRow {
-  const core = buildRawRowCore(ctx, item.condition.id, packContent, outcome, durationMs, snapshot);
+  const core = buildRawRowCore(ctx, item.condition.id, packContent, outcome, durationMs, snapshot, undefined, delivered);
   return {
     caseId: item.kase.id,
     conditionId: item.condition.id,
@@ -234,7 +236,8 @@ async function runSecondTouchItem(ctx: SecondTouchContext, item: SecondTouchItem
   try {
     const { outcome, durationMs } = await spawnForItem(ctx, item.kase.extension!.task, workDir, env);
     const snapshot = snapshotWorkDir(workDir, plan);
-    const row = buildSecondTouchRow(ctx, item, packContent, outcome, durationMs, snapshot);
+    const delivered = readDelivered(workDir);
+    const row = buildSecondTouchRow(ctx, item, packContent, outcome, durationMs, snapshot, delivered);
     return { row, stdoutJsonl: outcome.stdoutJsonl };
   } catch (err) {
     return { failure: secondTouchFailureMessage(item, err) };

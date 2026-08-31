@@ -4,11 +4,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, appen
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { runCollect, detectAgentError, countTurns, sumTokenUsage, countRailFirings, countShadowFirings } from "./collect.ts";
+import { runCollect, detectAgentError, countTurns, sumTokenUsage, countRailFirings, countShadowFirings, readDelivered } from "./collect.ts";
 import type { CollectOpts } from "./collect.ts";
 import type { RunSpec, RunOutcome, PiSpawner } from "./spawner.ts";
 import { gitSha } from "./provenance.ts";
-import { packHash } from "./phrasing.ts";
+import { packHash } from "../contract.ts";
 import { SNAPSHOT_FILE_CAP_BYTES } from "./snapshot.ts";
 import type { RawRow, Tier } from "./eval-contract.ts";
 
@@ -691,6 +691,57 @@ test("runCollect_omits_shadowFirings_from_the_raw_row_when_no_shadow_log_was_wri
   await runCollect(opts);
 
   assert.equal(firstRow(opts.runDir).shadowFirings, undefined);
+});
+
+function deliveredStampSpawner(delivered: unknown): PiSpawner {
+  return async (spec) => {
+    const liubaiDir = join(spec.cwd, ".liubai");
+    mkdirSync(liubaiDir, { recursive: true });
+    writeFileSync(join(liubaiDir, "delivered.json"), JSON.stringify(delivered));
+    return { exitCode: 0, stdoutJsonl: "", timedOut: false };
+  };
+}
+
+test("readDelivered_parses_the_workdirs_delivered_stamp", () => {
+  const workDir = tempDir("eval-delivered-");
+  mkdirSync(join(workDir, ".liubai"), { recursive: true });
+  const delivered = { packHash: "abc123", liveRules: ["cc"], shadowRules: [] };
+  writeFileSync(join(workDir, ".liubai", "delivered.json"), JSON.stringify(delivered));
+
+  assert.deepEqual(readDelivered(workDir), delivered);
+});
+
+test("readDelivered_is_undefined_when_no_stamp_was_written", () => {
+  const workDir = tempDir("eval-delivered-");
+
+  assert.equal(readDelivered(workDir), undefined);
+});
+
+test("readDelivered_is_undefined_when_the_stamp_is_unparseable_json", () => {
+  const workDir = tempDir("eval-delivered-");
+  mkdirSync(join(workDir, ".liubai"), { recursive: true });
+  writeFileSync(join(workDir, ".liubai", "delivered.json"), "{ not json");
+
+  assert.equal(readDelivered(workDir), undefined);
+});
+
+test("runCollect_stamps_delivered_from_the_workdirs_delivered_json_onto_the_raw_row", async () => {
+  const delivered = { packHash: null, liveRules: ["cc", "cc-delta"], shadowRules: [] };
+  const spawner = deliveredStampSpawner(delivered);
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+
+  await runCollect(opts);
+
+  assert.deepEqual(firstRow(opts.runDir).delivered, delivered);
+});
+
+test("runCollect_omits_delivered_from_the_raw_row_when_no_delivered_stamp_was_written", async () => {
+  const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+
+  await runCollect(opts);
+
+  assert.equal(firstRow(opts.runDir).delivered, undefined);
 });
 
 test("runCollect_stamps_agentError_into_the_raw_row_when_stdout_reports_a_terminal_retry_failure", async () => {

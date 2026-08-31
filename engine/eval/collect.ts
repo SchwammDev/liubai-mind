@@ -359,6 +359,16 @@ function readShadowFirings(workDir: string): Record<RuleName, number> | undefine
   return countShadowFirings(readFileSync(shadowLogPath, "utf8"));
 }
 
+export function readDelivered(workDir: string): RawRow["delivered"] {
+  const deliveredPath = join(workDir, ".liubai", "delivered.json");
+  if (!existsSync(deliveredPath)) return undefined;
+  try {
+    return JSON.parse(readFileSync(deliveredPath, "utf8")) as RawRow["delivered"];
+  } catch {
+    return undefined;
+  }
+}
+
 export function buildRawRowCore(
   ctx: CollectContext,
   conditionId: string,
@@ -367,6 +377,7 @@ export function buildRawRowCore(
   durationMs: number,
   snapshot: WorkDirSnapshot,
   shadowFirings?: Record<RuleName, number>,
+  delivered?: RawRow["delivered"],
 ): Omit<RawRow, "caseId" | "conditionId" | "rep"> {
   const packBytes = packContent === undefined ? null : packContent;
   const provenance = buildProvenance({
@@ -393,6 +404,7 @@ export function buildRawRowCore(
     cacheReadTokens: tokenUsage.cacheReadTokens,
     railFirings: countRailFirings(outcome.stdoutJsonl),
     ...(shadowFirings !== undefined ? { shadowFirings } : {}),
+    ...(delivered !== undefined ? { delivered } : {}),
     ...(agentError !== undefined ? { agentError } : {}),
   };
 }
@@ -405,12 +417,13 @@ function buildRawRow(
   durationMs: number,
   snapshot: WorkDirSnapshot,
   shadowFirings: Record<RuleName, number> | undefined,
+  delivered: RawRow["delivered"],
 ): RawRow {
   return {
     caseId: item.kase.id,
     conditionId: item.condition.id,
     rep: item.rep,
-    ...buildRawRowCore(ctx, item.condition.id, packContent, outcome, durationMs, snapshot, shadowFirings),
+    ...buildRawRowCore(ctx, item.condition.id, packContent, outcome, durationMs, snapshot, shadowFirings, delivered),
   };
 }
 
@@ -425,7 +438,8 @@ async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult>
     const { outcome, durationMs } = await spawnForItem(ctx, item.kase.task, workDir, env);
     const snapshot = snapshotWorkDir(workDir, plan);
     const shadowFirings = readShadowFirings(workDir);
-    const row = buildRawRow(ctx, item, packContent, outcome, durationMs, snapshot, shadowFirings);
+    const delivered = readDelivered(workDir);
+    const row = buildRawRow(ctx, item, packContent, outcome, durationMs, snapshot, shadowFirings, delivered);
     return { row, stdoutJsonl: outcome.stdoutJsonl };
   } catch (err) {
     return { failure: failureMessage(item, err) };
