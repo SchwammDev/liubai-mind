@@ -9,6 +9,8 @@ import { decisionPoints, classifyVerdict } from "./judge.ts";
 import { countSilentHandlers } from "./silent-handlers.ts";
 import { loadCases, declaredFiles } from "./corpus.ts";
 import { loadConditions } from "./conditions.ts";
+import { ccDeltaTextFor } from "./canary.ts";
+import { validatePack } from "./phrasing.ts";
 import { runProbes } from "./probes.ts";
 import { scanReferences } from "./references.ts";
 import { sourceParses } from "./parse-check.ts";
@@ -721,7 +723,7 @@ async function judgeAndSummarize(
   return { judged, summary: aggregate(judged, env, tierMap.map), tierByCaseId: tierMap.map };
 }
 
-export type DeliveryViolationKind = "not-delivered" | "missing-stamp" | "live-rules-silent" | "shadow-rules-silent";
+export type DeliveryViolationKind = "not-delivered" | "missing-stamp" | "live-rules-silent" | "shadow-rules-silent" | "prompt-not-carried";
 
 export interface DeliveryViolation {
   kind: DeliveryViolationKind;
@@ -736,6 +738,7 @@ export interface ArmDeliverySummary {
   reps: number;
   liveFirings: number;
   shadowFirings: number;
+  promptCarried: boolean;
 }
 
 export type DeliveryValidity =
@@ -762,9 +765,13 @@ function notDeliveredViolations(rows: RawRow[]): DeliveryViolation[] {
     }));
 }
 
-function missingStampViolations(rows: RawRow[]): DeliveryViolation[] {
+function isPromptCarried(conditionById: Map<string, ConditionManifest>, conditionId: string): boolean {
+  return conditionById.get(conditionId)?.delivery === "prompt";
+}
+
+function missingStampViolations(rows: RawRow[], conditionById: Map<string, ConditionManifest>): DeliveryViolation[] {
   return rows
-    .filter((row) => row.delivered === undefined)
+    .filter((row) => row.delivered === undefined && !isPromptCarried(conditionById, row.conditionId))
     .map((row) => ({
       kind: "missing-stamp",
       conditionId: row.conditionId,
@@ -772,6 +779,41 @@ function missingStampViolations(rows: RawRow[]): DeliveryViolation[] {
       rep: row.rep,
       message: `${rowLabel(row)}: no delivery stamp while other rows in this run carry one — rails likely never loaded for this rep`,
     }));
+}
+
+function packContentFor(conditionsDir: string, condition: ConditionManifest): string | undefined {
+  if (condition.phrasingPack === undefined) return undefined;
+  return readFileSync(join(conditionsDir, condition.phrasingPack), "utf8");
+}
+
+function expectedPromptMessage(conditionsDir: string, condition: ConditionManifest): string {
+  const packContent = packContentFor(conditionsDir, condition);
+  if (packContent === undefined) return ccDeltaTextFor({});
+
+  const validated = validatePack(packContent);
+  return ccDeltaTextFor("pack" in validated ? validated.pack : {});
+}
+
+function promptCarriedViolations(rows: RawRow[], conditionById: Map<string, ConditionManifest>, conditionsDir: string): DeliveryViolation[] {
+  const violations: DeliveryViolation[] = [];
+
+  for (const row of rows) {
+    const condition = conditionById.get(row.conditionId);
+    if (condition?.delivery !== "prompt") continue;
+
+    const expected = expectedPromptMessage(conditionsDir, condition);
+    if (row.task !== undefined && row.task.includes(expected)) continue;
+
+    violations.push({
+      kind: "prompt-not-carried",
+      conditionId: row.conditionId,
+      caseId: row.caseId,
+      rep: row.rep,
+      message: `${rowLabel(row)}: opening prompt does not carry the arm's message — delivery: "prompt" requires the arm's phrasing inside the sent task`,
+    });
+  }
+
+  return violations;
 }
 
 function armRowsByCondition(rows: RawRow[]): Map<string, RawRow[]> {
@@ -815,6 +857,7 @@ function firingFloorViolation(
 
 function firingFloorViolations(conditionId: string, armRows: RawRow[], manifest: ConditionManifest | undefined): DeliveryViolation[] {
   if (manifest?.expectedZeroFirings === true) return [];
+  if (manifest?.delivery === "prompt") return [];
 
   const violations: DeliveryViolation[] = [];
 
@@ -831,37 +874,45 @@ function firingFloorViolations(conditionId: string, armRows: RawRow[], manifest:
   return violations;
 }
 
-function armSummaryFor(conditionId: string, armRows: RawRow[]): ArmDeliverySummary {
+function armSummaryFor(conditionId: string, armRows: RawRow[], manifest: ConditionManifest | undefined): ArmDeliverySummary {
   return {
     conditionId,
     reps: armRows.length,
     liveFirings: sumFirings(armRows, (row) => row.railFirings),
     shadowFirings: sumFirings(armRows, (row) => row.shadowFirings),
+    promptCarried: manifest?.delivery === "prompt",
   };
 }
 
-function checkDeliveryValidity(rows: RawRow[], conditions: ConditionManifest[]): DeliveryValidity {
+function checkDeliveryValidity(rows: RawRow[], conditions: ConditionManifest[], conditionsDir: string): DeliveryValidity {
   const conditionById = new Map(conditions.map((c) => [c.id, c]));
   const arms = [...armRowsByCondition(rows)];
 
   const violations = [
     ...notDeliveredViolations(rows),
-    ...missingStampViolations(rows),
+    ...missingStampViolations(rows, conditionById),
+    ...promptCarriedViolations(rows, conditionById, conditionsDir),
     ...arms.flatMap(([conditionId, armRows]) => firingFloorViolations(conditionId, armRows, conditionById.get(conditionId))),
   ];
   if (violations.length > 0) return { kind: "invalid", violations };
 
-  const armSummaries = arms.map(([conditionId, armRows]) => armSummaryFor(conditionId, armRows)).sort((a, b) => a.conditionId.localeCompare(b.conditionId));
+  const armSummaries = arms
+    .map(([conditionId, armRows]) => armSummaryFor(conditionId, armRows, conditionById.get(conditionId)))
+    .sort((a, b) => a.conditionId.localeCompare(b.conditionId));
   return { kind: "valid", arms: armSummaries };
 }
 
 function resolveDeliveryValidity(rows: RawRow[], conditionsDir: string): { result: DeliveryValidity } | { error: string } {
-  if (rows.every((row) => row.delivered === undefined)) return { result: { kind: "unstamped", warning: UNSTAMPED_DELIVERY_WARNING } };
-
   const conditions = loadConditions(conditionsDir);
   if ("error" in conditions) return { error: `score: failed to load conditions: ${conditions.error}` };
 
-  return { result: checkDeliveryValidity(rows, conditions) };
+  const conditionById = new Map(conditions.map((c) => [c.id, c]));
+  const isLegacyRailOnlyRun = rows.every((row) => !isPromptCarried(conditionById, row.conditionId) && row.delivered === undefined);
+  if (rows.length > 0 && isLegacyRailOnlyRun) {
+    return { result: { kind: "unstamped", warning: UNSTAMPED_DELIVERY_WARNING } };
+  }
+
+  return { result: checkDeliveryValidity(rows, conditions, conditionsDir) };
 }
 
 function formatDeliveryViolations(violations: DeliveryViolation[]): string {
@@ -869,7 +920,9 @@ function formatDeliveryViolations(violations: DeliveryViolation[]): string {
 }
 
 function formatDeliveryValidityBlock(arms: ArmDeliverySummary[]): string {
-  const lines = arms.map((a) => `  ${a.conditionId}: reps=${a.reps} liveFirings=${a.liveFirings} shadowFirings=${a.shadowFirings} delivered=ok`);
+  const lines = arms.map(
+    (a) => `  ${a.conditionId}: reps=${a.reps} liveFirings=${a.liveFirings} shadowFirings=${a.shadowFirings} delivered=${a.promptCarried ? "prompt" : "ok"}`,
+  );
   return [...lines, ""].join("\n");
 }
 
