@@ -5,6 +5,7 @@ export interface ConditionManifest {
   env: Record<string, string>;
   phrasingPack?: string;
   expectedZeroFirings?: boolean;
+  delivery?: "prompt" | "rail";
 }
 
 export type Probe = { args: unknown[]; returns: unknown } | { args: unknown[]; throws: string };
@@ -78,6 +79,7 @@ export interface RawRow {
   conditionId: string;
   rep: number;
   provenance: Provenance;
+  task?: string;
   files: Record<string, string>;
   snapshotDropped?: string[];
   exitCode: number;

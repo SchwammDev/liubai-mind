@@ -33,33 +33,82 @@ function validateOptionalBoolean(value: unknown, label: string): { value: boolea
   return { value };
 }
 
+function validateDelivery(value: unknown): { value: "prompt" | "rail" | undefined } | { error: string } {
+  if (value === undefined) return { value: undefined };
+  if (value === "prompt" || value === "rail") return { value };
+  return { error: `condition delivery must be "prompt" or "rail", got: ${JSON.stringify(value)}` };
+}
+
+function validateDeliveryClosesLiveRail(
+  delivery: "prompt" | "rail" | undefined,
+  env: Record<string, string>,
+  id: string,
+): { error: string } | undefined {
+  if (delivery !== "prompt") return undefined;
+  if (env.LIUBAI_RAILS_OFF !== undefined) return undefined;
+  return {
+    error: `condition ${id}: delivery: "prompt" requires env.LIUBAI_RAILS_OFF — a prompt-carried arm must close the live rail so the prompt is the only treatment channel`,
+  };
+}
+
+interface ManifestFields {
+  id: string;
+  env: Record<string, string>;
+  phrasingPack: string | undefined;
+  expectedZeroFirings: boolean | undefined;
+  delivery: "prompt" | "rail" | undefined;
+}
+
+function validateFields(raw: Record<string, unknown>): { fields: ManifestFields } | { error: string } {
+  const id = validateId(raw.id);
+  if ("error" in id) return id;
+
+  const env = validateEnv(raw.env);
+  if ("error" in env) return env;
+
+  const phrasingPack = validateOptionalString(raw.phrasingPack, "phrasingPack");
+  if ("error" in phrasingPack) return phrasingPack;
+
+  const expectedZeroFirings = validateOptionalBoolean(raw.expectedZeroFirings, "expectedZeroFirings");
+  if ("error" in expectedZeroFirings) return expectedZeroFirings;
+
+  const delivery = validateDelivery(raw.delivery);
+  if ("error" in delivery) return delivery;
+
+  return {
+    fields: {
+      id: id.value,
+      env: env.value,
+      phrasingPack: phrasingPack.value,
+      expectedZeroFirings: expectedZeroFirings.value,
+      delivery: delivery.value,
+    },
+  };
+}
+
+function assembleManifest(fields: ManifestFields): ConditionManifest {
+  return {
+    id: fields.id,
+    env: fields.env,
+    ...(fields.phrasingPack !== undefined ? { phrasingPack: fields.phrasingPack } : {}),
+    ...(fields.expectedZeroFirings !== undefined ? { expectedZeroFirings: fields.expectedZeroFirings } : {}),
+    ...(fields.delivery !== undefined ? { delivery: fields.delivery } : {}),
+  };
+}
+
 function validateManifest(raw: unknown, filename: string): { manifest: ConditionManifest } | { error: string } {
   if (typeof raw !== "object" || raw === null) {
     return { error: `${filename}: condition manifest must be a JSON object` };
   }
 
-  const { id, env, phrasingPack, expectedZeroFirings } = raw as Record<string, unknown>;
+  const fieldsResult = validateFields(raw as Record<string, unknown>);
+  if ("error" in fieldsResult) return { error: `${filename}: ${fieldsResult.error}` };
 
-  const idResult = validateId(id);
-  if ("error" in idResult) return { error: `${filename}: ${idResult.error}` };
+  const { fields } = fieldsResult;
+  const railError = validateDeliveryClosesLiveRail(fields.delivery, fields.env, fields.id);
+  if (railError !== undefined) return { error: `${filename}: ${railError.error}` };
 
-  const envResult = validateEnv(env);
-  if ("error" in envResult) return { error: `${filename}: ${envResult.error}` };
-
-  const packResult = validateOptionalString(phrasingPack, "phrasingPack");
-  if ("error" in packResult) return { error: `${filename}: ${packResult.error}` };
-
-  const expectedZeroFiringsResult = validateOptionalBoolean(expectedZeroFirings, "expectedZeroFirings");
-  if ("error" in expectedZeroFiringsResult) return { error: `${filename}: ${expectedZeroFiringsResult.error}` };
-
-  return {
-    manifest: {
-      id: idResult.value,
-      env: envResult.value,
-      ...(packResult.value !== undefined ? { phrasingPack: packResult.value } : {}),
-      ...(expectedZeroFiringsResult.value !== undefined ? { expectedZeroFirings: expectedZeroFiringsResult.value } : {}),
-    },
-  };
+  return { manifest: assembleManifest(fields) };
 }
 
 function validatePhrasingPack(dir: string, manifest: ConditionManifest): { error: string } | undefined {

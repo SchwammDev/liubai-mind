@@ -94,7 +94,7 @@ function ccNudgeEntryFor(lang: FixtureLang, pack: ValidPack): { first: string; r
   return pack.CC_NUDGE?.[lang] ?? DEFAULT_CC_NUDGE[lang];
 }
 
-function ccDeltaTextFor(pack: ValidPack): string {
+export function ccDeltaTextFor(pack: ValidPack): string {
   return pack.CC_DELTA_NUDGE ?? DEFAULT_CC_DELTA_NUDGE;
 }
 
