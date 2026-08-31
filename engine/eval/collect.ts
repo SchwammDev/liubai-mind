@@ -5,11 +5,13 @@ import { dirname, join, relative } from "node:path";
 import type { CaseManifest, ConditionManifest, RawRow, Tier } from "./eval-contract.ts";
 import { RULE, EVAL_ABORT_EXIT_CODE } from "../contract.ts";
 import type { RuleName } from "../contract.ts";
+import { evaluateCanary } from "./canary.ts";
+import type { ProbeReport } from "./canary.ts";
 import { loadConditions } from "./conditions.ts";
 import { loadCases, copyPlan } from "./corpus.ts";
 import { buildProvenance } from "./provenance.ts";
-import { defaultPiSpawner } from "./spawner.ts";
-import type { PiSpawner, RunOutcome } from "./spawner.ts";
+import { defaultPiSpawner, defaultProbeSpawner } from "./spawner.ts";
+import type { PiSpawner, ProbeSpawner, RunOutcome } from "./spawner.ts";
 import { snapshotExtras } from "./snapshot.ts";
 import type { WorkDirSnapshot } from "./snapshot.ts";
 
@@ -23,6 +25,7 @@ export interface CollectOpts {
   conditions?: string[];
   tier?: Tier;
   spawner?: PiSpawner;
+  probeSpawner?: ProbeSpawner;
   workRoot?: string;
   now?: () => string;
   conditionsDir?: string;
@@ -50,6 +53,7 @@ export interface CollectContext {
   model: string;
   timeoutMs: number;
   spawner: PiSpawner;
+  probeSpawner: ProbeSpawner;
   workRoot: string;
   now: () => string;
   parallel: number;
@@ -471,6 +475,7 @@ export interface EngineOptsBase {
   model: string;
   timeoutMs?: number;
   spawner?: PiSpawner;
+  probeSpawner?: ProbeSpawner;
   workRoot?: string;
   now?: () => string;
   parallel?: number;
@@ -484,6 +489,7 @@ export function buildContext(opts: EngineOptsBase, corpusDir: string, conditions
     model: opts.model,
     timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     spawner: opts.spawner ?? defaultPiSpawner(opts.repoRoot),
+    probeSpawner: opts.probeSpawner ?? defaultProbeSpawner(opts.repoRoot),
     workRoot: opts.workRoot ?? tmpdir(),
     now: opts.now ?? (() => new Date().toISOString()),
     parallel: opts.parallel ?? 1,
@@ -599,6 +605,33 @@ export function toCollectResult(counts: CollectCounts): CollectResult {
   };
 }
 
+type CanaryOutcome = { ok: true; results: Record<string, ProbeReport> } | { ok: false; message: string };
+
+async function runCanaryChecks(ctx: CollectContext, conditions: ConditionManifest[]): Promise<CanaryOutcome> {
+  const results: Record<string, ProbeReport> = {};
+
+  for (const condition of conditions) {
+    const workDir = mkdtempSync(join(ctx.workRoot, "eval-canary-"));
+    const packPath = packAbsolutePath(ctx.conditionsDir, condition);
+    const packContent = readPackContent(packPath);
+    const env = buildEnv(condition, packContent);
+
+    const outcome = await ctx.probeSpawner({ cwd: workDir, env });
+    const verdict = evaluateCanary({
+      condition,
+      packContent,
+      exitCode: outcome.exitCode,
+      stdout: outcome.stdout,
+      stderr: outcome.stderr,
+    });
+    if (!verdict.ok) return { ok: false, message: verdict.reason };
+
+    results[condition.id] = verdict.report;
+  }
+
+  return { ok: true, results };
+}
+
 export async function runCollect(opts: CollectOpts): Promise<CollectResult> {
   const parallelError = validateParallel(opts.parallel);
   if (parallelError !== undefined) return parallelError;
@@ -615,11 +648,16 @@ export async function runCollect(opts: CollectOpts): Promise<CollectResult> {
   const tieredCases = filterByTier(cases, opts.tier);
   if ("error" in tieredCases) return loadError(tieredCases.error);
 
+  const ctx = buildContext(opts, corpusDir, conditionsDir);
+
+  const canary = await runCanaryChecks(ctx, conditions);
+  if (!canary.ok) return loadError(canary.message);
+
   const rawPath = join(opts.runDir, "raw.jsonl");
   const existingKeys = loadExistingKeys(rawPath, rowKey);
   mkdirSync(join(opts.runDir, "transcripts"), { recursive: true });
+  writeFileSync(join(opts.runDir, "canary.json"), `${JSON.stringify(canary.results, null, 2)}\n`);
 
-  const ctx = buildContext(opts, corpusDir, conditionsDir);
   const items = buildWorkItems(tieredCases, conditions, opts.reps);
   const counts = await runWorkItems(ctx, opts.runDir, rawPath, items, existingKeys);
 

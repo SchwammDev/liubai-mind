@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -51,7 +51,7 @@ export interface BwrapMountPlan {
 }
 
 const REPO_EXPOSED_PATHS = ["node_modules", "extensions", "engine", "package.json", "tsconfig.json"];
-const HOME_EXPOSED_PATHS = [join(".local", "share", "mise")];
+const HOME_EXPOSED_PATHS = [join(".local", "share", "mise"), join(".local", "share", "uv")];
 const PI_AGENT_HIDDEN_ENTRIES = ["extensions", "sessions", "complexity.json", "liubai-dedup-log.jsonl"];
 
 function roBindIfExists(args: string[], path: string): void {
@@ -137,6 +137,85 @@ function runPi(repoRoot: string, spec: RunSpec): Promise<RunOutcome> {
       clearTimeout(timeoutTimer);
       if (killTimer !== undefined) clearTimeout(killTimer);
       resolve({ exitCode: code ?? -1, stdoutJsonl: stdout, timedOut });
+    });
+  });
+}
+
+export interface ProbeSpec {
+  cwd: string;
+  env: Record<string, string>;
+}
+
+export interface ProbeOutcome {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
+export type ProbeSpawner = (spec: ProbeSpec) => Promise<ProbeOutcome>;
+
+const PROBE_TIMEOUT_MS = 60000;
+
+function resolveNodeBin(): string {
+  const res = spawnSync("mise", ["which", "node"], { encoding: "utf8" });
+  if (res.error || res.status !== 0) return "node";
+  const resolved = res.stdout.trim();
+  return resolved.length > 0 ? resolved : "node";
+}
+
+function probeArgs(repoRoot: string): string[] {
+  return ["--experimental-strip-types", join(repoRoot, "engine", "delivery-probe.ts")];
+}
+
+export function defaultProbeSpawner(repoRoot: string): ProbeSpawner {
+  return (spec) => runProbe(repoRoot, spec);
+}
+
+function runProbe(repoRoot: string, spec: ProbeSpec): Promise<ProbeOutcome> {
+  const nodeBin = resolveNodeBin();
+  const bwrapArgs = buildBwrapArgs({ repoRoot, homeDir: homedir(), workDir: spec.cwd });
+  const args = [...bwrapArgs, "--", nodeBin, ...probeArgs(repoRoot)];
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const child = spawn("bwrap", args, {
+      cwd: spec.cwd,
+      env: buildSpawnEnv(process.env, spec.env),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    child.on("error", (err: NodeJS.ErrnoException) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      if (killTimer !== undefined) clearTimeout(killTimer);
+      reject(err.code === "ENOENT" ? bwrapNotFoundError() : err);
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const timeoutTimer = setTimeout(() => {
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+    }, PROBE_TIMEOUT_MS);
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+    });
+
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+
+    child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      if (killTimer !== undefined) clearTimeout(killTimer);
+      resolve({ exitCode: code ?? -1, stdout, stderr });
     });
   });
 }

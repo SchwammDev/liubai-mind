@@ -6,11 +6,49 @@ import { join } from "node:path";
 
 import { runCollect, detectAgentError, countTurns, sumTokenUsage, countRailFirings, countShadowFirings, readDelivered } from "./collect.ts";
 import type { CollectOpts } from "./collect.ts";
-import type { RunSpec, RunOutcome, PiSpawner } from "./spawner.ts";
+import type { RunSpec, RunOutcome, PiSpawner, ProbeOutcome, ProbeSpawner } from "./spawner.ts";
 import { gitSha } from "./provenance.ts";
-import { packHash } from "../contract.ts";
+import { RULE, packHash } from "../contract.ts";
+import { CC_DELTA_NUDGE, CC_NUDGE, formatCcNudge } from "../messages.ts";
+import { DEFAULT_POLICY } from "../policy.ts";
+import { PROBE_FIXTURES } from "../delivery-probe.ts";
+import type { ProbeReport } from "./canary.ts";
+import { validatePack } from "./phrasing.ts";
 import { SNAPSHOT_FILE_CAP_BYTES } from "./snapshot.ts";
 import type { RawRow, Tier } from "./eval-contract.ts";
+
+function passingProbeSpawner(): ProbeSpawner {
+  return async (spec) => {
+    const packContent = spec.env.LIUBAI_PHRASING_PACK;
+    const validated = packContent === undefined ? undefined : validatePack(packContent);
+    const pack = validated !== undefined && "pack" in validated ? validated.pack : {};
+
+    const nudges: Partial<Record<"python" | "typescript", string[]>> = {};
+    for (const fixture of PROBE_FIXTURES) {
+      const entry = pack.CC_NUDGE?.[fixture.lang] ?? CC_NUDGE[fixture.lang];
+      const threshold = DEFAULT_POLICY[RULE.cc].threshold?.[fixture.lang] ?? 8;
+      nudges[fixture.lang] = [formatCcNudge(entry.first, { name: fixture.functionName, cc: fixture.cyclomaticComplexity, threshold })];
+    }
+
+    const report: ProbeReport = {
+      packHash: packHash(packContent ?? null),
+      nudges,
+      errors: [],
+      ccNudge: {
+        python: pack.CC_NUDGE?.python ?? CC_NUDGE.python,
+        typescript: pack.CC_NUDGE?.typescript ?? CC_NUDGE.typescript,
+        cpp: pack.CC_NUDGE?.cpp ?? CC_NUDGE.cpp,
+      },
+      ccDeltaNudge: pack.CC_DELTA_NUDGE ?? CC_DELTA_NUDGE,
+    };
+
+    return { exitCode: 0, stdout: `${JSON.stringify(report)}\n`, stderr: "" };
+  };
+}
+
+function failingProbeSpawner(outcome: Partial<ProbeOutcome> = {}): ProbeSpawner {
+  return async () => ({ exitCode: 1, stdout: "", stderr: "delivery probe crashed", ...outcome });
+}
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 
@@ -32,6 +70,7 @@ function baseOpts(over: Partial<CollectOpts> = {}): CollectOpts {
     workRoot: tempDir("eval-work-"),
     reps: 1,
     model: "claude-test-model",
+    probeSpawner: passingProbeSpawner(),
     ...over,
   };
 }
@@ -762,6 +801,48 @@ test("runCollect_leaves_agentError_absent_when_stdout_shows_only_successful_retr
   await runCollect(opts);
 
   assert.equal("agentError" in firstRow(opts.runDir), false);
+});
+
+test("runCollect_runs_no_work_items_and_reports_a_load_error_when_the_delivery_canary_fails", async () => {
+  const { spawner, calls } = recordingSpawner();
+  const opts = baseOpts({
+    cases: ["ts-flag-parser"],
+    conditions: ["control", "rails-default"],
+    spawner,
+    probeSpawner: failingProbeSpawner({ stderr: "python rail dead inside the sandbox" }),
+  });
+
+  const result = await runCollect(opts);
+
+  assert.equal(result.status, 1);
+  assert.equal(calls.length, 0);
+  assert.equal(result.rowsWritten, 0);
+  assert.match(result.stderr, /control|rails-default/);
+  assert.match(result.stderr, /python rail dead inside the sandbox/);
+});
+
+test("runCollect_probes_every_condition_in_the_run_before_dispatching_any_work_item", async () => {
+  const probeCwds: string[] = [];
+  const probeSpawner: ProbeSpawner = async (spec) => {
+    probeCwds.push(spec.cwd);
+    return passingProbeSpawner()(spec);
+  };
+  const { spawner, calls } = recordingSpawner();
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control", "rails-default"], spawner, probeSpawner });
+
+  await runCollect(opts);
+
+  assert.equal(probeCwds.length, 2);
+  assert.equal(calls.length, 2);
+});
+
+test("runCollect_writes_a_canary_json_report_naming_every_probed_condition", async () => {
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control", "rails-default"], spawner: recordingSpawner().spawner });
+
+  await runCollect(opts);
+
+  const canary = JSON.parse(readFileSync(join(opts.runDir, "canary.json"), "utf8")) as Record<string, unknown>;
+  assert.deepEqual(Object.keys(canary).sort(), ["control", "rails-default"]);
 });
 
 test("runCollect_rejects_a_non_positive_parallel_value_with_a_load_error", async () => {
