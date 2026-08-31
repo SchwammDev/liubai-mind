@@ -143,30 +143,24 @@ test("resolveCcDeltaNudge falls back to the default when the pack is not an obje
   assert.equal(result, DEFAULT_DELTA_TEXT);
 });
 
-test("readPack yields an empty object when the path is undefined", () => {
-  const result = readPack(undefined, () => {
-    throw new Error("should not be called");
-  });
+test("readPack yields an empty object when the content is undefined", () => {
+  const result = readPack(undefined);
 
   assert.deepEqual(result, {});
 });
 
-test("readPack yields an empty object when the reader throws", () => {
-  const result = readPack("/does/not/exist.json", () => {
-    throw new Error("ENOENT");
-  });
+test("readPack yields an empty object when the content is an empty string", () => {
+  const result = readPack("");
 
   assert.deepEqual(result, {});
 });
 
-test("readPack yields an empty object when the file contains malformed json", () => {
-  const result = readPack("/pack.json", () => "{ not json");
-
-  assert.deepEqual(result, {});
+test("readPack throws naming LIUBAI_PHRASING_PACK when the content is malformed json", () => {
+  assert.throws(() => readPack("{ not json"), /LIUBAI_PHRASING_PACK/);
 });
 
-test("readPack yields the parsed pack when the file is valid json", () => {
-  const result = readPack("/pack.json", () => '{"CC_NUDGE":{"python":{"first":"f","rest":"r"}}}');
+test("readPack yields the parsed pack when the content is valid json", () => {
+  const result = readPack('{"CC_NUDGE":{"python":{"first":"f","rest":"r"}}}');
 
   assert.deepEqual(result, { CC_NUDGE: { python: { first: "f", rest: "r" } } });
 });
@@ -249,10 +243,8 @@ function runScript(source: string, env: NodeJS.ProcessEnv): string {
   });
 }
 
-function writePack(dir: string, ccNudge: object): string {
-  const packPath = join(dir, "pack.json");
-  writeFileSync(packPath, JSON.stringify({ CC_NUDGE: ccNudge }));
-  return packPath;
+function packContent(ccNudge: object): string {
+  return JSON.stringify({ CC_NUDGE: ccNudge });
 }
 
 function envWithout(name: string): NodeJS.ProcessEnv {
@@ -261,32 +253,29 @@ function envWithout(name: string): NodeJS.ProcessEnv {
   return env;
 }
 
-function ccNudgeMsgsWithPack(dir: string, ccNudge: object): string[] {
-  const packPath = writePack(dir, ccNudge);
-  const stdout = runScript(scriptPrintingCcNudges(), { ...process.env, LIUBAI_PHRASING_PACK: packPath });
+function ccNudgeMsgsWithPack(ccNudge: object): string[] {
+  const stdout = runScript(scriptPrintingCcNudges(), { ...process.env, LIUBAI_PHRASING_PACK: packContent(ccNudge) });
   return JSON.parse(stdout) as string[];
 }
 
-function blockReasonWithAndWithoutPack(dir: string): { withoutPack: string; withPack: string } {
+function blockReasonWithAndWithoutPack(): { withoutPack: string; withPack: string } {
   const overridden = phrasing("OVERRIDDEN_CC_NUDGE", "OVERRIDDEN_CC_NUDGE");
-  const packPath = writePack(dir, { python: overridden, typescript: overridden, cpp: overridden });
+  const content = packContent({ python: overridden, typescript: overridden, cpp: overridden });
   return {
     withoutPack: runScript(scriptPrintingBlockReason(), envWithout("LIUBAI_PHRASING_PACK")),
-    withPack: runScript(scriptPrintingBlockReason(), { ...process.env, LIUBAI_PHRASING_PACK: packPath }),
+    withPack: runScript(scriptPrintingBlockReason(), { ...process.env, LIUBAI_PHRASING_PACK: content }),
   };
 }
 
 test("formatBlockReason output is byte-identical whether or not a phrasing pack overrode CC_NUDGE", () => {
-  const { withoutPack, withPack } = inTempDir(blockReasonWithAndWithoutPack);
+  const { withoutPack, withPack } = blockReasonWithAndWithoutPack();
 
   assert.equal(withoutPack, withPack);
   assert.doesNotMatch(withPack, /OVERRIDDEN_CC_NUDGE/);
 });
 
 test("a phrasing pack gives the first flagged function the full guide and later ones the short form", () => {
-  const msgs = inTempDir((dir) =>
-    ccNudgeMsgsWithPack(dir, { python: phrasing("GUIDE for {name} (cc {cc}, bar {threshold})", "{name}: SAME") }),
-  );
+  const msgs = ccNudgeMsgsWithPack({ python: phrasing("GUIDE for {name} (cc {cc}, bar {threshold})", "{name}: SAME") });
 
   assert.deepEqual(msgs, ["GUIDE for alpha (cc 9, bar 8)", "beta: SAME"]);
 });
@@ -321,18 +310,14 @@ function scriptPrintingCcDeltaNudge(): string {
   ].join("\n");
 }
 
-function writeDeltaPack(dir: string, ccDeltaNudge: string): string {
-  const packPath = join(dir, "delta-pack.json");
-  writeFileSync(packPath, JSON.stringify({ CC_DELTA_NUDGE: ccDeltaNudge }));
-  return packPath;
+function deltaPackContent(ccDeltaNudge: string): string {
+  return JSON.stringify({ CC_DELTA_NUDGE: ccDeltaNudge });
 }
 
 test("a phrasing pack overrides the cc-delta nudge text at rail runtime", () => {
-  const msgs = inTempDir((dir) => {
-    const packPath = writeDeltaPack(dir, "{name} custom delta text ({dpBefore}->{dpAfter})");
-    const stdout = runScript(scriptPrintingCcDeltaNudge(), { ...process.env, LIUBAI_PHRASING_PACK: packPath });
-    return JSON.parse(stdout) as string[];
-  });
+  const content = deltaPackContent("{name} custom delta text ({dpBefore}->{dpAfter})");
+  const stdout = runScript(scriptPrintingCcDeltaNudge(), { ...process.env, LIUBAI_PHRASING_PACK: content });
+  const msgs = JSON.parse(stdout) as string[];
 
   assert.deepEqual(msgs, ["handleRequest custom delta text (11->11)"]);
 });

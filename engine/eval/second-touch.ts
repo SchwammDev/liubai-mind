@@ -14,6 +14,7 @@ import {
   loadError,
   loadExistingKeys,
   packAbsolutePath,
+  readPackContent,
   runItemsConcurrently,
   snapshotWorkDir,
   spawnForItem,
@@ -198,12 +199,12 @@ function materializeSourceFiles(workDir: string, files: Record<string, string>):
 function buildSecondTouchRow(
   ctx: SecondTouchContext,
   item: SecondTouchItem,
-  packPath: string | undefined,
+  packContent: string | undefined,
   outcome: RunOutcome,
   durationMs: number,
   snapshot: WorkDirSnapshot,
 ): RawRow {
-  const core = buildRawRowCore(ctx, item.condition.id, packPath, outcome, durationMs, snapshot);
+  const core = buildRawRowCore(ctx, item.condition.id, packContent, outcome, durationMs, snapshot);
   return {
     caseId: item.kase.id,
     conditionId: item.condition.id,
@@ -227,12 +228,13 @@ async function runSecondTouchItem(ctx: SecondTouchContext, item: SecondTouchItem
   const workDir = mkdtempSync(join(ctx.workRoot, "eval-work-"));
   const plan = workDirPlanFor(ctx, item, workDir);
   const packPath = packAbsolutePath(ctx.conditionsDir, item.condition);
-  const env = buildEnv(item.condition, packPath);
+  const packContent = readPackContent(packPath);
+  const env = buildEnv(item.condition, packContent);
 
   try {
     const { outcome, durationMs } = await spawnForItem(ctx, item.kase.extension!.task, workDir, env);
     const snapshot = snapshotWorkDir(workDir, plan);
-    const row = buildSecondTouchRow(ctx, item, packPath, outcome, durationMs, snapshot);
+    const row = buildSecondTouchRow(ctx, item, packContent, outcome, durationMs, snapshot);
     return { row, stdoutJsonl: outcome.stdoutJsonl };
   } catch (err) {
     return { failure: secondTouchFailureMessage(item, err) };
