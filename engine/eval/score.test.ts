@@ -1474,6 +1474,114 @@ test("runScore_writes_a_summary_and_prints_a_validity_block_for_a_fully_delivere
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });
 
+const PROMPT_ARM_MESSAGE = "collapse the tangle back into a dispatch a reader can see in one place.";
+
+function writePromptConditionsDir(promptConditionId: string, railConditionIds: string[] = []): string {
+  const dir = mkdtempSync(join(tmpdir(), "eval-score-conditions-"));
+  mkdirSync(join(dir, "packs"), { recursive: true });
+  writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_ARM_MESSAGE }));
+  writeFileSync(
+    join(dir, `${promptConditionId}.json`),
+    JSON.stringify({ id: promptConditionId, env: { LIUBAI_RAILS_OFF: "1" }, delivery: "prompt", phrasingPack: "packs/pack.json" }),
+  );
+  for (const railConditionId of railConditionIds) {
+    writeFileSync(join(dir, `${railConditionId}.json`), JSON.stringify({ id: railConditionId, env: {} }));
+  }
+  return dir;
+}
+
+function promptCarriedTask(): string {
+  return `Improve parse_flags.ts. Keep the public function signature and behavior unchanged.\n\n${PROMPT_ARM_MESSAGE}`;
+}
+
+test("runScore_scores_a_prompt_carried_arm_as_verified_with_no_stamp_or_firing_checks", async () => {
+  const conditionId = "cc-delta-prompt";
+  const conditionsDir = writePromptConditionsDir(conditionId);
+  const row = tsFlagParserRow({}, { conditionId, task: promptCarriedTask() });
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [row]);
+
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, new RegExp(`${conditionId}: reps=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
+  assert.doesNotMatch(result.stdout, /unverifiable/);
+  assert.ok(existsSync(join(runDir, "summary.jsonl")));
+});
+
+test("runScore_refuses_a_prompt_carried_row_whose_recorded_task_does_not_carry_the_arm_message", async () => {
+  const conditionId = "cc-delta-prompt";
+  const conditionsDir = writePromptConditionsDir(conditionId);
+  const row = tsFlagParserRow({}, { conditionId, task: "Improve parse_flags.ts. Keep the public function signature and behavior unchanged." });
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [row]);
+
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /\[prompt-not-carried\]/);
+  assert.match(result.stdout, new RegExp(`${conditionId}/ts-flag-parser#1`));
+  assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
+});
+
+test("runScore_refuses_a_prompt_carried_row_with_no_recorded_task", async () => {
+  const conditionId = "cc-delta-prompt";
+  const conditionsDir = writePromptConditionsDir(conditionId);
+  const row = tsFlagParserRow({}, { conditionId });
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [row]);
+
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /\[prompt-not-carried\]/);
+  assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
+});
+
+test("runScore_scores_a_mixed_run_applying_each_arms_own_delivery_checks", async () => {
+  const promptConditionId = "cc-delta-prompt";
+  const railConditionId = "rails-verified-mixed";
+  const conditionsDir = writePromptConditionsDir(promptConditionId, [railConditionId]);
+  const packHash = "a".repeat(64);
+  const promptRow = tsFlagParserRow({}, { conditionId: promptConditionId, task: promptCarriedTask() });
+  const railRow = tsFlagParserRow(
+    {},
+    {
+      conditionId: railConditionId,
+      provenance: provenance({ conditionId: railConditionId, phrasingPackHash: packHash }),
+      delivered: deliveredStamp({ packHash, liveRules: ["cc"] }),
+      railFirings: railFirings({ cc: 2 }),
+    },
+  );
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [promptRow, railRow]);
+
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, new RegExp(`${promptConditionId}: reps=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
+  assert.match(result.stdout, new RegExp(`${railConditionId}: reps=1 liveFirings=2 shadowFirings=0 delivered=ok`));
+  assert.doesNotMatch(result.stdout, /unverifiable/);
+  assert.ok(existsSync(join(runDir, "summary.jsonl")));
+});
+
+test("runScore_exempts_a_prompt_carried_arm_from_the_live_rules_firing_floor", async () => {
+  const conditionId = "cc-delta-prompt";
+  const conditionsDir = writePromptConditionsDir(conditionId);
+  const row = tsFlagParserRow(
+    {},
+    { conditionId, task: promptCarriedTask(), delivered: deliveredStamp({ liveRules: ["cc"] }), railFirings: railFirings() },
+  );
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [row]);
+
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+
+  assert.equal(result.status, 0);
+  assert.doesNotMatch(result.stdout, /live-rules-silent/);
+  assert.ok(existsSync(join(runDir, "summary.jsonl")));
+});
+
 test("runScore_classifies_a_rail_abort_row_as_errored_verdict", async () => {
   const erroredRow = erroredRawRow("rails-default", "ts-flag-parser", "rail aborted the rep under eval (exit 17)", 1);
   const normalRow = tsFlagParserRow({}, { conditionId: "control" });
