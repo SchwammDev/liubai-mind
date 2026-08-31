@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 
 import type { CaseManifest, ConditionManifest, RawRow, Tier } from "./eval-contract.ts";
-import { RULE } from "../contract.ts";
+import { RULE, EVAL_ABORT_EXIT_CODE } from "../contract.ts";
 import type { RuleName } from "../contract.ts";
 import { loadConditions } from "./conditions.ts";
 import { loadCases, copyPlan } from "./corpus.ts";
@@ -244,6 +244,12 @@ function terminalAssistantError(lastAssistantEnd: AssistantEnd): string | undefi
   return lastAssistantEnd.errorMessage ?? FALLBACK_AGENT_ERROR;
 }
 
+function partialRunExitError(exitCode: number): string | undefined {
+  if (exitCode === 0) return undefined;
+  if (exitCode === EVAL_ABORT_EXIT_CODE) return `rail aborted the rep under eval (exit ${EVAL_ABORT_EXIT_CODE})`;
+  return `agent exited ${exitCode} after a partial run`;
+}
+
 export function detectAgentError(stdoutJsonl: string, exitCode = 0): string | undefined {
   const lines = stdoutJsonl.split("\n").filter((line) => line.trim().length > 0);
   let lastAssistantEnd: AssistantEnd | undefined;
@@ -255,7 +261,9 @@ export function detectAgentError(stdoutJsonl: string, exitCode = 0): string | un
   }
 
   if (lastAssistantEnd === undefined) return silentCrashError(exitCode);
-  return terminalAssistantError(lastAssistantEnd);
+  const assistantError = terminalAssistantError(lastAssistantEnd);
+  if (assistantError !== undefined) return assistantError;
+  return partialRunExitError(exitCode);
 }
 
 function rowKey(row: { caseId: string; conditionId: string; rep: number }): string {
