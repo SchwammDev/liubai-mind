@@ -88,6 +88,7 @@ export interface RawRow {
   cacheReadTokens?: number;
   railFirings?: Record<RuleName, number>;
   shadowFirings?: Record<RuleName, number>;
+  delivered?: { packHash: string | null; liveRules: string[]; shadowRules: string[] };
   agentError?: string;
   secondTouch?: SecondTouchInfo;
 }

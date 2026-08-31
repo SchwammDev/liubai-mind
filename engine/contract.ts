@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export type Lang = "python" | "typescript" | "cpp";
 export type Severity = "block" | "nudge";
 
@@ -87,3 +89,8 @@ export type RuleConfig = {
   threshold?: Record<Lang, number>;
   exemptions?: Exemption[];
 };
+
+export function packHash(bytes: string | null): string | null {
+  if (bytes === null) return null;
+  return createHash("sha256").update(bytes).digest("hex");
+}

@@ -289,7 +289,7 @@ test("a rule not named in LIUBAI_SHADOW_RULES still blocks and is not logged as 
 function registeredBashTool(): any {
   const registered: any[] = [];
   const pi = { on: () => undefined, registerTool: (tool: any) => registered.push(tool) };
-  register(pi as any);
+  register(pi as any, { writeDelivered: () => {} });
   return registered.find((tool) => tool.name === "bash");
 }
 

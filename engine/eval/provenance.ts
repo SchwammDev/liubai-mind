@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 
 import type { Provenance } from "./eval-contract.ts";
-import { packHash } from "./phrasing.ts";
+import { packHash } from "../contract.ts";
 
 function runGit(repoRoot: string, args: string[]): string {
   const res = spawnSync("git", args, { cwd: repoRoot, encoding: "utf8" });

@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import type { Lang } from "../contract.ts";
 
 const KNOWN_LANGS: readonly Lang[] = ["python", "typescript", "cpp"];
@@ -98,9 +96,4 @@ export function validatePack(raw: string): ValidatePackResult {
   }
 
   return { pack };
-}
-
-export function packHash(bytes: string | null): string | null {
-  if (bytes === null) return null;
-  return createHash("sha256").update(bytes).digest("hex");
 }

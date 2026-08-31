@@ -5,7 +5,7 @@ import {
   type ExtensionContext,
   type ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
-import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -32,11 +32,11 @@ import { cleanProse } from "./prose-gate.ts";
 import { injectWebSearch, loadWebSearchConfig, LIUBAI_CONFIG } from "./web-search.ts";
 import { analyze } from "../../engine/analyze.ts";
 import type { RuleName } from "../../engine/contract.ts";
-import { EVAL_ABORT_EXIT_CODE } from "../../engine/contract.ts";
+import { EVAL_ABORT_EXIT_CODE, RULE, packHash } from "../../engine/contract.ts";
 import { defaultEnv } from "../../engine/env.ts";
 import { detectLang } from "../../engine/lang.ts";
 import { formatBlockReason } from "../../engine/messages.ts";
-import { buildRules, DEFAULT_POLICY } from "../../engine/policy.ts";
+import { buildRules, ccDeltaEnabledLangs, DEFAULT_POLICY } from "../../engine/policy.ts";
 import { reconstruct, type FileChange } from "../../engine/reconstruct.ts";
 
 const GLOBAL_RULES = join(homedir(), ".pi/agent/command-rules.json");
@@ -87,6 +87,46 @@ function createShadowLog(cwd: string): ShadowLog {
   };
 }
 
+export type DeliveredStamp = { packHash: string | null; liveRules: string[]; shadowRules: string[] };
+export type WriteDelivered = (stamp: DeliveredStamp) => void;
+
+function createDeliveredWriter(cwd: string): WriteDelivered {
+  const path = join(cwd, ".liubai", "delivered.json");
+  return (stamp) => {
+    try {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify(stamp));
+    } catch {}
+  };
+}
+
+function deliveredPackHash(): string | null {
+  const raw = process.env.LIUBAI_PHRASING_PACK;
+  return packHash(raw && raw.length > 0 ? raw : null);
+}
+
+function enabledRuleNames(): RuleName[] {
+  const ccDeltaOn = ccDeltaEnabledLangs(process.env.LIUBAI_CC_DELTA_OFF).length > 0;
+  return (Object.values(RULE) as RuleName[]).filter((name) => name !== RULE.ccDelta || ccDeltaOn);
+}
+
+function stampDelivered(cwd: string, writeDelivered: WriteDelivered): void {
+  if (process.env.LIUBAI_EVAL) writeDelivered(resolveDelivered());
+}
+
+function resolveDelivered(): DeliveredStamp {
+  const hash = deliveredPackHash();
+  if (railsDisabled()) return { packHash: hash, liveRules: [], shadowRules: [] };
+
+  const shadowSet = parseShadowRules(process.env.LIUBAI_SHADOW_RULES);
+  const enabled = enabledRuleNames();
+  return {
+    packHash: hash,
+    liveRules: enabled.filter((rule) => !shadowSet.has(rule)),
+    shadowRules: enabled.filter((rule) => shadowSet.has(rule)),
+  };
+}
+
 // A missing or malformed file yields no rules, so the gate stays open rather
 // than bricking the agent on a typo.
 function loadRules(path: string): Partial<CommandRules> {
@@ -128,6 +168,7 @@ export type RailsDeps = {
   readTargetFile?: (path: string) => Promise<string>;
   logDedup?: DedupLog;
   logShadow?: ShadowLog;
+  writeDelivered?: WriteDelivered;
   abort?: (message: string) => void;
 };
 
@@ -150,6 +191,8 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
   const logDedup = deps?.logDedup ?? createFileLog();
   const logShadow = deps?.logShadow ?? createShadowLog(cwd);
   const abort = deps?.abort ?? abortProcess;
+
+  stampDelivered(cwd, deps?.writeDelivered ?? createDeliveredWriter(cwd));
 
   pi.registerTool(
     withBashDedup(bashTool, {

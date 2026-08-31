@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { gitSha, buildProvenance } from "./provenance.ts";
-import { packHash } from "./phrasing.ts";
+import { packHash } from "../contract.ts";
 
 function tempGitRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "eval-provenance-"));
