@@ -5,8 +5,10 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { buildBwrapArgs, buildSpawnEnv, defaultPiSpawner } from "./spawner.ts";
+import { buildBwrapArgs, buildSpawnEnv, defaultPiSpawner, defaultProbeSpawner } from "./spawner.ts";
 import type { RunSpec } from "./spawner.ts";
+import { evaluateCanary } from "./canary.ts";
+import type { ConditionManifest } from "./eval-contract.ts";
 
 function stubRepoRoot(piScript: string): string {
   const root = mkdtempSync(join(tmpdir(), "eval-stub-pi-"));
@@ -310,6 +312,21 @@ test("buildBwrapArgs_exposes_the_mise_toolchain_the_pi_shebang_resolves_node_fro
   assert.ok(args.lastIndexOf(misePath) > indexOfArg(args, "/home"), `expected ${misePath} bound after the /home mask`);
 });
 
+function homeWithUvToolchain(): string {
+  const homeDir = mkdtempSync(join(tmpdir(), "bwrap-home-"));
+  mkdirSync(join(homeDir, ".local", "share", "uv"), { recursive: true });
+  return homeDir;
+}
+
+test("buildBwrapArgs_exposes_the_uv_toolchain_the_python_venv_resolves_from", () => {
+  const homeDir = homeWithUvToolchain();
+
+  const args = buildBwrapArgs(stubMountPlan({ homeDir }));
+
+  const uvPath = join(homeDir, ".local", "share", "uv");
+  assert.ok(args.lastIndexOf(uvPath) > indexOfArg(args, "/home"), `expected ${uvPath} bound after the /home mask`);
+});
+
 test("buildBwrapArgs_binds_the_workdir_read_write", () => {
   const plan = stubMountPlan();
 
@@ -396,5 +413,70 @@ test(
 
     assert.equal(result.status, 0);
     assert.match(result.stdout.toString(), /^v\d+\.\d+\.\d+/);
+  },
+);
+
+function realRepoRoot(): string {
+  return join(import.meta.dirname, "..", "..");
+}
+
+function packedCondition(id: string): ConditionManifest {
+  return { id, env: {}, phrasingPack: "pack.json" };
+}
+
+function assertCanaryPassed(verdict: ReturnType<typeof evaluateCanary>): void {
+  assert.equal(verdict.ok, true);
+}
+
+function assertCanaryFailedWith(verdict: ReturnType<typeof evaluateCanary>, pattern: RegExp): void {
+  assert.equal(verdict.ok, false);
+  assert.match(verdict.ok ? "" : verdict.reason, pattern);
+}
+
+test(
+  "defaultProbeSpawner runs the real delivery probe inside bwrap and round-trips the delivered phrasing pack",
+  { skip: bwrapSkipReason },
+  async () => {
+    const workDir = mkdtempSync(join(tmpdir(), "probe-work-"));
+    const packContent = JSON.stringify({
+      CC_NUDGE: {
+        python: { first: "{name} probe-integration python ({cc}/{threshold})", rest: "{name} rest" },
+        typescript: { first: "{name} probe-integration ts ({cc}/{threshold})", rest: "{name} rest" },
+      },
+      CC_DELTA_NUDGE: "probe-integration delta text",
+    });
+
+    const outcome = await defaultProbeSpawner(realRepoRoot())({ cwd: workDir, env: { LIUBAI_PHRASING_PACK: packContent } });
+
+    const verdict = evaluateCanary({
+      condition: packedCondition("probe-integration"),
+      packContent,
+      exitCode: outcome.exitCode,
+      stdout: outcome.stdout,
+      stderr: outcome.stderr,
+    });
+    assertCanaryPassed(verdict);
+  },
+);
+
+test(
+  "the canary reports a mismatch when the sandbox delivers a phrasing pack that differs from what was expected",
+  { skip: bwrapSkipReason },
+  async () => {
+    const workDir = mkdtempSync(join(tmpdir(), "probe-work-"));
+    const deliveredPack = JSON.stringify({ CC_DELTA_NUDGE: "delivered text" });
+    const expectedPack = JSON.stringify({ CC_DELTA_NUDGE: "a different expected text" });
+
+    const outcome = await defaultProbeSpawner(realRepoRoot())({ cwd: workDir, env: { LIUBAI_PHRASING_PACK: deliveredPack } });
+
+    const verdict = evaluateCanary({
+      condition: packedCondition("probe-integration-mismatch"),
+      packContent: expectedPack,
+      exitCode: outcome.exitCode,
+      stdout: outcome.stdout,
+      stderr: outcome.stderr,
+    });
+
+    assertCanaryFailedWith(verdict, /probe-integration-mismatch/);
   },
 );
