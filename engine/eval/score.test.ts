@@ -1473,3 +1473,18 @@ test("runScore_writes_a_summary_and_prints_a_validity_block_for_a_fully_delivere
   assert.ok(blockIndex >= 0 && tableIndex > blockIndex);
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });
+
+test("runScore_classifies_a_rail_abort_row_as_errored_verdict", async () => {
+  const erroredRow = erroredRawRow("rails-default", "ts-flag-parser", "rail aborted the rep under eval (exit 17)", 1);
+  const normalRow = tsFlagParserRow({}, { conditionId: "control" });
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [erroredRow, normalRow]);
+
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+  assert.equal(result.status, 0);
+  const summaries = readSummary(runDir);
+  const railsSummary = summaries.find((s) => s.conditionId === "rails-default");
+  assert.ok(railsSummary);
+  assert.equal(railsSummary.counts.errored, 1);
+});

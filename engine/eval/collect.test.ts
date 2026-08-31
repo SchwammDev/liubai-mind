@@ -8,7 +8,7 @@ import { runCollect, detectAgentError, countTurns, sumTokenUsage, countRailFirin
 import type { CollectOpts } from "./collect.ts";
 import type { RunSpec, RunOutcome, PiSpawner, ProbeOutcome, ProbeSpawner } from "./spawner.ts";
 import { gitSha } from "./provenance.ts";
-import { RULE, packHash } from "../contract.ts";
+import { RULE, packHash, EVAL_ABORT_EXIT_CODE } from "../contract.ts";
 import { CC_DELTA_NUDGE, CC_NUDGE, formatCcNudge } from "../messages.ts";
 import { DEFAULT_POLICY } from "../policy.ts";
 import { PROBE_FIXTURES } from "../delivery-probe.ts";
@@ -932,4 +932,16 @@ test("runCollect_omits_a_declared_file_the_agent_deleted", async () => {
   await runCollect(opts);
 
   assert.equal("parse_flags.ts" in firstRow(opts.runDir).files, false);
+});
+
+test("runCollect_records_rail_abort_as_agentError_when_exit_code_is_17_with_completed_assistant_messages", async () => {
+  const stdoutJsonl = messageEndLine("stop");
+  const spawner = fixedOutcomeSpawner({ exitCode: EVAL_ABORT_EXIT_CODE, stdoutJsonl, timedOut: false });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+
+  await runCollect(opts);
+
+  const row = firstRow(opts.runDir);
+  assert.ok(row.agentError, "expected agentError to be set");
+  assert.match(row.agentError, /rail aborted.*exit 17/);
 });
