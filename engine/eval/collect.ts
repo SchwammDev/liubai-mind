@@ -5,12 +5,11 @@ import { dirname, join, relative } from "node:path";
 import type { CaseManifest, ConditionManifest, RawRow, Tier } from "./eval-contract.ts";
 import { RULE, EVAL_ABORT_EXIT_CODE } from "../contract.ts";
 import type { RuleName } from "../contract.ts";
-import { evaluateCanary, ccDeltaTextFor } from "./canary.ts";
+import { evaluateCanary } from "./canary.ts";
 import type { ProbeReport } from "./canary.ts";
 import { loadConditions } from "./conditions.ts";
 import { loadCases, copyPlan } from "./corpus.ts";
-import { validatePack } from "./phrasing.ts";
-import type { ValidPack } from "./phrasing.ts";
+import { promptCarriedArmMessage } from "./prompt-carried-message.ts";
 import { buildProvenance } from "./provenance.ts";
 import { defaultPiSpawner, defaultProbeSpawner } from "./spawner.ts";
 import type { PiSpawner, ProbeSpawner, RunOutcome } from "./spawner.ts";
@@ -312,15 +311,9 @@ export function buildEnv(condition: ConditionManifest, packContent: string | und
   return packContent === undefined ? base : { ...base, LIUBAI_PHRASING_PACK: packContent };
 }
 
-function armPack(packContent: string | undefined): ValidPack {
-  if (packContent === undefined) return {};
-  const validated = validatePack(packContent);
-  return "pack" in validated ? validated.pack : {};
-}
-
 export function buildTask(kase: CaseManifest, condition: ConditionManifest, packContent: string | undefined): string {
   if (condition.delivery !== "prompt") return kase.task;
-  return `${kase.task}\n\n${ccDeltaTextFor(armPack(packContent))}`;
+  return `${kase.task}\n\n${promptCarriedArmMessage(kase, packContent)}`;
 }
 
 export function copyCaseFiles(corpusDir: string, kase: CaseManifest, workDir: string): { from: string; to: string }[] {
