@@ -289,9 +289,13 @@ export function packAbsolutePath(conditionsDir: string, condition: ConditionMani
   return condition.phrasingPack === undefined ? undefined : join(conditionsDir, condition.phrasingPack);
 }
 
-export function buildEnv(condition: ConditionManifest, packPath: string | undefined): Record<string, string> {
+export function readPackContent(packPath: string | undefined): string | undefined {
+  return packPath === undefined ? undefined : readFileSync(packPath, "utf8");
+}
+
+export function buildEnv(condition: ConditionManifest, packContent: string | undefined): Record<string, string> {
   const base = { ...condition.env, LIUBAI_EVAL: "1" };
-  return packPath === undefined ? base : { ...base, LIUBAI_PHRASING_PACK: packPath };
+  return packContent === undefined ? base : { ...base, LIUBAI_PHRASING_PACK: packContent };
 }
 
 export function copyCaseFiles(corpusDir: string, kase: CaseManifest, workDir: string): { from: string; to: string }[] {
@@ -350,13 +354,13 @@ function readShadowFirings(workDir: string): Record<RuleName, number> | undefine
 export function buildRawRowCore(
   ctx: CollectContext,
   conditionId: string,
-  packPath: string | undefined,
+  packContent: string | undefined,
   outcome: RunOutcome,
   durationMs: number,
   snapshot: WorkDirSnapshot,
   shadowFirings?: Record<RuleName, number>,
 ): Omit<RawRow, "caseId" | "conditionId" | "rep"> {
-  const packBytes = packPath === undefined ? null : readFileSync(packPath, "utf8");
+  const packBytes = packContent === undefined ? null : packContent;
   const provenance = buildProvenance({
     conditionId,
     packBytes,
@@ -388,7 +392,7 @@ export function buildRawRowCore(
 function buildRawRow(
   ctx: CollectContext,
   item: WorkItem,
-  packPath: string | undefined,
+  packContent: string | undefined,
   outcome: RunOutcome,
   durationMs: number,
   snapshot: WorkDirSnapshot,
@@ -398,7 +402,7 @@ function buildRawRow(
     caseId: item.kase.id,
     conditionId: item.condition.id,
     rep: item.rep,
-    ...buildRawRowCore(ctx, item.condition.id, packPath, outcome, durationMs, snapshot, shadowFirings),
+    ...buildRawRowCore(ctx, item.condition.id, packContent, outcome, durationMs, snapshot, shadowFirings),
   };
 }
 
@@ -406,13 +410,14 @@ async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult>
   const workDir = mkdtempSync(join(ctx.workRoot, "eval-work-"));
   const plan = copyCaseFiles(ctx.corpusDir, item.kase, workDir);
   const packPath = packAbsolutePath(ctx.conditionsDir, item.condition);
-  const env = buildEnv(item.condition, packPath);
+  const packContent = readPackContent(packPath);
+  const env = buildEnv(item.condition, packContent);
 
   try {
     const { outcome, durationMs } = await spawnForItem(ctx, item.kase.task, workDir, env);
     const snapshot = snapshotWorkDir(workDir, plan);
     const shadowFirings = readShadowFirings(workDir);
-    const row = buildRawRow(ctx, item, packPath, outcome, durationMs, snapshot, shadowFirings);
+    const row = buildRawRow(ctx, item, packContent, outcome, durationMs, snapshot, shadowFirings);
     return { row, stdoutJsonl: outcome.stdoutJsonl };
   } catch (err) {
     return { failure: failureMessage(item, err) };

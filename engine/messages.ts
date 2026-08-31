@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-
 import type { Lang, Nudge } from "./contract.ts";
 
 export interface HelperConvention {
@@ -37,12 +35,13 @@ function isLang(value: string): value is Lang {
   return (KNOWN_LANGS as readonly string[]).includes(value);
 }
 
-export function readPack(path: string | undefined, read: (p: string) => string): unknown {
-  if (path === undefined) return {};
+export function readPack(content: string | undefined): unknown {
+  if (content === undefined || content === "") return {};
   try {
-    return JSON.parse(read(path));
-  } catch {
-    return {};
+    return JSON.parse(content);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`LIUBAI_PHRASING_PACK is set but is not valid JSON: ${reason}`);
   }
 }
 
@@ -96,7 +95,7 @@ export function formatCcDeltaNudge(template: string, facts: { name: string; dpBe
     .replaceAll("{dpAfter}", String(facts.dpAfter));
 }
 
-const PARSED_PACK: unknown = readPack(process.env.LIUBAI_PHRASING_PACK, (p) => readFileSync(p, "utf8"));
+const PARSED_PACK: unknown = readPack(process.env.LIUBAI_PHRASING_PACK);
 
 export const CC_NUDGE: Record<Lang, CcNudgePhrasing> = resolveCcNudge(DEFAULT_CC_NUDGE, PARSED_PACK);
 

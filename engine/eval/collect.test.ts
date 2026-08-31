@@ -8,6 +8,7 @@ import { runCollect, detectAgentError, countTurns, sumTokenUsage, countRailFirin
 import type { CollectOpts } from "./collect.ts";
 import type { RunSpec, RunOutcome, PiSpawner } from "./spawner.ts";
 import { gitSha } from "./provenance.ts";
+import { packHash } from "./phrasing.ts";
 import { SNAPSHOT_FILE_CAP_BYTES } from "./snapshot.ts";
 import type { RawRow, Tier } from "./eval-contract.ts";
 
@@ -259,14 +260,26 @@ test("runCollect_passes_control_condition_env_to_the_spawner", async () => {
   assert.equal(calls[0]?.env.LIUBAI_RAILS_OFF, "1");
 });
 
-test("runCollect_passes_the_phrasing_pack_path_only_for_pack_conditions", async () => {
+test("runCollect_passes_the_phrasing_pack_content_only_for_pack_conditions", async () => {
   const conditionsDir = tempPackedConditionsDir();
   const { spawner, calls } = recordingSpawner();
   const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["packed"], conditionsDir, spawner });
 
   await runCollect(opts);
 
-  assert.equal(calls[0]?.env.LIUBAI_PHRASING_PACK, join(conditionsDir, "packs", "pack.json"));
+  const packContent = readFileSync(join(conditionsDir, "packs", "pack.json"), "utf8");
+  assert.equal(calls[0]?.env.LIUBAI_PHRASING_PACK, packContent);
+});
+
+test("runCollect_stamps_the_phrasing_pack_hash_from_the_content_delivered_to_the_agent", async () => {
+  const conditionsDir = tempPackedConditionsDir();
+  const { spawner, calls } = recordingSpawner();
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["packed"], conditionsDir, spawner });
+
+  await runCollect(opts);
+
+  const row = firstRow(opts.runDir);
+  assert.equal(row.provenance.phrasingPackHash, packHash(calls[0]?.env.LIUBAI_PHRASING_PACK ?? null));
 });
 
 test("runCollect_omits_the_phrasing_pack_var_for_packless_conditions", async () => {
