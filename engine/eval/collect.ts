@@ -5,10 +5,12 @@ import { dirname, join, relative } from "node:path";
 import type { CaseManifest, ConditionManifest, RawRow, Tier } from "./eval-contract.ts";
 import { RULE, EVAL_ABORT_EXIT_CODE } from "../contract.ts";
 import type { RuleName } from "../contract.ts";
-import { evaluateCanary } from "./canary.ts";
+import { evaluateCanary, ccDeltaTextFor } from "./canary.ts";
 import type { ProbeReport } from "./canary.ts";
 import { loadConditions } from "./conditions.ts";
 import { loadCases, copyPlan } from "./corpus.ts";
+import { validatePack } from "./phrasing.ts";
+import type { ValidPack } from "./phrasing.ts";
 import { buildProvenance } from "./provenance.ts";
 import { defaultPiSpawner, defaultProbeSpawner } from "./spawner.ts";
 import type { PiSpawner, ProbeSpawner, RunOutcome } from "./spawner.ts";
@@ -310,6 +312,17 @@ export function buildEnv(condition: ConditionManifest, packContent: string | und
   return packContent === undefined ? base : { ...base, LIUBAI_PHRASING_PACK: packContent };
 }
 
+function armPack(packContent: string | undefined): ValidPack {
+  if (packContent === undefined) return {};
+  const validated = validatePack(packContent);
+  return "pack" in validated ? validated.pack : {};
+}
+
+export function buildTask(kase: CaseManifest, condition: ConditionManifest, packContent: string | undefined): string {
+  if (condition.delivery !== "prompt") return kase.task;
+  return `${kase.task}\n\n${ccDeltaTextFor(armPack(packContent))}`;
+}
+
 export function copyCaseFiles(corpusDir: string, kase: CaseManifest, workDir: string): { from: string; to: string }[] {
   const caseDir = join(corpusDir, kase.id);
   const plan = copyPlan(caseDir, kase, workDir);
@@ -382,6 +395,7 @@ export function buildRawRowCore(
   snapshot: WorkDirSnapshot,
   shadowFirings?: Record<RuleName, number>,
   delivered?: RawRow["delivered"],
+  sentTask?: string,
 ): Omit<RawRow, "caseId" | "conditionId" | "rep"> {
   const packBytes = packContent === undefined ? null : packContent;
   const provenance = buildProvenance({
@@ -397,6 +411,7 @@ export function buildRawRowCore(
 
   return {
     provenance,
+    ...(sentTask !== undefined ? { task: sentTask } : {}),
     files: snapshot.files,
     ...(snapshot.dropped.length > 0 ? { snapshotDropped: snapshot.dropped } : {}),
     exitCode: outcome.exitCode,
@@ -422,12 +437,13 @@ function buildRawRow(
   snapshot: WorkDirSnapshot,
   shadowFirings: Record<RuleName, number> | undefined,
   delivered: RawRow["delivered"],
+  sentTask: string | undefined,
 ): RawRow {
   return {
     caseId: item.kase.id,
     conditionId: item.condition.id,
     rep: item.rep,
-    ...buildRawRowCore(ctx, item.condition.id, packContent, outcome, durationMs, snapshot, shadowFirings, delivered),
+    ...buildRawRowCore(ctx, item.condition.id, packContent, outcome, durationMs, snapshot, shadowFirings, delivered, sentTask),
   };
 }
 
@@ -437,13 +453,15 @@ async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult>
   const packPath = packAbsolutePath(ctx.conditionsDir, item.condition);
   const packContent = readPackContent(packPath);
   const env = buildEnv(item.condition, packContent);
+  const task = buildTask(item.kase, item.condition, packContent);
 
   try {
-    const { outcome, durationMs } = await spawnForItem(ctx, item.kase.task, workDir, env);
+    const { outcome, durationMs } = await spawnForItem(ctx, task, workDir, env);
     const snapshot = snapshotWorkDir(workDir, plan);
     const shadowFirings = readShadowFirings(workDir);
     const delivered = readDelivered(workDir);
-    const row = buildRawRow(ctx, item, packContent, outcome, durationMs, snapshot, shadowFirings, delivered);
+    const sentTask = item.condition.delivery === "prompt" ? task : undefined;
+    const row = buildRawRow(ctx, item, packContent, outcome, durationMs, snapshot, shadowFirings, delivered, sentTask);
     return { row, stdoutJsonl: outcome.stdoutJsonl };
   } catch (err) {
     return { failure: failureMessage(item, err) };

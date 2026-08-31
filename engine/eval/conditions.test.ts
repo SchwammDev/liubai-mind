@@ -30,7 +30,7 @@ test("loadConditions_loads_all_committed_conditions", () => {
 
   assertLoaded(result);
   const ids = result.map((c) => c.id).sort();
-  assert.deepEqual(ids, ["bare-metric-v1", "cc-delta-numberless", "cc-delta-off", "cc-delta-shadow", "coaching-v1", "control", "rails-default"]);
+  assert.deepEqual(ids, ["bare-metric-v1", "cc-delta-numberless", "cc-delta-numberless-prompt", "cc-delta-off", "cc-delta-shadow", "coaching-v1", "control", "rails-default"]);
 });
 
 test("loadConditions_reads_control_env_from_its_manifest", () => {
@@ -118,4 +118,45 @@ test("loadConditions_rejects_a_non_boolean_expectedZeroFirings", () => {
 
   assertRejected(result);
   assert.match(result.error, /expectedZeroFirings must be a boolean/);
+});
+
+test("loadConditions_leaves_delivery_undefined_when_the_manifest_omits_it", () => {
+  const dir = tempConditionsDir();
+  writeCondition(dir, "plain.json", { id: "plain", env: {} });
+
+  const result = loadConditions(dir);
+
+  assertLoaded(result);
+  assert.equal(result[0]?.delivery, undefined);
+});
+
+test("loadConditions_reads_delivery_prompt_from_a_condition_that_closes_the_live_rail", () => {
+  const dir = tempConditionsDir();
+  writeCondition(dir, "prompt-carried.json", { id: "prompt-carried", delivery: "prompt", env: { LIUBAI_RAILS_OFF: "1" } });
+
+  const result = loadConditions(dir);
+
+  assertLoaded(result);
+  assert.equal(result[0]?.delivery, "prompt");
+});
+
+test("loadConditions_rejects_a_delivery_value_that_is_neither_prompt_nor_rail", () => {
+  const dir = tempConditionsDir();
+  writeCondition(dir, "bad-delivery.json", { id: "bad-delivery", env: {}, delivery: "carrier-pigeon" });
+
+  const result = loadConditions(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /bad-delivery\.json/);
+  assert.match(result.error, /carrier-pigeon/);
+});
+
+test("loadConditions_rejects_a_prompt_delivery_condition_that_leaves_the_live_rail_open", () => {
+  const dir = tempConditionsDir();
+  writeCondition(dir, "leaky-prompt.json", { id: "leaky-prompt", delivery: "prompt", env: {} });
+
+  const result = loadConditions(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /LIUBAI_RAILS_OFF/);
 });
