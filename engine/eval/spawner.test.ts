@@ -128,9 +128,10 @@ function repoRootWithEvalCorpus(): string {
 function piAgentHomeWithSessionState(): string {
   const homeDir = mkdtempSync(join(tmpdir(), "bwrap-home-"));
   const agentDir = join(homeDir, ".pi", "agent");
-  mkdirSync(join(agentDir, "engine"), { recursive: true });
+  mkdirSync(join(agentDir, "engine", "eval"), { recursive: true });
   mkdirSync(join(agentDir, "extensions"), { recursive: true });
   mkdirSync(join(agentDir, "sessions"), { recursive: true });
+  writeFileSync(join(agentDir, "engine", "venv-marker.txt"), "venv\n");
   writeFileSync(join(agentDir, "complexity.json"), "{}");
   writeFileSync(join(agentDir, "liubai-dedup-log.jsonl"), "");
   writeFileSync(join(agentDir, "auth.json"), "{}");
@@ -198,7 +199,7 @@ test("buildBwrapArgs_skips_exposing_repo_paths_that_do_not_exist_on_disk", () =>
   assert.equal(args.includes(join(repoRoot, "engine", "eval")), false);
 });
 
-const PI_AGENT_SESSION_STATE = ["engine", "extensions", "sessions", "complexity.json", "liubai-dedup-log.jsonl"];
+const PI_AGENT_SESSION_STATE = ["extensions", "sessions", "complexity.json", "liubai-dedup-log.jsonl"];
 
 function assertAgentDirIsTmpfsWithSessionStateHidden(args: string[], agentDir: string): void {
   const tmpfsIndex = indexOfArg(args, agentDir);
@@ -222,6 +223,48 @@ test("buildBwrapArgs_binds_pi_agent_config_files_into_the_agent_tmpfs", () => {
   const args = buildBwrapArgs(stubMountPlan({ homeDir }));
 
   assert.equal(args.includes(join(homeDir, ".pi", "agent", "auth.json")), true);
+});
+
+function assertRoBound(args: string[], path: string): void {
+  const index = indexOfArg(args, path);
+  assert.ok(index > 0, `expected ${path} to be ro-bound`);
+  assert.equal(args[index - 1], "--ro-bind");
+}
+
+function assertTmpfsMasked(args: string[], path: string): void {
+  const index = indexOfArg(args, path);
+  assert.ok(index > 0, `expected ${path} to be tmpfs-masked`);
+  assert.equal(args[index - 1], "--tmpfs");
+}
+
+test("buildBwrapArgs_ro_binds_the_deployed_pi_agent_engine_so_its_venv_is_usable", () => {
+  const homeDir = piAgentHomeWithSessionState();
+  const agentDir = join(homeDir, ".pi", "agent");
+
+  const args = buildBwrapArgs(stubMountPlan({ homeDir }));
+
+  assertRoBound(args, join(agentDir, "engine"));
+});
+
+test("buildBwrapArgs_masks_the_deployed_pi_agent_eval_answer_key", () => {
+  const homeDir = piAgentHomeWithSessionState();
+  const agentDir = join(homeDir, ".pi", "agent");
+
+  const args = buildBwrapArgs(stubMountPlan({ homeDir }));
+
+  assertTmpfsMasked(args, join(agentDir, "engine", "eval"));
+});
+
+test("buildBwrapArgs_masks_the_deployed_pi_agent_eval_answer_key_after_binding_engine", () => {
+  const homeDir = piAgentHomeWithSessionState();
+  const agentDir = join(homeDir, ".pi", "agent");
+
+  const args = buildBwrapArgs(stubMountPlan({ homeDir }));
+
+  const engineBindIndex = indexOfArg(args, join(agentDir, "engine"));
+  const evalMaskIndex = indexOfArg(args, join(agentDir, "engine", "eval"));
+  assert.ok(engineBindIndex >= 0 && evalMaskIndex >= 0);
+  assert.ok(engineBindIndex < evalMaskIndex);
 });
 
 function homeWithDotfilesManagedConfig(): { homeDir: string; agentDir: string } {
@@ -298,9 +341,14 @@ function assertCorpusUnreadable(args: string[], repoRoot: string): void {
   assert.notEqual(sandboxedRun(args, `cat ${join(repoRoot, "engine", "eval", "corpus")}`).status, 0);
 }
 
-function assertDeployedEngineEmpty(args: string[], homeDir: string): void {
-  const listing = sandboxedRun(args, `ls -A ${join(homeDir, ".pi", "agent", "engine")}`);
+function assertDeployedEngineEvalEmpty(args: string[], homeDir: string): void {
+  const listing = sandboxedRun(args, `ls -A ${join(homeDir, ".pi", "agent", "engine", "eval")}`);
   assert.equal(listing.stdout.toString().trim(), "");
+}
+
+function assertDeployedEngineVenvReadable(args: string[], homeDir: string): void {
+  const path = join(homeDir, ".pi", "agent", "engine", "venv-marker.txt");
+  assert.equal(sandboxedRun(args, `cat ${path}`).status, 0);
 }
 
 function assertWorkdirWritable(args: string[], workDir: string): void {
@@ -321,7 +369,7 @@ function sandboxedMountPlan() {
 }
 
 test(
-  "a real bwrap sandbox hides the eval harness and the deployed pi agent copy while keeping the workdir writable",
+  "a real bwrap sandbox hides the eval harness and the deployed agent's eval answer key while exposing its engine and keeping the workdir writable",
   { skip: bwrapSkipReason },
   () => {
     const { repoRoot, homeDir, workDir } = sandboxedMountPlan();
@@ -329,7 +377,8 @@ test(
     const args = buildBwrapArgs({ repoRoot, homeDir, workDir });
 
     assertCorpusUnreadable(args, repoRoot);
-    assertDeployedEngineEmpty(args, homeDir);
+    assertDeployedEngineEvalEmpty(args, homeDir);
+    assertDeployedEngineVenvReadable(args, homeDir);
     assertWorkdirWritable(args, workDir);
     assertAnalyzeTsReadable(args, repoRoot);
   },

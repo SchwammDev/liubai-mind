@@ -52,7 +52,7 @@ export interface BwrapMountPlan {
 
 const REPO_EXPOSED_PATHS = ["node_modules", "extensions", "engine", "package.json", "tsconfig.json"];
 const HOME_EXPOSED_PATHS = [join(".local", "share", "mise")];
-const PI_AGENT_HIDDEN_ENTRIES = ["engine", "extensions", "sessions", "complexity.json", "liubai-dedup-log.jsonl"];
+const PI_AGENT_HIDDEN_ENTRIES = ["extensions", "sessions", "complexity.json", "liubai-dedup-log.jsonl"];
 
 function roBindIfExists(args: string[], path: string): void {
   if (existsSync(path)) args.push("--ro-bind", path, path);
@@ -78,7 +78,10 @@ export function buildBwrapArgs({ repoRoot, homeDir, workDir }: BwrapMountPlan): 
   tmpfsMaskIfExists(args, join(repoRoot, "engine", "eval"));
 
   const piAgentDir = join(homeDir, ".pi", "agent");
-  if (existsSync(piAgentDir)) bindVisibleAgentConfig(args, piAgentDir);
+  if (existsSync(piAgentDir)) {
+    bindVisibleAgentConfig(args, piAgentDir);
+    tmpfsMaskIfExists(args, join(piAgentDir, "engine", "eval"));
+  }
 
   args.push("--bind", workDir, workDir);
   args.push("--unshare-user", "--die-with-parent");
