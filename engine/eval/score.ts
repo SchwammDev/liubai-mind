@@ -3,11 +3,12 @@ import { join } from "node:path";
 
 import type { Lang, Extracted, RuleName } from "../contract.ts";
 import { RULE } from "../contract.ts";
-import type { CaseManifest } from "./eval-contract.ts";
+import type { CaseManifest, ConditionManifest } from "./eval-contract.ts";
 import type { RawRow, Metrics, Verdict, GamedReason, JudgeResult, Provenance, Tier } from "./eval-contract.ts";
 import { decisionPoints, classifyVerdict } from "./judge.ts";
 import { countSilentHandlers } from "./silent-handlers.ts";
 import { loadCases, declaredFiles } from "./corpus.ts";
+import { loadConditions } from "./conditions.ts";
 import { runProbes } from "./probes.ts";
 import { scanReferences } from "./references.ts";
 import { sourceParses } from "./parse-check.ts";
@@ -61,6 +62,7 @@ const FALLBACK_AGENT_ERROR = "agent error";
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const ANSWER_KEY_PREFIXES = [join(REPO_ROOT, "engine", "eval"), ".pi/agent/engine/eval"];
 const RAIL_PATH_PREFIXES = [REPO_ROOT, "/.pi/", "~/.pi"];
+const DEFAULT_CONDITIONS_DIR = join(import.meta.dirname, "conditions");
 
 function silentHandlerLang(lang: Lang): "typescript" | "python" {
   if (lang === "typescript") return "typescript";
@@ -719,15 +721,177 @@ async function judgeAndSummarize(
   return { judged, summary: aggregate(judged, env, tierMap.map), tierByCaseId: tierMap.map };
 }
 
+export type DeliveryViolationKind = "not-delivered" | "missing-stamp" | "live-rules-silent" | "shadow-rules-silent";
+
+export interface DeliveryViolation {
+  kind: DeliveryViolationKind;
+  conditionId: string;
+  caseId?: string;
+  rep?: number;
+  message: string;
+}
+
+export interface ArmDeliverySummary {
+  conditionId: string;
+  reps: number;
+  liveFirings: number;
+  shadowFirings: number;
+}
+
+export type DeliveryValidity =
+  | { kind: "unstamped"; warning: string }
+  | { kind: "invalid"; violations: DeliveryViolation[] }
+  | { kind: "valid"; arms: ArmDeliverySummary[] };
+
+const UNSTAMPED_DELIVERY_WARNING =
+  "score: no row in this run carries a delivery stamp; delivery validity is unverifiable (the run predates stamping) — scoring proceeds without delivery checks";
+
+function rowLabel(row: RawRow): string {
+  return `${row.conditionId}/${row.caseId}#${row.rep}`;
+}
+
+function notDeliveredViolations(rows: RawRow[]): DeliveryViolation[] {
+  return rows
+    .filter((row) => row.delivered !== undefined && row.delivered.packHash !== row.provenance.phrasingPackHash)
+    .map((row) => ({
+      kind: "not-delivered",
+      conditionId: row.conditionId,
+      caseId: row.caseId,
+      rep: row.rep,
+      message: `${rowLabel(row)}: condition not delivered — claimed pack ${row.provenance.phrasingPackHash ?? "none"}, delivered ${row.delivered!.packHash ?? "none"}`,
+    }));
+}
+
+function missingStampViolations(rows: RawRow[]): DeliveryViolation[] {
+  return rows
+    .filter((row) => row.delivered === undefined)
+    .map((row) => ({
+      kind: "missing-stamp",
+      conditionId: row.conditionId,
+      caseId: row.caseId,
+      rep: row.rep,
+      message: `${rowLabel(row)}: no delivery stamp while other rows in this run carry one — rails likely never loaded for this rep`,
+    }));
+}
+
+function armRowsByCondition(rows: RawRow[]): Map<string, RawRow[]> {
+  const arms = new Map<string, RawRow[]>();
+  for (const row of rows) {
+    const armRows = arms.get(row.conditionId);
+    if (armRows === undefined) arms.set(row.conditionId, [row]);
+    else armRows.push(row);
+  }
+  return arms;
+}
+
+function unionDeliveredRules(rows: RawRow[], pick: (delivered: NonNullable<RawRow["delivered"]>) => string[]): string[] {
+  const rules = new Set<string>();
+  for (const row of rows) {
+    if (row.delivered === undefined) continue;
+    for (const rule of pick(row.delivered)) rules.add(rule);
+  }
+  return [...rules];
+}
+
+function sumFirings(rows: RawRow[], pick: (row: RawRow) => Record<RuleName, number> | undefined): number {
+  let total = 0;
+  for (const row of rows) {
+    const firings = pick(row);
+    if (firings === undefined) continue;
+    for (const count of Object.values(firings)) total += count;
+  }
+  return total;
+}
+
+function firingFloorViolation(
+  kind: Extract<DeliveryViolationKind, "live-rules-silent" | "shadow-rules-silent">,
+  conditionId: string,
+  rules: string[],
+  reps: number,
+): DeliveryViolation {
+  const label = kind === "live-rules-silent" ? "live" : "shadow";
+  return { kind, conditionId, message: `${conditionId}: ${label} rules ${rules.join(", ")} were delivered but never fired across ${reps} rows` };
+}
+
+function firingFloorViolations(conditionId: string, armRows: RawRow[], manifest: ConditionManifest | undefined): DeliveryViolation[] {
+  if (manifest?.expectedZeroFirings === true) return [];
+
+  const violations: DeliveryViolation[] = [];
+
+  const liveRules = unionDeliveredRules(armRows, (d) => d.liveRules);
+  if (liveRules.length > 0 && sumFirings(armRows, (row) => row.railFirings) === 0) {
+    violations.push(firingFloorViolation("live-rules-silent", conditionId, liveRules, armRows.length));
+  }
+
+  const shadowRules = unionDeliveredRules(armRows, (d) => d.shadowRules);
+  if (shadowRules.length > 0 && sumFirings(armRows, (row) => row.shadowFirings) === 0) {
+    violations.push(firingFloorViolation("shadow-rules-silent", conditionId, shadowRules, armRows.length));
+  }
+
+  return violations;
+}
+
+function armSummaryFor(conditionId: string, armRows: RawRow[]): ArmDeliverySummary {
+  return {
+    conditionId,
+    reps: armRows.length,
+    liveFirings: sumFirings(armRows, (row) => row.railFirings),
+    shadowFirings: sumFirings(armRows, (row) => row.shadowFirings),
+  };
+}
+
+function checkDeliveryValidity(rows: RawRow[], conditions: ConditionManifest[]): DeliveryValidity {
+  const conditionById = new Map(conditions.map((c) => [c.id, c]));
+  const arms = [...armRowsByCondition(rows)];
+
+  const violations = [
+    ...notDeliveredViolations(rows),
+    ...missingStampViolations(rows),
+    ...arms.flatMap(([conditionId, armRows]) => firingFloorViolations(conditionId, armRows, conditionById.get(conditionId))),
+  ];
+  if (violations.length > 0) return { kind: "invalid", violations };
+
+  const armSummaries = arms.map(([conditionId, armRows]) => armSummaryFor(conditionId, armRows)).sort((a, b) => a.conditionId.localeCompare(b.conditionId));
+  return { kind: "valid", arms: armSummaries };
+}
+
+function resolveDeliveryValidity(rows: RawRow[], conditionsDir: string): { result: DeliveryValidity } | { error: string } {
+  if (rows.every((row) => row.delivered === undefined)) return { result: { kind: "unstamped", warning: UNSTAMPED_DELIVERY_WARNING } };
+
+  const conditions = loadConditions(conditionsDir);
+  if ("error" in conditions) return { error: `score: failed to load conditions: ${conditions.error}` };
+
+  return { result: checkDeliveryValidity(rows, conditions) };
+}
+
+function formatDeliveryViolations(violations: DeliveryViolation[]): string {
+  return violations.map((v) => `score: delivery violation [${v.kind}] ${v.message}`).join("\n");
+}
+
+function formatDeliveryValidityBlock(arms: ArmDeliverySummary[]): string {
+  const lines = arms.map((a) => `  ${a.conditionId}: reps=${a.reps} liveFirings=${a.liveFirings} shadowFirings=${a.shadowFirings} delivered=ok`);
+  return [...lines, ""].join("\n");
+}
+
+function deliveryStdoutPrefix(validity: Exclude<DeliveryValidity, { kind: "invalid" }>): string {
+  if (validity.kind === "unstamped") return `${validity.warning}\n\n`;
+  return `delivery validity:\n${formatDeliveryValidityBlock(validity.arms)}\n`;
+}
+
 export async function runScore(opts: {
   runDir: string;
   corpusDir: string;
   repoRoot: string;
+  conditionsDir?: string;
   compareRunDir?: string;
   pythonBin?: string;
 }): Promise<{ status: number; stdout: string }> {
   const parsedRaw = readRawJsonl(opts.runDir);
   if ("error" in parsedRaw) return { status: ERROR_STATUS, stdout: parsedRaw.error };
+
+  const validity = resolveDeliveryValidity(parsedRaw.rows, opts.conditionsDir ?? DEFAULT_CONDITIONS_DIR);
+  if ("error" in validity) return { status: ERROR_STATUS, stdout: validity.error };
+  if (validity.result.kind === "invalid") return { status: ERROR_STATUS, stdout: formatDeliveryViolations(validity.result.violations) };
 
   if (allRowsErrored(parsedRaw.rows)) {
     return { status: ERROR_STATUS, stdout: `score: every row in this run agent-errored; first: ${firstAgentError(parsedRaw.rows)}` };
@@ -744,11 +908,12 @@ export async function runScore(opts: {
   writeSummaryJsonl(opts.runDir, summary);
   writeJudgedJsonl(opts.runDir, judged);
   const table = formatMarkdown(summary);
+  const validityPrefix = deliveryStdoutPrefix(validity.result);
 
-  if (opts.compareRunDir === undefined) return { status: OK_STATUS, stdout: table };
+  if (opts.compareRunDir === undefined) return { status: OK_STATUS, stdout: `${validityPrefix}${table}` };
 
   const compareSection = await buildCompareSection(parsedRaw.rows, summary, opts.compareRunDir, opts.corpusDir, judgeEnv.env, tierMap);
   if ("error" in compareSection) return { status: ERROR_STATUS, stdout: compareSection.error };
 
-  return { status: OK_STATUS, stdout: `${compareSection.text}\n${table}` };
+  return { status: OK_STATUS, stdout: `${validityPrefix}${compareSection.text}\n${table}` };
 }

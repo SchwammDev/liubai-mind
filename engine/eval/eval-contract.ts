@@ -4,6 +4,7 @@ export interface ConditionManifest {
   id: string;
   env: Record<string, string>;
   phrasingPack?: string;
+  expectedZeroFirings?: boolean;
 }
 
 export type Probe = { args: unknown[]; returns: unknown } | { args: unknown[]; throws: string };
