@@ -360,6 +360,30 @@ test("runCollect_sends_the_case_task_followed_by_the_arm_message_for_a_prompt_de
   assert.equal(calls[0]?.task, `${caseTask}\n\n${PROMPT_ARM_MESSAGE}`);
 });
 
+const PROMPT_ARM_TEMPLATE_WITH_PLACEHOLDERS = "{name} still carries {dpBefore} decision points, unchanged from {dpAfter}.";
+
+function tempPlaceholderPromptConditionsDir(): string {
+  const dir = tempDir("eval-conditions-");
+  mkdirSync(join(dir, "packs"), { recursive: true });
+  writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_ARM_TEMPLATE_WITH_PLACEHOLDERS }));
+  writeFileSync(
+    join(dir, "prompt-carried.json"),
+    JSON.stringify({ id: "prompt-carried", delivery: "prompt", env: { LIUBAI_RAILS_OFF: "1" }, phrasingPack: "packs/pack.json" }),
+  );
+  return dir;
+}
+
+test("runCollect_fills_the_arm_messages_placeholders_with_the_cases_entry_symbol_and_decision_points", async () => {
+  const conditionsDir = tempPlaceholderPromptConditionsDir();
+  const { spawner, calls } = recordingSpawner();
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["prompt-carried"], conditionsDir, spawner });
+
+  await runCollect(opts);
+
+  const caseTask = readCaseTask(CORPUS_DIR, "ts-flag-parser");
+  assert.equal(calls[0]?.task, `${caseTask}\n\nparseFlags still carries 24 decision points, unchanged from 24.`);
+});
+
 test("runCollect_records_the_sent_task_on_the_raw_row_for_a_prompt_delivery_condition", async () => {
   const conditionsDir = tempPromptConditionsDir();
   const { spawner } = recordingSpawner();

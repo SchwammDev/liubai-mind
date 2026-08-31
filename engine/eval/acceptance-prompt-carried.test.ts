@@ -9,6 +9,7 @@ import type { CollectOpts, CollectResult } from "./collect.ts";
 import { runScore } from "./score.ts";
 import type { RunSpec, PiSpawner } from "./spawner.ts";
 import { healthyProbeReporter } from "./probe-doubles.ts";
+import { formatCcDeltaNudge } from "../messages.ts";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const CORPUS_DIR = join(import.meta.dirname, "corpus");
@@ -19,14 +20,28 @@ const CASE_ID = "ts-flag-parser";
 const CASE_TASK = caseTask();
 const ARM_MESSAGE = armMessage();
 
+interface CaseFacts {
+  task: string;
+  entrySymbol: string;
+  baseline: { decisionPoints: number };
+}
+
+function caseFacts(): CaseFacts {
+  return JSON.parse(readFileSync(join(CORPUS_DIR, CASE_ID, "manifest.json"), "utf8")) as CaseFacts;
+}
+
 function caseTask(): string {
-  const manifest = JSON.parse(readFileSync(join(CORPUS_DIR, CASE_ID, "manifest.json"), "utf8")) as { task: string };
-  return manifest.task;
+  return caseFacts().task;
 }
 
 function armMessage(): string {
   const pack = JSON.parse(readFileSync(join(CONDITIONS_DIR, "packs", "cc-delta-numberless.json"), "utf8")) as { CC_DELTA_NUDGE: string };
-  return pack.CC_DELTA_NUDGE;
+  const facts = caseFacts();
+  return formatCcDeltaNudge(pack.CC_DELTA_NUDGE, {
+    name: facts.entrySymbol,
+    dpBefore: facts.baseline.decisionPoints,
+    dpAfter: facts.baseline.decisionPoints,
+  });
 }
 
 function tempDir(prefix: string): string {
