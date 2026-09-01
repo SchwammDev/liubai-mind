@@ -437,6 +437,7 @@ export function buildRawRowCore(
     ...(shadowFirings !== undefined ? { shadowFirings } : {}),
     ...(delivered !== undefined ? { delivered } : {}),
     ...(agentError !== undefined ? { agentError } : {}),
+    ...(ctx.simulatedSession ? { simulatedSession: true as const } : {}),
   };
 }
 
