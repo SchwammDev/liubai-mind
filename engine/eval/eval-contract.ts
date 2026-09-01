@@ -96,5 +96,4 @@ export interface RawRow {
   delivered?: { packHash: string | null; liveRules: string[]; shadowRules: string[] };
   agentError?: string;
   secondTouch?: SecondTouchInfo;
-  simulatedSession?: true;
 }
