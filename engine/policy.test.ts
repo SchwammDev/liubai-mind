@@ -247,7 +247,7 @@ test("the cc-delta rule nudges a helper split that hides a violation without low
   const resp = await ccDeltaResp(withBefore([4, 4, 4, 3], SPLIT_BEFORE));
 
   assert.equal(resp.nudges.length, 1);
-  assertCcDeltaNudge(firstNudge(resp), /handleRequest/, /carries 11 decision points where it carried 11/);
+  assertCcDeltaNudge(firstNudge(resp), /handleRequest/, /still carries the same decisions/);
 });
 
 const CC_DELTA_OFF_POLICY: Policy = {
