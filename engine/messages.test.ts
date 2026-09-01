@@ -108,13 +108,19 @@ test("formatCcDeltaNudge leaves a template without placeholders untouched", () =
   assert.equal(msg, "say it in one sentence");
 });
 
-test("CC_DELTA_NUDGE reads as the coaching guide's dp-invariant voice", () => {
+test("CC_DELTA_NUDGE reads as the coaching guide's numberless voice", () => {
   const msg = formatCcDeltaNudge(CC_DELTA_NUDGE, { name: "handleRequest", dpBefore: 11, dpAfter: 11 });
 
   assert.equal(
     msg,
-    "handleRequest dropped below the complexity threshold, but the file still carries 11 decision points where it carried 11 — the complexity moved, it did not leave. Splitting a tangle into helpers relocates branches without removing any; a reader now chases the same decisions across more functions. Go back to the shape: collapse branches that repeat a pattern into a dispatch/lookup, delete branches the function's one-sentence job does not need, and only keep helpers that stand for a genuinely separate job.",
+    "handleRequest dropped below the complexity threshold, but the file still carries the same decisions — the complexity moved, it did not leave. Splitting a tangle into helpers relocates branches without removing any; a reader now chases the same decisions across more functions. Go back to the shape: collapse branches that repeat a pattern into a dispatch/lookup, delete branches the function's one-sentence job does not need, and only keep helpers that stand for a genuinely separate job.",
   );
+});
+
+test("the default cc-delta nudge mentions no numbers once formatted with a name and decision-point counts", () => {
+  const msg = formatCcDeltaNudge(CC_DELTA_NUDGE, { name: "handleRequest", dpBefore: 11, dpAfter: 9 });
+
+  assert.doesNotMatch(msg, /[0-9]/);
 });
 
 const DEFAULT_DELTA_TEXT = "default delta text for {name}";
