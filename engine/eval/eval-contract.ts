@@ -84,6 +84,8 @@ export interface RawRow {
   snapshotDropped?: string[];
   exitCode: number;
   timedOut: boolean;
+  signal?: string;
+  stderrTail?: string;
   durationMs: number;
   turns?: number;
   tokensIn?: number;

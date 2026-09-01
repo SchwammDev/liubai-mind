@@ -88,6 +88,33 @@ test("defaultPiSpawner_kills_a_hung_process_and_reports_timeout", async () => {
   assert.notEqual(outcome.exitCode, 0);
 });
 
+test("defaultPiSpawner_reports_a_kill_inside_the_sandbox_as_a_plain_exit_code", async () => {
+  const repoRoot = stubRepoRoot("kill -KILL $$");
+
+  const outcome = await defaultPiSpawner(repoRoot)(spec());
+
+  assert.equal(outcome.exitCode, 137);
+  assert.equal(outcome.signal, undefined);
+});
+
+test("defaultPiSpawner_records_the_signal_when_the_sandbox_process_itself_is_killed", async () => {
+  const repoRoot = stubRepoRoot("trap '' TERM; sleep 2");
+
+  const outcome = await defaultPiSpawner(repoRoot)(spec({ timeoutMs: 200 }));
+
+  assert.equal(outcome.timedOut, true);
+  assert.equal(outcome.signal, "SIGTERM");
+});
+
+test("defaultPiSpawner_keeps_the_stderr_tail_of_a_failing_pi_process", async () => {
+  const repoRoot = stubRepoRoot('echo "FATAL ERROR: heap out of memory" >&2; exit 7');
+
+  const outcome = await defaultPiSpawner(repoRoot)(spec());
+
+  assert.equal(outcome.exitCode, 7);
+  assert.match(outcome.stderrTail ?? "", /heap out of memory/);
+});
+
 test("defaultPiSpawner_rejects_clearly_when_bwrap_is_missing_from_path", async () => {
   const repoRoot = stubRepoRoot('echo "{\\"event\\":\\"done\\"}"');
   const pathWithoutBwrap = mkdtempSync(join(tmpdir(), "eval-empty-path-"));

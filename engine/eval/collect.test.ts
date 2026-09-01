@@ -779,6 +779,16 @@ test("runCollect_stamps_turns_tokens_and_rail_firings_from_stdout_onto_the_raw_r
   assertCostMetricsStamped(firstRow(opts.runDir));
 });
 
+test("runCollect_stamps_the_death_signal_and_stderr_tail_of_a_killed_rep_onto_the_raw_row", async () => {
+  const spawner = fixedOutcomeSpawner({ exitCode: -1, stdoutJsonl: "", timedOut: false, signal: "SIGKILL", stderrTail: "gateway stream reset" });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+
+  await runCollect(opts);
+
+  assert.equal(firstRow(opts.runDir).signal, "SIGKILL");
+  assert.equal(firstRow(opts.runDir).stderrTail, "gateway stream reset");
+});
+
 function shadowLogSpawner(lines: string[]): PiSpawner {
   return async (spec) => {
     const shadowDir = join(spec.cwd, ".liubai");

@@ -15,11 +15,14 @@ export interface RunOutcome {
   exitCode: number;
   stdoutJsonl: string;
   timedOut: boolean;
+  signal?: string;
+  stderrTail?: string;
 }
 
 export type PiSpawner = (spec: RunSpec) => Promise<RunOutcome>;
 
 const KILL_GRACE_MS = 5000;
+const STDERR_TAIL_CHARS = 4096;
 
 const EXPERIMENT_TOGGLES = ["LIUBAI_RAILS_OFF", "LIUBAI_PHRASING_PACK", "LIUBAI_CC_DELTA_OFF", "LIUBAI_SHADOW_RULES"];
 
@@ -141,7 +144,10 @@ function runPi(repoRoot: string, spec: RunSpec): Promise<RunOutcome> {
       reject(err.code === "ENOENT" ? bwrapNotFoundError() : err);
     });
 
-    child.stderr?.resume();
+    let stderrTail = "";
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderrTail = (stderrTail + chunk.toString("utf8")).slice(-STDERR_TAIL_CHARS);
+    });
 
     let stdout = "";
     let timedOut = false;
@@ -157,12 +163,18 @@ function runPi(repoRoot: string, spec: RunSpec): Promise<RunOutcome> {
       stdout += chunk.toString("utf8");
     });
 
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeoutTimer);
       if (killTimer !== undefined) clearTimeout(killTimer);
-      resolve({ exitCode: code ?? -1, stdoutJsonl: stdout, timedOut });
+      resolve({
+        exitCode: code ?? -1,
+        stdoutJsonl: stdout,
+        timedOut,
+        ...(signal !== null ? { signal } : {}),
+        ...(stderrTail.length > 0 ? { stderrTail } : {}),
+      });
     });
   });
 }

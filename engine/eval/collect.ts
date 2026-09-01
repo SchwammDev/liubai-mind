@@ -409,6 +409,7 @@ export function buildRawRowCore(
     ...(snapshot.dropped.length > 0 ? { snapshotDropped: snapshot.dropped } : {}),
     exitCode: outcome.exitCode,
     timedOut: outcome.timedOut,
+    ...deathEvidence(outcome),
     durationMs,
     turns: countTurns(outcome.stdoutJsonl),
     tokensIn: tokenUsage.tokensIn,
@@ -418,6 +419,13 @@ export function buildRawRowCore(
     ...(shadowFirings !== undefined ? { shadowFirings } : {}),
     ...(delivered !== undefined ? { delivered } : {}),
     ...(agentError !== undefined ? { agentError } : {}),
+  };
+}
+
+function deathEvidence(outcome: RunOutcome): Pick<RawRow, "signal" | "stderrTail"> {
+  return {
+    ...(outcome.signal !== undefined ? { signal: outcome.signal } : {}),
+    ...(outcome.stderrTail !== undefined ? { stderrTail: outcome.stderrTail } : {}),
   };
 }
 
