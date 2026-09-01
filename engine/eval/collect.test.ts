@@ -452,6 +452,24 @@ test("runCollect_fails_fast_without_spawning_when_simulated_session_mode_is_on_a
   assert.equal(calls.length, 0);
 });
 
+test("runCollect_stamps_simulatedSession_true_on_the_raw_row_when_simulated_session_mode_is_on", async () => {
+  const { spawner } = recordingSpawner();
+  const opts = baseOpts({ cases: ["ts-telemetry-pipeline"], conditions: ["rails-default"], spawner, simulatedSession: true });
+
+  await runCollect(opts);
+
+  assert.equal(firstRow(opts.runDir).simulatedSession, true);
+});
+
+test("runCollect_omits_simulatedSession_from_the_raw_row_when_simulated_session_mode_is_off", async () => {
+  const { spawner } = recordingSpawner();
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+
+  await runCollect(opts);
+
+  assert.equal("simulatedSession" in firstRow(opts.runDir), false);
+});
+
 test("runCollect_always_sets_LIUBAI_EVAL_so_the_spawned_agent_sandboxes_its_bash_tool", async () => {
   const { spawner, calls } = recordingSpawner();
   const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });

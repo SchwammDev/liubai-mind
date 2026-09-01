@@ -18,6 +18,7 @@ import { pythonExtractor } from "../extract-python.ts";
 import { probePyCcBackend } from "./judge-env.ts";
 import { gitSha } from "./provenance.ts";
 import { classifyTranscript } from "./contamination.ts";
+import { isSimulatedSessionRun, runSimulatedSessionScore } from "./simulated-session-score.ts";
 
 export interface JudgedRow {
   row: RawRow;
@@ -964,6 +965,12 @@ export async function runScore(opts: {
   const validity = resolveDeliveryValidity(parsedRaw.rows, opts.conditionsDir ?? DEFAULT_CONDITIONS_DIR, opts.corpusDir);
   if ("error" in validity) return { status: ERROR_STATUS, stdout: validity.error };
   if (validity.result.kind === "invalid") return { status: ERROR_STATUS, stdout: formatDeliveryViolations(validity.result.violations) };
+
+  if (isSimulatedSessionRun(parsedRaw.rows)) {
+    const cases = loadCases(opts.corpusDir);
+    if ("error" in cases) return { status: ERROR_STATUS, stdout: `score: failed to load corpus: ${cases.error}` };
+    return await runSimulatedSessionScore(parsedRaw.rows, cases, opts.corpusDir, opts.runDir);
+  }
 
   if (allRowsErrored(parsedRaw.rows)) {
     return { status: ERROR_STATUS, stdout: `score: every row in this run agent-errored; first: ${firstAgentError(parsedRaw.rows)}` };
