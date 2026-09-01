@@ -502,7 +502,7 @@ test("pure_split_that_preserves_decision_points_gets_an_advisory", async () => {
     assert.equal(res.status, 0);
     assert.equal(
       res.stderr,
-      "crap: advisory — foo.ts: f dropped below the cc threshold but total decision points did not fall (10 -> 10); the complexity moved, it did not leave.\n",
+      "crap: advisory — foo.ts: f dropped below the cc threshold but the file still carries the same decisions — the complexity moved, it did not leave.\n",
     );
   } finally {
     rmTree(root);
