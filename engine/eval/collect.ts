@@ -11,6 +11,7 @@ import { loadConditions } from "./conditions.ts";
 import { loadCases, copyPlan } from "./corpus.ts";
 import { promptCarriedArmMessage } from "./prompt-carried-message.ts";
 import { buildProvenance } from "./provenance.ts";
+import { buildSimulatedSessionTask, missingSimulatedSessionInputs } from "./simulated-session.ts";
 import { defaultPiSpawner, defaultProbeSpawner } from "./spawner.ts";
 import type { PiSpawner, ProbeSpawner, RunOutcome } from "./spawner.ts";
 import { snapshotExtras } from "./snapshot.ts";
@@ -32,6 +33,7 @@ export interface CollectOpts {
   conditionsDir?: string;
   corpusDir?: string;
   parallel?: number;
+  simulatedSession?: boolean;
 }
 
 export interface CollectResult {
@@ -58,6 +60,7 @@ export interface CollectContext {
   workRoot: string;
   now: () => string;
   parallel: number;
+  simulatedSession: boolean;
 }
 
 export interface ItemResult {
@@ -323,6 +326,14 @@ export function buildTask(kase: CaseManifest, condition: ConditionManifest, pack
   return `${kase.task}\n\n${promptCarriedArmMessage(kase, requirePromptPackContent(packContent, condition))}`;
 }
 
+function taskForItem(ctx: CollectContext, item: WorkItem, packContent: string | undefined): string {
+  if (!ctx.simulatedSession) return buildTask(item.kase, item.condition, packContent);
+
+  const built = buildSimulatedSessionTask(ctx.corpusDir, item.kase);
+  if ("error" in built) throw new Error(built.error);
+  return built.task;
+}
+
 export function copyCaseFiles(corpusDir: string, kase: CaseManifest, workDir: string): { from: string; to: string }[] {
   const caseDir = join(corpusDir, kase.id);
   const plan = copyPlan(caseDir, kase, workDir);
@@ -461,9 +472,9 @@ async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult>
   const packPath = packAbsolutePath(ctx.conditionsDir, item.condition);
   const packContent = readPackContent(packPath);
   const env = buildEnv(item.condition, packContent);
-  const task = buildTask(item.kase, item.condition, packContent);
 
   try {
+    const task = taskForItem(ctx, item, packContent);
     const { outcome, durationMs } = await spawnForItem(ctx, task, workDir, env);
     const snapshot = snapshotWorkDir(workDir, plan);
     const shadowFirings = readShadowFirings(workDir);
@@ -496,6 +507,27 @@ export function validateParallel(parallel: number | undefined): CollectResult | 
   return loadError(`parallel must be a positive integer, got: ${parallel}`);
 }
 
+function simulatedSessionMissingInputsError(corpusDir: string, cases: CaseManifest[]): string | undefined {
+  return missingSimulatedSessionInputs(corpusDir, cases);
+}
+
+function simulatedSessionPromptDeliveryError(conditions: ConditionManifest[]): string | undefined {
+  const promptCondition = conditions.find((condition) => condition.delivery === "prompt");
+  if (promptCondition === undefined) return undefined;
+  return `condition ${promptCondition.id}: simulated-session mode needs the live rail to observe the scripted write, but this condition's delivery is "prompt", which closes the rail via LIUBAI_RAILS_OFF`;
+}
+
+export function validateSimulatedSession(
+  simulatedSession: boolean | undefined,
+  corpusDir: string,
+  conditions: ConditionManifest[],
+  cases: CaseManifest[],
+): CollectResult | undefined {
+  if (simulatedSession !== true) return undefined;
+  const error = simulatedSessionMissingInputsError(corpusDir, cases) ?? simulatedSessionPromptDeliveryError(conditions);
+  return error === undefined ? undefined : loadError(error);
+}
+
 export interface EngineOptsBase {
   repoRoot: string;
   model: string;
@@ -505,6 +537,7 @@ export interface EngineOptsBase {
   workRoot?: string;
   now?: () => string;
   parallel?: number;
+  simulatedSession?: boolean;
 }
 
 export function buildContext(opts: EngineOptsBase, corpusDir: string, conditionsDir: string): CollectContext {
@@ -519,6 +552,7 @@ export function buildContext(opts: EngineOptsBase, corpusDir: string, conditions
     workRoot: opts.workRoot ?? tmpdir(),
     now: opts.now ?? (() => new Date().toISOString()),
     parallel: opts.parallel ?? 1,
+    simulatedSession: opts.simulatedSession ?? false,
   };
 }
 
@@ -673,6 +707,9 @@ export async function runCollect(opts: CollectOpts): Promise<CollectResult> {
 
   const tieredCases = filterByTier(cases, opts.tier);
   if ("error" in tieredCases) return loadError(tieredCases.error);
+
+  const simulatedSessionError = validateSimulatedSession(opts.simulatedSession, corpusDir, conditions, tieredCases);
+  if (simulatedSessionError !== undefined) return simulatedSessionError;
 
   const ctx = buildContext(opts, corpusDir, conditionsDir);
 

@@ -404,6 +404,54 @@ test("runCollect_omits_task_from_the_raw_row_for_a_rail_delivery_condition", asy
   assert.equal("task" in firstRow(opts.runDir), false);
 });
 
+function priorDraftContent(caseId: string, filename: string): string {
+  return readFileSync(join(CORPUS_DIR, caseId, filename), "utf8");
+}
+
+function extensionTaskOf(caseId: string): string {
+  const extension = JSON.parse(readFileSync(join(CORPUS_DIR, caseId, "extension.json"), "utf8")) as { task: string };
+  return extension.task;
+}
+
+function assertSentTaskIsTheSimulatedSessionOpeningForTheCase(sentTask: string, caseId: string, draftFilename: string): void {
+  assert.ok(sentTask.includes(priorDraftContent(caseId, draftFilename)), "sent task does not carry the prior draft");
+  assert.ok(sentTask.includes(extensionTaskOf(caseId)), "sent task does not carry the extension task");
+  assert.ok(!sentTask.includes(readCaseTask(CORPUS_DIR, caseId)), "sent task leaks the case's normal improve task");
+}
+
+test("runCollect_sends_the_simulated_session_opening_task_instead_of_the_cases_normal_task_when_simulated_session_mode_is_on", async () => {
+  const { spawner, calls } = recordingSpawner();
+  const opts = baseOpts({ cases: ["ts-telemetry-pipeline"], conditions: ["rails-default"], spawner, simulatedSession: true });
+
+  const result = await runCollect(opts);
+
+  assert.equal(result.status, 0);
+  assertSentTaskIsTheSimulatedSessionOpeningForTheCase(calls[0]!.task, "ts-telemetry-pipeline", "prior-draft.ts");
+});
+
+test("runCollect_fails_fast_without_spawning_when_simulated_session_mode_is_on_and_a_selected_case_has_no_prior_draft", async () => {
+  const { spawner, calls } = recordingSpawner();
+  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner, simulatedSession: true });
+
+  const result = await runCollect(opts);
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /ts-flag-parser/);
+  assert.equal(calls.length, 0);
+});
+
+test("runCollect_fails_fast_without_spawning_when_simulated_session_mode_is_on_and_a_selected_condition_delivers_by_prompt", async () => {
+  const conditionsDir = tempPromptConditionsDir();
+  const { spawner, calls } = recordingSpawner();
+  const opts = baseOpts({ cases: ["ts-telemetry-pipeline"], conditions: ["prompt-carried"], conditionsDir, spawner, simulatedSession: true });
+
+  const result = await runCollect(opts);
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /prompt-carried/);
+  assert.equal(calls.length, 0);
+});
+
 test("runCollect_always_sets_LIUBAI_EVAL_so_the_spawned_agent_sandboxes_its_bash_tool", async () => {
   const { spawner, calls } = recordingSpawner();
   const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
