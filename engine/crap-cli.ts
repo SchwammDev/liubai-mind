@@ -249,7 +249,7 @@ function adviseOnComplexityShuffle(
   if (dpAfter < dpBefore) return null;
 
   const names = overThreshold.map((f) => f.name).join(", ");
-  return `crap: advisory — ${rel}: ${names} dropped below the cc threshold but total decision points did not fall (${dpBefore} -> ${dpAfter}); the complexity moved, it did not leave.`;
+  return `crap: advisory — ${rel}: ${names} dropped below the cc threshold but the file still carries the same decisions — the complexity moved, it did not leave.`;
 }
 
 function collectViolations(
