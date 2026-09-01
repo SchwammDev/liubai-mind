@@ -4,13 +4,17 @@ import { validatePack } from "./phrasing.ts";
 import type { ValidPack } from "./phrasing.ts";
 import { formatCcDeltaNudge } from "../messages.ts";
 
-function armPack(packContent: string | undefined): ValidPack {
-  if (packContent === undefined) return {};
+function armPack(packContent: string): ValidPack {
   const validated = validatePack(packContent);
-  return "pack" in validated ? validated.pack : {};
+  if ("error" in validated) {
+    throw new Error(
+      `promptCarriedArmMessage: pack content failed validation (${validated.error}) — this pack was validated at condition load time, so an invalid pack here means that validation regressed`,
+    );
+  }
+  return validated.pack;
 }
 
-export function promptCarriedArmMessage(kase: CaseManifest, packContent: string | undefined): string {
+export function promptCarriedArmMessage(kase: CaseManifest, packContent: string): string {
   const template = ccDeltaTextFor(armPack(packContent));
   return formatCcDeltaNudge(template, {
     name: kase.entrySymbol,

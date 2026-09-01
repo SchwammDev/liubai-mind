@@ -787,6 +787,9 @@ function packContentFor(conditionsDir: string, condition: ConditionManifest): st
 
 function expectedPromptMessage(conditionsDir: string, condition: ConditionManifest, kase: CaseManifest): string {
   const packContent = packContentFor(conditionsDir, condition);
+  if (packContent === undefined) {
+    throw new Error(`condition ${condition.id}: delivery "prompt" carries no phrasing pack — conditions.ts validation should have rejected this at load time`);
+  }
   return promptCarriedArmMessage(kase, packContent);
 }
 
