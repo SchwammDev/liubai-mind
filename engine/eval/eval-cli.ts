@@ -17,6 +17,7 @@ export type ParsedCli =
       cases?: string[];
       conditions?: string[];
       tier?: Tier;
+      simulatedSession?: boolean;
     }
   | {
       cmd: "second-touch";
@@ -42,7 +43,7 @@ const DEFAULT_PARALLEL = 1;
 
 const USAGE = [
   "Usage:",
-  "  liubai eval collect --run <name> --model <provider/id> [--reps N] [--parallel N] [--timeout-ms N] [--case id]... [--condition id]... [--tier <easy|hard>]",
+  "  liubai eval collect --run <name> --model <provider/id> [--reps N] [--parallel N] [--timeout-ms N] [--case id]... [--condition id]... [--tier <easy|hard>] [--simulated-session]",
   "  liubai eval second-touch --run <newRun> --source-run <existingRun> --model <provider/id> [--parallel N] [--timeout-ms N] [--case id]... [--condition id]...",
   "  liubai eval score --run <name> [--compare <otherRunName>]",
 ].join("\n");
@@ -60,6 +61,7 @@ interface CollectAccum {
   tierRaw?: string;
   cases: string[];
   conditions: string[];
+  simulatedSession?: boolean;
 }
 
 interface SecondTouchAccum {
@@ -79,14 +81,28 @@ interface ScoreAccum {
 
 type FlagHandlers<T> = Record<string, (accum: T, value: string) => void>;
 
-function consumeFlags<T>(args: string[], handlers: FlagHandlers<T>, accum: T): { error: string } | undefined {
-  for (let i = 0; i < args.length; i += 2) {
+function consumeFlags<T>(
+  args: string[],
+  handlers: FlagHandlers<T>,
+  accum: T,
+  booleanFlags: readonly string[] = [],
+): { error: string } | undefined {
+  let i = 0;
+  while (i < args.length) {
     const flag = args[i];
-    const value = args[i + 1];
     const handler = flag === undefined ? undefined : handlers[flag];
     if (handler === undefined) return { error: `unknown flag: ${flag ?? ""}` };
+
+    if (flag !== undefined && booleanFlags.includes(flag)) {
+      handler(accum, "true");
+      i += 1;
+      continue;
+    }
+
+    const value = args[i + 1];
     if (value === undefined) return { error: `missing value for ${flag}` };
     handler(accum, value);
+    i += 2;
   }
   return undefined;
 }
@@ -101,8 +117,11 @@ function collectFlagHandlers(): FlagHandlers<CollectAccum> {
     "--case": (a, v) => { a.cases.push(v); },
     "--condition": (a, v) => { a.conditions.push(v); },
     "--tier": (a, v) => { a.tierRaw = v; },
+    "--simulated-session": (a) => { a.simulatedSession = true; },
   };
 }
+
+const COLLECT_BOOLEAN_FLAGS = ["--simulated-session"];
 
 function secondTouchFlagHandlers(): FlagHandlers<SecondTouchAccum> {
   return {
@@ -151,6 +170,7 @@ function collectOptionalFields(accum: CollectAccum, tier: Tier | undefined): Par
     ...(accum.cases.length > 0 ? { cases: accum.cases } : {}),
     ...(accum.conditions.length > 0 ? { conditions: accum.conditions } : {}),
     ...(tier !== undefined ? { tier } : {}),
+    ...(accum.simulatedSession === true ? { simulatedSession: true } : {}),
   };
 }
 
@@ -179,7 +199,7 @@ function buildCollectResult(accum: CollectAccum): ParsedCli {
 
 function parseCollectArgs(args: string[]): ParsedCli {
   const accum: CollectAccum = { cases: [], conditions: [] };
-  const flagError = consumeFlags(args, collectFlagHandlers(), accum);
+  const flagError = consumeFlags(args, collectFlagHandlers(), accum, COLLECT_BOOLEAN_FLAGS);
   if (flagError !== undefined) return usageError(flagError.error);
   return buildCollectResult(accum);
 }
@@ -256,6 +276,7 @@ async function runCollectCmd(
     ...(parsed.cases !== undefined ? { cases: parsed.cases } : {}),
     ...(parsed.conditions !== undefined ? { conditions: parsed.conditions } : {}),
     ...(parsed.tier !== undefined ? { tier: parsed.tier } : {}),
+    ...(parsed.simulatedSession !== undefined ? { simulatedSession: parsed.simulatedSession } : {}),
   });
 
   return {
