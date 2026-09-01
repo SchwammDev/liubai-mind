@@ -29,5 +29,6 @@
       ]
     }
   },
-  "include": ["extensions/**/*.ts", "engine/**/*.ts"]
+  "include": ["extensions/**/*.ts", "engine/**/*.ts"],
+  "exclude": ["engine/eval/corpus/**"]
 }
