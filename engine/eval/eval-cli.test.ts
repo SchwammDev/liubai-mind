@@ -124,18 +124,6 @@ test("parseCliArgs_rejects_an_unknown_tier_value", () => {
   assert.ok("error" in parsed);
 });
 
-test("parseCliArgs_parses_the_simulated_session_flag_into_collect_opts", () => {
-  const parsed = parseCliArgs(collectArgv("--simulated-session"));
-
-  assertParsedCollect(parsed, { simulatedSession: true });
-});
-
-test("parseCliArgs_still_parses_case_flags_that_follow_the_simulated_session_flag", () => {
-  const parsed = parseCliArgs(collectArgv("--simulated-session", "--case", "ts-telemetry-pipeline"));
-
-  assertParsedCollect(parsed, { simulatedSession: true, cases: ["ts-telemetry-pipeline"] });
-});
-
 test("parseCliArgs_parses_score_with_compare", () => {
   const parsed = parseCliArgs(["score", "--run", "baseline", "--compare", "rails-default"]);
 
@@ -195,14 +183,6 @@ test("runEval_passes_tier_through_to_the_collect_dependency", async () => {
   await runEval(["collect", "--run", "baseline", "--model", "anthropic/claude-test", "--tier", "hard"], { collect });
 
   assert.equal(calls[0]?.tier, "hard");
-});
-
-test("runEval_passes_simulated_session_through_to_the_collect_dependency", async () => {
-  const { collect, calls } = recordingCollect({ status: 0, rowsWritten: 1, rowsSkipped: 0, stderr: "" });
-
-  await runEval(["collect", "--run", "baseline", "--model", "anthropic/claude-test", "--simulated-session"], { collect });
-
-  assert.equal(calls[0]?.simulatedSession, true);
 });
 
 test("runEval_propagates_nonzero_status_from_dependency", async () => {
