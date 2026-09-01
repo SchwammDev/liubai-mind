@@ -30,7 +30,7 @@ test("loadConditions_loads_all_committed_conditions", () => {
 
   assertLoaded(result);
   const ids = result.map((c) => c.id).sort();
-  assert.deepEqual(ids, ["bare-metric-v1", "cc-delta-numberless", "cc-delta-numberless-prompt", "cc-delta-off", "cc-delta-prompt", "cc-delta-shadow", "coaching-v1", "control", "rails-default"]);
+  assert.deepEqual(ids, ["bare-metric-v1", "cc-delta-numbered-prompt", "cc-delta-numberless", "cc-delta-numberless-prompt", "cc-delta-off", "cc-delta-shadow", "coaching-v1", "control", "rails-default"]);
 });
 
 test("loadConditions_reads_control_env_from_its_manifest", () => {
@@ -132,12 +132,38 @@ test("loadConditions_leaves_delivery_undefined_when_the_manifest_omits_it", () =
 
 test("loadConditions_reads_delivery_prompt_from_a_condition_that_closes_the_live_rail", () => {
   const dir = tempConditionsDir();
-  writeCondition(dir, "prompt-carried.json", { id: "prompt-carried", delivery: "prompt", env: { LIUBAI_RAILS_OFF: "1" } });
+  mkdirSync(join(dir, "packs"));
+  writeFileSync(join(dir, "packs", "pack.json"), '{"CC_DELTA_NUDGE":"nudge text"}');
+  writeCondition(dir, "prompt-carried.json", {
+    id: "prompt-carried",
+    delivery: "prompt",
+    env: { LIUBAI_RAILS_OFF: "1" },
+    phrasingPack: "packs/pack.json",
+  });
 
   const result = loadConditions(dir);
 
   assertLoaded(result);
   assert.equal(result[0]?.delivery, "prompt");
+});
+
+test("loadConditions_rejects_a_prompt_delivery_condition_that_carries_no_phrasing_pack", () => {
+  const dir = tempConditionsDir();
+  writeCondition(dir, "unpinned-prompt.json", { id: "unpinned-prompt", delivery: "prompt", env: { LIUBAI_RAILS_OFF: "1" } });
+
+  const result = loadConditions(dir);
+
+  assertRejected(result);
+  assert.match(result.error, /phrasingPack/);
+  assert.match(result.error, /drift/);
+});
+
+test("loadConditions_reads_the_pinned_pack_for_the_cc_delta_numbered_prompt_condition", () => {
+  const result = loadConditions(CONDITIONS_DIR);
+
+  assertLoaded(result);
+  const condition = result.find((c) => c.id === "cc-delta-numbered-prompt");
+  assert.equal(condition?.phrasingPack, "packs/cc-delta-numbered.json");
 });
 
 test("loadConditions_rejects_a_delivery_value_that_is_neither_prompt_nor_rail", () => {

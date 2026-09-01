@@ -51,6 +51,18 @@ function validateDeliveryClosesLiveRail(
   };
 }
 
+function validateDeliveryPinsPhrasingPack(
+  delivery: "prompt" | "rail" | undefined,
+  phrasingPack: string | undefined,
+  id: string,
+): { error: string } | undefined {
+  if (delivery !== "prompt") return undefined;
+  if (phrasingPack !== undefined) return undefined;
+  return {
+    error: `condition ${id}: delivery: "prompt" requires phrasingPack — a prompt-carried arm must pin its message in a pack so its meaning cannot drift with the production default wording`,
+  };
+}
+
 interface ManifestFields {
   id: string;
   env: Record<string, string>;
@@ -107,6 +119,9 @@ function validateManifest(raw: unknown, filename: string): { manifest: Condition
   const { fields } = fieldsResult;
   const railError = validateDeliveryClosesLiveRail(fields.delivery, fields.env, fields.id);
   if (railError !== undefined) return { error: `${filename}: ${railError.error}` };
+
+  const packError = validateDeliveryPinsPhrasingPack(fields.delivery, fields.phrasingPack, fields.id);
+  if (packError !== undefined) return { error: `${filename}: ${packError.error}` };
 
   return { manifest: assembleManifest(fields) };
 }

@@ -311,9 +311,16 @@ export function buildEnv(condition: ConditionManifest, packContent: string | und
   return packContent === undefined ? base : { ...base, LIUBAI_PHRASING_PACK: packContent };
 }
 
+function requirePromptPackContent(packContent: string | undefined, condition: ConditionManifest): string {
+  if (packContent === undefined) {
+    throw new Error(`condition ${condition.id}: delivery "prompt" carries no phrasing pack — conditions.ts validation should have rejected this at load time`);
+  }
+  return packContent;
+}
+
 export function buildTask(kase: CaseManifest, condition: ConditionManifest, packContent: string | undefined): string {
   if (condition.delivery !== "prompt") return kase.task;
-  return `${kase.task}\n\n${promptCarriedArmMessage(kase, packContent)}`;
+  return `${kase.task}\n\n${promptCarriedArmMessage(kase, requirePromptPackContent(packContent, condition))}`;
 }
 
 export function copyCaseFiles(corpusDir: string, kase: CaseManifest, workDir: string): { from: string; to: string }[] {
