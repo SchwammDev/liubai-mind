@@ -1,6 +1,6 @@
 {
   "task": "accumulate_grid should support an alternative way of summarizing each cell's observations. Callers may specify a mode: \"mean\" keeps today's per-cell averaging, and a new \"max\" mode reports the highest observed value in each cell instead of the average. An unrecognized mode is a validation error. When mode is omitted, behavior is exactly what it is today. The mode does not affect which observations are dropped, rejected, or saturated, only how a filled cell's value is computed. Keep accumulate_grid's signature and every existing behavior unchanged.",
-  "probes": [
+  "behaviorChecks": [
     {
       "args": [{
         "grid": { "width": 1, "height": 1, "cell_size": 10 },

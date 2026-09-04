@@ -3,11 +3,11 @@ import { join } from "node:path";
 
 import type { Lang, RuleName } from "../contract.ts";
 import { RULE } from "../contract.ts";
-import type { CaseManifest, Probe, RawRow, Verdict } from "./eval-contract.ts";
+import type { CaseManifest, BehaviorCheck, RawRow, Verdict } from "./eval-contract.ts";
 import { loadCases, declaredFiles } from "./corpus.ts";
-import { runProbes } from "./probes.ts";
+import { runBehaviorChecks } from "./behavior-checks.ts";
 import { sourceParses } from "./parse-check.ts";
-import { readRawJsonl, judgeRows, runScore, probeLang } from "./score.ts";
+import { readRawJsonl, judgeRows, runScore, checkLang } from "./score.ts";
 
 export type FollowUpVerdict = "extended" | "extension-failed" | "regressed" | "broken" | "untouched" | "errored" | "timed-out";
 
@@ -117,13 +117,13 @@ function filesAreIdentical(seed: Record<string, string>, final: Record<string, s
   return seedKeys.every((key) => final[key] === seed[key]);
 }
 
-function probesPassFor(kase: CaseManifest, probes: Probe[], entrySource: string, files: Record<string, string>): boolean {
-  const outcome = runProbes({
-    lang: probeLang(kase.lang),
+function behaviorChecksPassFor(kase: CaseManifest, behaviorChecks: BehaviorCheck[], entrySource: string, files: Record<string, string>): boolean {
+  const outcome = runBehaviorChecks({
+    lang: checkLang(kase.lang),
     entryFilename: kase.entry,
     source: entrySource,
     entrySymbol: kase.entrySymbol,
-    probes,
+    behaviorChecks,
     files,
     compare: "subset",
   });
@@ -135,12 +135,12 @@ function classifyFollowUpVerdict(kase: CaseManifest, row: RawRow, seedFiles: Rec
   if (row.agentError !== undefined) return "errored";
 
   const entrySource = row.files[kase.entry];
-  if (entrySource === undefined || !sourceParses(entrySource, probeLang(kase.lang))) return "broken";
+  if (entrySource === undefined || !sourceParses(entrySource, checkLang(kase.lang))) return "broken";
 
   if (filesAreIdentical(seedFiles, row.files)) return "untouched";
 
-  if (!probesPassFor(kase, kase.probes, entrySource, row.files)) return "regressed";
-  if (!probesPassFor(kase, kase.extension!.probes, entrySource, row.files)) return "extension-failed";
+  if (!behaviorChecksPassFor(kase, kase.behaviorChecks, entrySource, row.files)) return "regressed";
+  if (!behaviorChecksPassFor(kase, kase.extension!.behaviorChecks, entrySource, row.files)) return "extension-failed";
 
   return "extended";
 }

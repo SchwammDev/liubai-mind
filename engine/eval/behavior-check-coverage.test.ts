@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { entrySpan, runProbesWithCoverage } from "./probe-coverage.ts";
-import type { AdequacyResult } from "./probe-coverage.ts";
-import type { Probe } from "./eval-contract.ts";
-import type { ProbeRunInput } from "./probes.ts";
+import { entrySpan, runBehaviorChecksWithCoverage } from "./behavior-check-coverage.ts";
+import type { AdequacyResult } from "./behavior-check-coverage.ts";
+import type { BehaviorCheck } from "./eval-contract.ts";
+import type { BehaviorCheckRunInput } from "./behavior-checks.ts";
 import { venvPythonAvailable } from "./judge-env.ts";
 
 const TWO_FUNCTIONS_SOURCE = [
@@ -56,14 +56,14 @@ const PY_IF_ELSE_SOURCE = [
   "",
 ].join("\n");
 
-const POSITIVE_ONLY_PROBES: Probe[] = [{ args: [1], returns: "positive" }];
-const BOTH_BRANCHES_PROBES: Probe[] = [
+const POSITIVE_ONLY_BEHAVIOR_CHECKS: BehaviorCheck[] = [{ args: [1], returns: "positive" }];
+const BOTH_BRANCHES_BEHAVIOR_CHECKS: BehaviorCheck[] = [
   { args: [1], returns: "positive" },
   { args: [-1], returns: "non-positive" },
 ];
 
-function coverageInput(lang: ProbeRunInput["lang"], entryFilename: string, source: string, probes: Probe[]): ProbeRunInput {
-  return { lang, entryFilename, source, entrySymbol: "classify", probes };
+function coverageInput(lang: BehaviorCheckRunInput["lang"], entryFilename: string, source: string, behaviorChecks: BehaviorCheck[]): BehaviorCheckRunInput {
+  return { lang, entryFilename, source, entrySymbol: "classify", behaviorChecks };
 }
 
 function assertFullyCovered(result: AdequacyResult): void {
@@ -96,43 +96,43 @@ test("entrySpan_throws_when_the_symbol_is_absent", async () => {
   await assert.rejects(() => entrySpan("typescript", "thing.ts", source, "missingFn"), /missingFn/);
 });
 
-test("runProbesWithCoverage_reports_no_missing_lines_when_probes_hit_both_branches", async () => {
-  const input = coverageInput("typescript", "classify.ts", TS_IF_ELSE_SOURCE, BOTH_BRANCHES_PROBES);
+test("runBehaviorChecksWithCoverage_reports_no_missing_lines_when_behaviorChecks_hit_both_branches", async () => {
+  const input = coverageInput("typescript", "classify.ts", TS_IF_ELSE_SOURCE, BOTH_BRANCHES_BEHAVIOR_CHECKS);
 
-  const result = await runProbesWithCoverage(input);
+  const result = await runBehaviorChecksWithCoverage(input);
 
   assertFullyCovered(result);
 });
 
-test("runProbesWithCoverage_reports_the_untaken_branch_line_as_missing", async () => {
-  const input = coverageInput("typescript", "classify.ts", TS_IF_ELSE_SOURCE, POSITIVE_ONLY_PROBES);
+test("runBehaviorChecksWithCoverage_reports_the_untaken_branch_line_as_missing", async () => {
+  const input = coverageInput("typescript", "classify.ts", TS_IF_ELSE_SOURCE, POSITIVE_ONLY_BEHAVIOR_CHECKS);
 
-  const result = await runProbesWithCoverage(input);
+  const result = await runBehaviorChecksWithCoverage(input);
 
   assertLineIsMissing(result, 5);
 });
 
-test("runProbesWithCoverage_restricts_missing_lines_to_the_entry_symbol_span", async () => {
-  const input = coverageInput("typescript", "classify.ts", TS_IF_ELSE_WITH_UNUSED_HELPER_SOURCE, POSITIVE_ONLY_PROBES);
+test("runBehaviorChecksWithCoverage_restricts_missing_lines_to_the_entry_symbol_span", async () => {
+  const input = coverageInput("typescript", "classify.ts", TS_IF_ELSE_WITH_UNUSED_HELPER_SOURCE, POSITIVE_ONLY_BEHAVIOR_CHECKS);
 
-  const result = await runProbesWithCoverage(input);
+  const result = await runBehaviorChecksWithCoverage(input);
 
   assertLineIsMissing(result, 5);
   assertNoMissingLinesAtOrAfter(result, 9);
 });
 
-test("runProbesWithCoverage_python_reports_no_missing_lines_when_probes_hit_both_branches", { skip: !venvPythonAvailable() }, async () => {
-  const input = coverageInput("python", "classify.py", PY_IF_ELSE_SOURCE, BOTH_BRANCHES_PROBES);
+test("runBehaviorChecksWithCoverage_python_reports_no_missing_lines_when_behaviorChecks_hit_both_branches", { skip: !venvPythonAvailable() }, async () => {
+  const input = coverageInput("python", "classify.py", PY_IF_ELSE_SOURCE, BOTH_BRANCHES_BEHAVIOR_CHECKS);
 
-  const result = await runProbesWithCoverage(input);
+  const result = await runBehaviorChecksWithCoverage(input);
 
   assertFullyCovered(result);
 });
 
-test("runProbesWithCoverage_python_reports_the_untaken_branch_line_as_missing", { skip: !venvPythonAvailable() }, async () => {
-  const input = coverageInput("python", "classify.py", PY_IF_ELSE_SOURCE, POSITIVE_ONLY_PROBES);
+test("runBehaviorChecksWithCoverage_python_reports_the_untaken_branch_line_as_missing", { skip: !venvPythonAvailable() }, async () => {
+  const input = coverageInput("python", "classify.py", PY_IF_ELSE_SOURCE, POSITIVE_ONLY_BEHAVIOR_CHECKS);
 
-  const result = await runProbesWithCoverage(input);
+  const result = await runBehaviorChecksWithCoverage(input);
 
   assertOnlyLineMissing(result, 5);
 });

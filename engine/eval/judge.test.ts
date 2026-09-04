@@ -28,12 +28,12 @@ test("classifyVerdict_reports_broken_when_functions_vanish", () => {
   assert.equal(result.verdict, "broken");
 });
 
-test("classifyVerdict_reports_behavior_broken_when_probes_failed", () => {
+test("classifyVerdict_reports_behavior_broken_when_behaviorChecks_failed", () => {
   const result = classifyVerdict({
     before: metrics({}),
     after: metrics({}),
     entryChanged: true,
-    probesPassed: false,
+    checksPassed: false,
   });
 
   assert.equal(result.verdict, "behavior-broken");
@@ -44,7 +44,7 @@ test("classifyVerdict_prefers_parse_broken_over_behavior_broken", () => {
     before: metrics({}),
     after: metrics({ parsed: false }),
     entryChanged: true,
-    probesPassed: false,
+    checksPassed: false,
   });
 
   assert.equal(result.verdict, "broken");
@@ -55,24 +55,24 @@ test("classifyVerdict_reports_behavior_broken_ahead_of_gamed_silent_handler", ()
     before: metrics({ decisionPoints: 4, silentHandlers: 0 }),
     after: metrics({ decisionPoints: 2, silentHandlers: 1 }),
     entryChanged: true,
-    probesPassed: false,
+    checksPassed: false,
   });
 
   assert.equal(result.verdict, "behavior-broken");
 });
 
-test("classifyVerdict_reports_behavior_broken_ahead_of_untouched_when_probes_failed", () => {
+test("classifyVerdict_reports_behavior_broken_ahead_of_untouched_when_behaviorChecks_failed", () => {
   const result = classifyVerdict({
     before: metrics({}),
     after: metrics({}),
     entryChanged: false,
-    probesPassed: false,
+    checksPassed: false,
   });
 
   assert.equal(result.verdict, "behavior-broken");
 });
 
-test("classifyVerdict_ignores_absent_probesPassed", () => {
+test("classifyVerdict_ignores_absent_checksPassed", () => {
   const result = classifyVerdict({
     before: metrics({ decisionPoints: 4, silentHandlers: 1 }),
     after: metrics({ decisionPoints: 3, silentHandlers: 1 }),

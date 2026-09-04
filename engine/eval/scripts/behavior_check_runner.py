@@ -9,7 +9,7 @@ from os import environ
 from pathlib import Path
 from typing import Any
 
-SENTINEL_PREFIX = "LIUBAI_PROBE_RESULT:"
+SENTINEL_PREFIX = "LIUBAI_BEHAVIOR_CHECK_RESULT:"
 
 
 def _category(value: object) -> str:
@@ -92,39 +92,39 @@ def _load_entry(source_path: str, entry_symbol: str) -> tuple[Callable[..., obje
     return fn, None
 
 
-def _run_returns_probe(fn: Callable[..., object], probe: dict, number: int, compare: str) -> dict:
+def _run_returns_check(fn: Callable[..., object], check: dict, number: int, compare: str) -> dict:
     try:
-        actual = fn(*probe["args"])
+        actual = fn(*check["args"])
     except Exception as exc:
-        reason = f'probe {number}: expected {_safe_json(probe["returns"])}, got throw "{_error_message(exc)}"'
+        reason = f'check {number}: expected {_safe_json(check["returns"])}, got throw "{_error_message(exc)}"'
         return {"pass": False, "reason": reason}
-    if _deep_equal(actual, probe["returns"], compare):
+    if _deep_equal(actual, check["returns"], compare):
         return {"pass": True}
-    reason = f'probe {number}: expected {_safe_json(probe["returns"])}, got {_safe_json(actual)}'
+    reason = f'check {number}: expected {_safe_json(check["returns"])}, got {_safe_json(actual)}'
     return {"pass": False, "reason": reason}
 
 
-def _run_throws_probe(fn: Callable[..., object], probe: dict, number: int) -> dict:
+def _run_throws_check(fn: Callable[..., object], check: dict, number: int) -> dict:
     try:
-        actual = fn(*probe["args"])
+        actual = fn(*check["args"])
     except Exception as exc:
         message = _error_message(exc)
-        if message == probe["throws"]:
+        if message == check["throws"]:
             return {"pass": True}
-        reason = f'probe {number}: expected throw "{probe["throws"]}", got throw "{message}"'
+        reason = f'check {number}: expected throw "{check["throws"]}", got throw "{message}"'
         return {"pass": False, "reason": reason}
-    reason = f'probe {number}: expected throw "{probe["throws"]}", got return {_safe_json(actual)}'
+    reason = f'check {number}: expected throw "{check["throws"]}", got return {_safe_json(actual)}'
     return {"pass": False, "reason": reason}
 
 
-def _run_probe(fn: Callable[..., object], probe: dict, number: int, compare: str) -> dict:
-    if "throws" in probe:
-        return _run_throws_probe(fn, probe, number)
-    return _run_returns_probe(fn, probe, number, compare)
+def _run_check(fn: Callable[..., object], check: dict, number: int, compare: str) -> dict:
+    if "throws" in check:
+        return _run_throws_check(fn, check, number)
+    return _run_returns_check(fn, check, number, compare)
 
 
-def _run_all_probes(fn: Callable[..., object], probes: list[dict], compare: str) -> list[dict]:
-    return [_run_probe(fn, probe, i + 1, compare) for i, probe in enumerate(probes)]
+def _run_all_checks(fn: Callable[..., object], checks: list[dict], compare: str) -> list[dict]:
+    return [_run_check(fn, check, i + 1, compare) for i, check in enumerate(checks)]
 
 
 def _write_trace(tracer: trace.Trace, source_path: str, trace_out_path: str) -> None:
@@ -143,10 +143,10 @@ def main() -> None:
     payload = json.loads(sys.stdin.read())
     source_path = payload["sourcePath"]
     entry_symbol = payload["entrySymbol"]
-    probes = payload["probes"]
+    checks = payload["behaviorChecks"]
     compare = payload.get("compare", "exact")
 
-    trace_out_path = environ.get("LIUBAI_PROBE_TRACE_OUT")
+    trace_out_path = environ.get("LIUBAI_BEHAVIOR_CHECK_TRACE_OUT")
     tracer = trace.Trace(count=1, trace=0) if trace_out_path else None
     run = tracer.runfunc if tracer is not None else lambda f, *args: f(*args)
 
@@ -155,7 +155,7 @@ def main() -> None:
         _print_sentinel({"loadError": load_error})
         return
 
-    results = run(_run_all_probes, fn, probes, compare)
+    results = run(_run_all_checks, fn, checks, compare)
     if tracer is not None and trace_out_path is not None:
         _write_trace(tracer, source_path, trace_out_path)
 

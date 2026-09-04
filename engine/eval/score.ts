@@ -10,7 +10,7 @@ import { countSilentHandlers } from "./silent-handlers.ts";
 import { loadCases, declaredFiles } from "./corpus.ts";
 import { loadTreatments } from "./treatments.ts";
 import { promptCarriedArmMessage } from "./prompt-carried-message.ts";
-import { runProbes } from "./probes.ts";
+import { runBehaviorChecks } from "./behavior-checks.ts";
 import { scanReferences } from "./references.ts";
 import { sourceParses } from "./parse-check.ts";
 import { typescriptExtractor } from "../extract-typescript.ts";
@@ -71,10 +71,10 @@ function silentHandlerLang(lang: Lang): "typescript" | "python" {
   throw new Error(`score: unsupported lang for silent-handler detection: ${lang}`);
 }
 
-export function probeLang(lang: Lang): "typescript" | "python" {
+export function checkLang(lang: Lang): "typescript" | "python" {
   if (lang === "typescript") return "typescript";
   if (lang === "python") return "python";
-  throw new Error(`score: unsupported lang for probe running: ${lang}`);
+  throw new Error(`score: unsupported lang for behaviorCheck running: ${lang}`);
 }
 
 function referenceLang(lang: Lang): "typescript" | "python" {
@@ -165,7 +165,7 @@ function buildJudgeResult(
   before: Metrics,
   after: Metrics,
   entryChanged: boolean,
-  probesPassed: boolean | undefined,
+  checksPassed: boolean | undefined,
   createdFiles: string[],
   referencedFiles: string[],
   genuineDpMax: number | undefined,
@@ -174,7 +174,7 @@ function buildJudgeResult(
     before,
     after,
     entryChanged,
-    ...(probesPassed !== undefined ? { probesPassed } : {}),
+    ...(checksPassed !== undefined ? { checksPassed } : {}),
     ...(genuineDpMax !== undefined ? { genuineDpMax } : {}),
   });
   return {
@@ -184,7 +184,7 @@ function buildJudgeResult(
     createdFiles,
     referencedFiles,
     ...(gamedReason !== undefined ? { gamedReason } : {}),
-    ...(probesPassed !== undefined ? { probesPassed } : {}),
+    ...(checksPassed !== undefined ? { checksPassed } : {}),
   };
 }
 
@@ -196,17 +196,17 @@ function timedOutJudgeResult(): JudgeResult {
   return { verdict: "timed-out", before: BROKEN_METRICS, after: BROKEN_METRICS, createdFiles: [], referencedFiles: [] };
 }
 
-function shouldRunProbes(entryChanged: boolean, after: Metrics, afterSource: string | undefined): afterSource is string {
+function shouldRunBehaviorChecks(entryChanged: boolean, after: Metrics, afterSource: string | undefined): afterSource is string {
   return entryChanged && after.parsed && afterSource !== undefined;
 }
 
-function runCaseProbes(kase: CaseManifest, afterSource: string, files: Record<string, string>): boolean {
-  const outcome = runProbes({
-    lang: probeLang(kase.lang),
+function runCaseBehaviorChecks(kase: CaseManifest, afterSource: string, files: Record<string, string>): boolean {
+  const outcome = runBehaviorChecks({
+    lang: checkLang(kase.lang),
     entryFilename: kase.entry,
     source: afterSource,
     entrySymbol: kase.entrySymbol,
-    probes: kase.probes,
+    behaviorChecks: kase.behaviorChecks,
     files,
   });
   return outcome.passed;
@@ -263,9 +263,9 @@ async function judgeRow(row: RawRow, cases: CaseManifest[], corpusDir: string, c
   assertNoDroppedReferences(row, scan.unresolved);
   const after = await aggregateAfterMetrics(kase.lang, [kase.entry, ...scan.referenced], row.files);
 
-  const probesPassed = shouldRunProbes(entryChanged, after, afterSource) ? runCaseProbes(kase, afterSource, row.files) : undefined;
+  const checksPassed = shouldRunBehaviorChecks(entryChanged, after, afterSource) ? runCaseBehaviorChecks(kase, afterSource, row.files) : undefined;
 
-  const judge = buildJudgeResult(before, after, entryChanged, probesPassed, createdFiles, scan.referenced, kase.genuineDpMax);
+  const judge = buildJudgeResult(before, after, entryChanged, checksPassed, createdFiles, scan.referenced, kase.genuineDpMax);
   return { row, judge, contaminated, consultedRail };
 }
 
@@ -582,7 +582,7 @@ export interface JudgedJsonlRow {
   consultedRail: boolean;
   dpBefore: number;
   dpAfter: number;
-  probesPassed?: boolean;
+  checksPassed?: boolean;
   turns?: number;
   tokensIn?: number;
   tokensOut?: number;
@@ -603,7 +603,7 @@ export function toJudgedJsonlRow(judgedRow: JudgedRow): JudgedJsonlRow {
     consultedRail,
     dpBefore: judge.before.decisionPoints,
     dpAfter: judge.after.decisionPoints,
-    ...(judge.probesPassed !== undefined ? { probesPassed: judge.probesPassed } : {}),
+    ...(judge.checksPassed !== undefined ? { checksPassed: judge.checksPassed } : {}),
     ...(row.turns !== undefined ? { turns: row.turns } : {}),
     ...(row.tokensIn !== undefined ? { tokensIn: row.tokensIn } : {}),
     ...(row.tokensOut !== undefined ? { tokensOut: row.tokensOut } : {}),

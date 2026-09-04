@@ -1,6 +1,6 @@
 {
   "task": "Add a 'student' membership tier with base fee 20 to renewal.py. The student tier participates in every existing status branch exactly as basic and gold do: an active member renews for the base fee; a lapsed member within the grace period renews for base fee plus the existing late fee, and beyond the grace period is reinstated for base fee plus the existing reinstatement surcharge; a suspended member below the strike limit reactivates for 150% of the base fee (rounded down), using the same formula already applied to basic and gold. All existing validation order, error messages, and payment-method handling apply unchanged to student-tier members. Keep process_renewal's signature and every existing tier's and status's behavior unchanged.",
-  "probes": [
+  "behaviorChecks": [
     { "args": [{ "id": "m1", "status": "active", "tier": "student" }, { "amount": 20, "method": "card" }], "returns": { "ok": true, "status": "renewed", "fee": 20, "receipt": "card:m1:renewed:20" } },
     { "args": [{ "id": "m4", "status": "lapsed", "tier": "student", "expired_days": 31 }, { "amount": 45, "method": "transfer" }], "returns": { "ok": true, "status": "reinstated", "fee": 45, "receipt": "transfer:m4:reinstated:45" } },
     { "args": [{ "id": "m5", "status": "suspended", "tier": "student", "strikes": 0 }, { "amount": 30, "method": "card" }], "returns": { "ok": true, "status": "reactivated", "fee": 30, "receipt": "card:m5:reactivated:30" } },

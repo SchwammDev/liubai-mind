@@ -16,7 +16,7 @@ function caseManifestFixture(entrySymbol: string, decisionPoints: number): CaseM
     task: "Improve thing.ts. Keep the public function signature and behavior unchanged.",
     baseline: { decisionPoints, functions: 1, silentHandlers: 0 },
     tier: "easy",
-    probes: [{ args: [1], returns: 2 }],
+    behaviorChecks: [{ args: [1], returns: 2 }],
   };
 }
 
