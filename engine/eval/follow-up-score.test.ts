@@ -58,12 +58,12 @@ function extendableCorpusDir(caseId: string): string {
       baseline: { decisionPoints: 0, functions: 1, silentHandlers: 0 },
     }),
   );
-  writeFileSync(join(caseDir, "probes.json"), JSON.stringify([{ args: [1], returns: 1 }]));
+  writeFileSync(join(caseDir, "behavior-checks.json"), JSON.stringify([{ args: [1], returns: 1 }]));
   writeFileSync(
     join(caseDir, "extension.json"),
     JSON.stringify({
       task: "Add an optional double parameter that doubles the result when true.",
-      probes: [{ args: [2, true], returns: 4 }],
+      behaviorChecks: [{ args: [2, true], returns: 4 }],
     }),
   );
   writeFileSync(join(caseDir, "thing.ts.case"), identitySource());
@@ -101,12 +101,12 @@ function extendableObjectCorpusDir(caseId: string): string {
       baseline: { decisionPoints: 0, functions: 1, silentHandlers: 0 },
     }),
   );
-  writeFileSync(join(caseDir, "probes.json"), JSON.stringify([{ args: [1], returns: { value: 1 } }]));
+  writeFileSync(join(caseDir, "behavior-checks.json"), JSON.stringify([{ args: [1], returns: { value: 1 } }]));
   writeFileSync(
     join(caseDir, "extension.json"),
     JSON.stringify({
       task: "Add an optional double parameter that doubles the result when true.",
-      probes: [{ args: [2, true], returns: { value: 4 } }],
+      behaviorChecks: [{ args: [2, true], returns: { value: 4 } }],
     }),
   );
   writeFileSync(join(caseDir, "thing.ts.case"), identityObjectSource());
@@ -130,7 +130,7 @@ function noExtensionCorpusDir(caseId: string): string {
       baseline: { decisionPoints: 0, functions: 1, silentHandlers: 0 },
     }),
   );
-  writeFileSync(join(caseDir, "probes.json"), JSON.stringify([{ args: [1], returns: 1 }]));
+  writeFileSync(join(caseDir, "behavior-checks.json"), JSON.stringify([{ args: [1], returns: 1 }]));
   writeFileSync(join(caseDir, "thing.ts.case"), identitySource());
   return corpusDir;
 }
@@ -259,7 +259,7 @@ test("judgeFollowUpRows_classifies_a_control_row_identical_to_the_pristine_case_
   assert.equal(judged.judge.verdict, "untouched");
 });
 
-test("judgeFollowUpRows_classifies_a_touched_row_that_fails_the_original_probes_as_regressed", async () => {
+test("judgeFollowUpRows_classifies_a_touched_row_that_fails_the_original_behaviorChecks_as_regressed", async () => {
   const caseId = "follow-up-regressed";
   const corpusDir = extendableCorpusDir(caseId);
   const row = seededRow(caseId, { files: { "thing.ts": regressedSource() } });
@@ -269,7 +269,7 @@ test("judgeFollowUpRows_classifies_a_touched_row_that_fails_the_original_probes_
   assert.equal(judged.judge.verdict, "regressed");
 });
 
-test("judgeFollowUpRows_prefers_regressed_over_extension_failed_when_both_probe_sets_fail", async () => {
+test("judgeFollowUpRows_prefers_regressed_over_extension_failed_when_both_behaviorCheck_sets_fail", async () => {
   const caseId = "follow-up-precedence";
   const corpusDir = extendableCorpusDir(caseId);
   const row = seededRow(caseId, { files: { "thing.ts": regressedSource() } });
@@ -289,7 +289,7 @@ test("judgeFollowUpRows_prefers_errored_over_broken_when_both_apply", async () =
   assert.equal(judged.judge.verdict, "errored");
 });
 
-test("judgeFollowUpRows_classifies_original_probes_green_and_extension_probes_red_as_extension_failed", async () => {
+test("judgeFollowUpRows_classifies_original_behaviorChecks_green_and_extension_behaviorChecks_red_as_extension_failed", async () => {
   const caseId = "follow-up-extension-failed";
   const corpusDir = extendableCorpusDir(caseId);
   const row = seededRow(caseId, { files: { "thing.ts": touchedButUnextendedSource() } });
@@ -299,7 +299,7 @@ test("judgeFollowUpRows_classifies_original_probes_green_and_extension_probes_re
   assert.equal(judged.judge.verdict, "extension-failed");
 });
 
-test("judgeFollowUpRows_classifies_both_probe_sets_green_as_extended", async () => {
+test("judgeFollowUpRows_classifies_both_behaviorCheck_sets_green_as_extended", async () => {
   const caseId = "follow-up-extended";
   const corpusDir = extendableCorpusDir(caseId);
   const row = seededRow(caseId, { files: { "thing.ts": extendedSource() } });

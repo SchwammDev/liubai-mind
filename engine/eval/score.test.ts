@@ -54,7 +54,7 @@ function unsupportedLangCorpusDir(caseId: string): string {
       baseline: { decisionPoints: 1, functions: 1, silentHandlers: 0 },
     }),
   );
-  writeFileSync(join(caseDir, "probes.json"), JSON.stringify([{ args: [1], returns: 2 }]));
+  writeFileSync(join(caseDir, "behavior-checks.json"), JSON.stringify([{ args: [1], returns: 2 }]));
   writeFileSync(join(caseDir, "thing.cpp.case"), "int f() { return 1; }\n");
   return corpusDir;
 }
@@ -76,7 +76,7 @@ function importingCorpusDir(caseId: string): string {
       baseline: { decisionPoints: 1, functions: 1, silentHandlers: 0 },
     }),
   );
-  writeFileSync(join(caseDir, "probes.json"), JSON.stringify([{ args: [1], returns: 2 }]));
+  writeFileSync(join(caseDir, "behavior-checks.json"), JSON.stringify([{ args: [1], returns: 2 }]));
   writeFileSync(join(caseDir, "thing.ts.case"), "export function f(x: number): number {\n  if (x > 0) {\n    return x;\n  }\n  return -x;\n}\n");
   return corpusDir;
 }
@@ -113,7 +113,7 @@ function hardTierCorpusDir(caseId: string, genuineDpMax: number): string {
     }),
   );
   writeFileSync(
-    join(caseDir, "probes.json"),
+    join(caseDir, "behavior-checks.json"),
     JSON.stringify([
       { args: [1], returns: 1 },
       { args: [-1], returns: -1 },
@@ -144,7 +144,7 @@ function mixedTierHardSource(): string {
   return "export function f(x: number): number {\n  if (x > 0) {\n    return 1;\n  }\n  if (x < 0) {\n    return -1;\n  }\n  return 0;\n}\n";
 }
 
-function writeMixedTierCase(corpusDir: string, id: string, tier: Tier, source: string, probes: unknown[], genuineDpMax?: number): void {
+function writeMixedTierCase(corpusDir: string, id: string, tier: Tier, source: string, behaviorChecks: unknown[], genuineDpMax?: number): void {
   const caseDir = join(corpusDir, id);
   mkdirSync(caseDir, { recursive: true });
   writeFileSync(
@@ -161,7 +161,7 @@ function writeMixedTierCase(corpusDir: string, id: string, tier: Tier, source: s
       baseline: { decisionPoints: tier === "hard" ? 2 : 1, functions: 1, silentHandlers: 0 },
     }),
   );
-  writeFileSync(join(caseDir, "probes.json"), JSON.stringify(probes));
+  writeFileSync(join(caseDir, "behavior-checks.json"), JSON.stringify(behaviorChecks));
   writeFileSync(join(caseDir, "thing.ts.case"), source);
   if (tier === "hard") writeReferenceEntryFile(caseDir, "thing.ts", source);
 }
@@ -318,7 +318,7 @@ function fullyPopulatedJudgedRow(): JudgedRow {
     judge: {
       verdict: "gamed",
       gamedReason: "helper-split",
-      probesPassed: true,
+      checksPassed: true,
       before: metrics({ decisionPoints: 5 }),
       after: metrics({ decisionPoints: 2 }),
       createdFiles: [],
@@ -344,7 +344,7 @@ test("toJudgedJsonlRow_maps_verdict_dp_and_cost_fields_from_a_fully_populated_ju
     consultedRail: false,
     dpBefore: 5,
     dpAfter: 2,
-    probesPassed: true,
+    checksPassed: true,
     turns: 4,
     tokensIn: 100,
     tokensOut: 50,
@@ -429,7 +429,7 @@ function importingPyCorpusDir(caseId: string): string {
       baseline: { decisionPoints: 1, functions: 1, silentHandlers: 0 },
     }),
   );
-  writeFileSync(join(caseDir, "probes.json"), JSON.stringify([{ args: [1], returns: 1 }]));
+  writeFileSync(join(caseDir, "behavior-checks.json"), JSON.stringify([{ args: [1], returns: 1 }]));
   writeFileSync(join(caseDir, "thing.py.case"), "def f(x):\n    if x > 0:\n        return x\n    return -x\n");
   return corpusDir;
 }
@@ -941,9 +941,9 @@ test(
   },
 );
 
-function assertProbesPassedFor(judged: JudgedRow, verdict: Verdict, expected: boolean | undefined): void {
+function assertBehaviorChecksPassedFor(judged: JudgedRow, verdict: Verdict, expected: boolean | undefined): void {
   assert.equal(judged.judge.verdict, verdict);
-  assert.equal(judged.judge.probesPassed, expected);
+  assert.equal(judged.judge.checksPassed, expected);
 }
 
 function assertAfterMetricsSum(judged: JudgedRow, expected: { nFunctions: number; decisionPoints: number; silentHandlers: number }): void {
@@ -957,28 +957,28 @@ function assertVerdictAndAfterParsed(judged: JudgedRow, verdict: Verdict, parsed
   assert.equal(judged.judge.after.parsed, parsed);
 }
 
-test("judgeRows_records_probesPassed_only_when_probes_ran", async () => {
+test("judgeRows_records_checksPassed_only_when_behaviorChecks_ran", async () => {
   const judged = await judgeRows(tsOnlyRows(readFixtureRows()), CORPUS_DIR);
 
-  assertProbesPassedFor(findJudgedRow(judged, "control", "ts-order-validator", 1), "untouched", undefined);
-  assertProbesPassedFor(findJudgedRow(judged, "rails-default", "ts-flag-parser", 1), "genuine-fix", true);
-  assertProbesPassedFor(judged.find((j) => j.judge.verdict === "behavior-broken")!, "behavior-broken", false);
+  assertBehaviorChecksPassedFor(findJudgedRow(judged, "control", "ts-order-validator", 1), "untouched", undefined);
+  assertBehaviorChecksPassedFor(findJudgedRow(judged, "rails-default", "ts-flag-parser", 1), "genuine-fix", true);
+  assertBehaviorChecksPassedFor(judged.find((j) => j.judge.verdict === "behavior-broken")!, "behavior-broken", false);
 });
 
-test("judgeRows_skips_probes_for_an_unparseable_after_source", async () => {
+test("judgeRows_skips_behaviorChecks_for_an_unparseable_after_source", async () => {
   const judged = await judgeRows(tsOnlyRows(readFixtureRows()), CORPUS_DIR);
 
-  assertProbesPassedFor(findJudgedRow(judged, "rails-default", "ts-flag-parser", 2), "broken", undefined);
+  assertBehaviorChecksPassedFor(findJudgedRow(judged, "rails-default", "ts-flag-parser", 2), "broken", undefined);
 });
 
-test("judgeRows_runs_probes_against_the_full_row_file_snapshot", async () => {
+test("judgeRows_runs_behaviorChecks_against_the_full_row_file_snapshot", async () => {
   const caseId = "ts-import-case";
   const corpusDir = importingCorpusDir(caseId);
   const row = rawRow("rails-default", caseId, { files: importingRowFiles() });
 
   const judged = await judgeRows([row], corpusDir);
 
-  assert.equal(judged[0]!.judge.probesPassed, true);
+  assert.equal(judged[0]!.judge.checksPassed, true);
 });
 
 test("judgeRows_lists_files_created_beyond_the_declared_set_sorted", async () => {
@@ -1076,7 +1076,7 @@ test("judgeRows_classifies_an_unparseable_referenced_file_as_broken", async () =
   const judged = await judgeRows([row], CORPUS_DIR);
 
   assertVerdictAndAfterParsed(judged[0]!, "broken", false);
-  assert.equal(judged[0]!.judge.probesPassed, undefined);
+  assert.equal(judged[0]!.judge.checksPassed, undefined);
 });
 
 test("judgeRows_ignores_an_unparseable_unreferenced_created_file", async () => {
@@ -1343,7 +1343,7 @@ function assertScoreFailedBeforeWritingATable(
   assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
 }
 
-test("runScore_fails_the_run_with_an_actionable_message_when_the_py_cc_backend_probe_is_broken", async () => {
+test("runScore_fails_the_run_with_an_actionable_message_when_the_py_cc_backend_behaviorCheck_is_broken", async () => {
   const rows = readFixtureRows().filter((row) => row.caseId === "py-ingest-bait");
   const runDir = tempRunDir();
   writeRawJsonl(runDir, rows);

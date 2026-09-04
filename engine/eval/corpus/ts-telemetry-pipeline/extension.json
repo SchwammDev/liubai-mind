@@ -1,6 +1,6 @@
 {
   "task": "Detect flatlines in processBatch: a flatline is a run of 3 or more consecutive entries in the input readings array that belong to the same channel and normalize to the same millivolt value. For each maximal flatline run, append one alert of the form '<channel>:flatline' to the result's alerts list, placed after all existing critical/loaded/negative alerts, in the order each run's first reading appears in the input. A run breaks the moment an intervening reading (even from a different channel) interrupts the matching sequence — readings of the same channel and value that are not adjacent in the input never count as a run. Keep every existing alert type, channel summary field, and per-reading label unchanged; the report field keeps its existing computation, so its alerts count reflects the final alerts list with flatline alerts included. Keep processBatch's signature unchanged.",
-  "probes": [
+  "behaviorChecks": [
     {
       "args": [{ "readings": [
         { "channel": "x", "unit": "mV", "value": 10, "at": 0 },

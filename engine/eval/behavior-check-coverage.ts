@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { typescriptExtractor } from "../extract-typescript.ts";
 import { pythonExtractor } from "../extract-python.ts";
 import { v8CoverageToSnapshot } from "../coverage-v8.ts";
-import { runProbesInDir } from "./probes.ts";
-import type { ProbeOutcome, ProbeRunInput } from "./probes.ts";
+import { runBehaviorChecksInDir } from "./behavior-checks.ts";
+import type { BehaviorCheckOutcome, BehaviorCheckRunInput } from "./behavior-checks.ts";
 
 export interface EntrySpan {
   startLine: number;
@@ -14,12 +14,12 @@ export interface EntrySpan {
 }
 
 export interface AdequacyResult {
-  outcome: ProbeOutcome;
+  outcome: BehaviorCheckOutcome;
   missingInSpan: number[];
 }
 
 async function extractedFunctions(
-  lang: ProbeRunInput["lang"],
+  lang: BehaviorCheckRunInput["lang"],
   entryFilename: string,
   source: string,
 ): Promise<{ name: string; startLine: number; endLine: number }[]> {
@@ -29,7 +29,7 @@ async function extractedFunctions(
 }
 
 export async function entrySpan(
-  lang: ProbeRunInput["lang"],
+  lang: BehaviorCheckRunInput["lang"],
   entryFilename: string,
   source: string,
   entrySymbol: string,
@@ -50,16 +50,16 @@ function linesWithinSpan(lines: Iterable<number>, span: EntrySpan): number[] {
   return inSpan.sort((a, b) => a - b);
 }
 
-async function runTypescriptWithCoverage(workDir: string, input: ProbeRunInput, span: EntrySpan): Promise<AdequacyResult> {
+async function runTypescriptWithCoverage(workDir: string, input: BehaviorCheckRunInput, span: EntrySpan): Promise<AdequacyResult> {
   const coverageDir = join(workDir, "v8");
   mkdirSync(coverageDir, { recursive: true });
 
-  const outcome = runProbesInDir(workDir, { ...input, env: { ...input.env, NODE_V8_COVERAGE: coverageDir } });
+  const outcome = runBehaviorChecksInDir(workDir, { ...input, env: { ...input.env, NODE_V8_COVERAGE: coverageDir } });
 
   const snapshot = await v8CoverageToSnapshot(coverageDir, workDir);
   const fileLines = snapshot.files[input.entryFilename];
   if (fileLines === undefined) {
-    throw new Error(`runProbesWithCoverage: no v8 coverage was recorded for ${input.entryFilename}; the probe run never loaded it`);
+    throw new Error(`runBehaviorChecksWithCoverage: no v8 coverage was recorded for ${input.entryFilename}; the behaviorCheck run never loaded it`);
   }
 
   return { outcome, missingInSpan: linesWithinSpan(fileLines.missing, span) };
@@ -70,13 +70,13 @@ interface PythonTrace {
   executable: number[];
 }
 
-function runPythonWithCoverage(workDir: string, input: ProbeRunInput, span: EntrySpan): AdequacyResult {
+function runPythonWithCoverage(workDir: string, input: BehaviorCheckRunInput, span: EntrySpan): AdequacyResult {
   const tracePath = join(workDir, "trace.json");
 
-  const outcome = runProbesInDir(workDir, { ...input, env: { ...input.env, LIUBAI_PROBE_TRACE_OUT: tracePath } });
+  const outcome = runBehaviorChecksInDir(workDir, { ...input, env: { ...input.env, LIUBAI_BEHAVIOR_CHECK_TRACE_OUT: tracePath } });
 
   if (!existsSync(tracePath)) {
-    throw new Error(`runProbesWithCoverage: no python trace was written for ${input.entryFilename}; the probe run never loaded it`);
+    throw new Error(`runBehaviorChecksWithCoverage: no python trace was written for ${input.entryFilename}; the behaviorCheck run never loaded it`);
   }
 
   const trace = JSON.parse(readFileSync(tracePath, "utf8")) as PythonTrace;
@@ -86,10 +86,10 @@ function runPythonWithCoverage(workDir: string, input: ProbeRunInput, span: Entr
   return { outcome, missingInSpan: linesWithinSpan(uncovered, span) };
 }
 
-export async function runProbesWithCoverage(input: ProbeRunInput): Promise<AdequacyResult> {
+export async function runBehaviorChecksWithCoverage(input: BehaviorCheckRunInput): Promise<AdequacyResult> {
   const span = await entrySpan(input.lang, input.entryFilename, input.source, input.entrySymbol);
 
-  const workDir = mkdtempSync(join(tmpdir(), "liubai-probe-coverage-"));
+  const workDir = mkdtempSync(join(tmpdir(), "liubai-behaviorCheck-coverage-"));
   try {
     if (input.lang === "typescript") return await runTypescriptWithCoverage(workDir, input, span);
     return runPythonWithCoverage(workDir, input, span);

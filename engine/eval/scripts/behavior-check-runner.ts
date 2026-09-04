@@ -1,44 +1,44 @@
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
-const SENTINEL_PREFIX = "LIUBAI_PROBE_RESULT:";
+const SENTINEL_PREFIX = "LIUBAI_BEHAVIOR_CHECK_RESULT:";
 
-interface ReturnsProbe {
+interface ReturnsCheck {
   args: unknown[];
   returns: unknown;
 }
 
-interface ThrowsProbe {
+interface ThrowsCheck {
   args: unknown[];
   throws: string;
 }
 
-type ProbeSpec = ReturnsProbe | ThrowsProbe;
+type BehaviorCheckSpec = ReturnsCheck | ThrowsCheck;
 
 type CompareMode = "exact" | "subset";
 
-interface ProbeRunnerInput {
+interface BehaviorCheckRunnerInput {
   sourcePath: string;
   entrySymbol: string;
-  probes: ProbeSpec[];
+  behaviorChecks: BehaviorCheckSpec[];
   compare: CompareMode;
 }
 
-interface ProbeResultOk {
+interface BehaviorCheckResultOk {
   pass: true;
 }
 
-interface ProbeResultFail {
+interface BehaviorCheckResultFail {
   pass: false;
   reason: string;
 }
 
-type ProbeResult = ProbeResultOk | ProbeResultFail;
+type BehaviorCheckResult = BehaviorCheckResultOk | BehaviorCheckResultFail;
 
 type EntryFn = (...args: unknown[]) => unknown;
 
-function isThrowsProbe(probe: ProbeSpec): probe is ThrowsProbe {
-  return "throws" in probe;
+function isThrowsCheck(behaviorCheck: BehaviorCheckSpec): behaviorCheck is ThrowsCheck {
+  return "throws" in behaviorCheck;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -82,31 +82,31 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function runReturnsProbe(fn: EntryFn, probe: ReturnsProbe, number: number, compare: CompareMode): ProbeResult {
+function runReturnsCheck(fn: EntryFn, behaviorCheck: ReturnsCheck, number: number, compare: CompareMode): BehaviorCheckResult {
   let actual: unknown;
   try {
-    actual = fn(...probe.args);
+    actual = fn(...behaviorCheck.args);
   } catch (err) {
-    return { pass: false, reason: `probe ${number}: expected ${safeStringify(probe.returns)}, got throw "${errorMessage(err)}"` };
+    return { pass: false, reason: `behaviorCheck ${number}: expected ${safeStringify(behaviorCheck.returns)}, got throw "${errorMessage(err)}"` };
   }
-  if (valuesMatch(actual, probe.returns, compare)) return { pass: true };
-  return { pass: false, reason: `probe ${number}: expected ${safeStringify(probe.returns)}, got ${safeStringify(actual)}` };
+  if (valuesMatch(actual, behaviorCheck.returns, compare)) return { pass: true };
+  return { pass: false, reason: `behaviorCheck ${number}: expected ${safeStringify(behaviorCheck.returns)}, got ${safeStringify(actual)}` };
 }
 
-function runThrowsProbe(fn: EntryFn, probe: ThrowsProbe, number: number): ProbeResult {
+function runThrowsCheck(fn: EntryFn, behaviorCheck: ThrowsCheck, number: number): BehaviorCheckResult {
   let actual: unknown;
   try {
-    actual = fn(...probe.args);
+    actual = fn(...behaviorCheck.args);
   } catch (err) {
     const message = errorMessage(err);
-    if (message === probe.throws) return { pass: true };
-    return { pass: false, reason: `probe ${number}: expected throw "${probe.throws}", got throw "${message}"` };
+    if (message === behaviorCheck.throws) return { pass: true };
+    return { pass: false, reason: `behaviorCheck ${number}: expected throw "${behaviorCheck.throws}", got throw "${message}"` };
   }
-  return { pass: false, reason: `probe ${number}: expected throw "${probe.throws}", got return ${safeStringify(actual)}` };
+  return { pass: false, reason: `behaviorCheck ${number}: expected throw "${behaviorCheck.throws}", got return ${safeStringify(actual)}` };
 }
 
-function runProbe(fn: EntryFn, probe: ProbeSpec, number: number, compare: CompareMode): ProbeResult {
-  return isThrowsProbe(probe) ? runThrowsProbe(fn, probe, number) : runReturnsProbe(fn, probe, number, compare);
+function runCheck(fn: EntryFn, behaviorCheck: BehaviorCheckSpec, number: number, compare: CompareMode): BehaviorCheckResult {
+  return isThrowsCheck(behaviorCheck) ? runThrowsCheck(fn, behaviorCheck, number) : runReturnsCheck(fn, behaviorCheck, number, compare);
 }
 
 function printSentinel(payload: unknown): void {
@@ -115,7 +115,7 @@ function printSentinel(payload: unknown): void {
 
 async function main(): Promise<void> {
   const raw = await readStdin();
-  const input = JSON.parse(raw) as ProbeRunnerInput;
+  const input = JSON.parse(raw) as BehaviorCheckRunnerInput;
 
   let mod: Record<string, unknown>;
   try {
@@ -132,7 +132,7 @@ async function main(): Promise<void> {
   }
 
   const entryFn = fn as EntryFn;
-  const results = input.probes.map((probe, i) => runProbe(entryFn, probe, i + 1, input.compare));
+  const results = input.behaviorChecks.map((behaviorCheck, i) => runCheck(entryFn, behaviorCheck, i + 1, input.compare));
   printSentinel({ results });
 }
 

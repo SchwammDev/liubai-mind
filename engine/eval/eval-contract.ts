@@ -8,13 +8,13 @@ export interface TreatmentManifest {
   delivery?: "prompt" | "rail";
 }
 
-export type Probe = { args: unknown[]; returns: unknown } | { args: unknown[]; throws: string };
+export type BehaviorCheck = { args: unknown[]; returns: unknown } | { args: unknown[]; throws: string };
 
 export type Tier = "easy" | "hard";
 
 export interface ExtensionSpec {
   task: string;
-  probes: Probe[];
+  behaviorChecks: BehaviorCheck[];
 }
 
 export interface CaseManifest {
@@ -28,7 +28,7 @@ export interface CaseManifest {
   tier: Tier;
   tags?: string[];
   genuineDpMax?: number;
-  probes: Probe[];
+  behaviorChecks: BehaviorCheck[];
   reference?: Record<string, string>;
   extension?: ExtensionSpec;
 }
@@ -53,7 +53,7 @@ export type GamedReason = "helper-split" | "silent-handler";
 export interface JudgeResult {
   verdict: Verdict;
   gamedReason?: GamedReason;
-  probesPassed?: boolean;
+  checksPassed?: boolean;
   createdFiles: string[];
   referencedFiles: string[];
   before: Metrics;

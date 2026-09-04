@@ -1,6 +1,6 @@
 {
   "task": "The workflow needs a way to cancel a request while it's still in progress. From draft, pending, or approved, a cancel event moves the request to a new cancelled state. Cancelled is final: no event is valid out of cancelled, and requests that have already been published or archived can no longer be cancelled. Keep transition's signature and every existing transition and error behavior unchanged.",
-  "probes": [
+  "behaviorChecks": [
     { "args": ["draft", "cancel"], "returns": "cancelled" },
     { "args": ["pending", "cancel"], "returns": "cancelled" },
     { "args": ["approved", "cancel"], "returns": "cancelled" },

@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Lang } from "../contract.ts";
-import type { CaseManifest, BaselineMetrics, ExtensionSpec, Probe, Tier } from "./eval-contract.ts";
+import type { CaseManifest, BaselineMetrics, ExtensionSpec, BehaviorCheck, Tier } from "./eval-contract.ts";
 
 type LoadResult = CaseManifest[] | { error: string };
 
@@ -218,42 +218,42 @@ function validateManifestShape(raw: unknown): { fields: ValidatedFields } | { er
   return { fields: fields.value };
 }
 
-function validateProbe(raw: unknown, index: number): { value: Probe } | { error: string } {
-  if (typeof raw !== "object" || raw === null) return { error: `probe ${index}: must be an object` };
+function validateBehaviorCheck(raw: unknown, index: number): { value: BehaviorCheck } | { error: string } {
+  if (typeof raw !== "object" || raw === null) return { error: `behaviorCheck ${index}: must be an object` };
 
   const { args, returns, throws } = raw as Record<string, unknown>;
-  if (!Array.isArray(args)) return { error: `probe ${index}: args must be an array` };
+  if (!Array.isArray(args)) return { error: `behaviorCheck ${index}: args must be an array` };
 
   const hasReturns = "returns" in raw;
   const hasThrows = "throws" in raw;
-  if (hasReturns === hasThrows) return { error: `probe ${index}: exactly one of returns or throws required` };
+  if (hasReturns === hasThrows) return { error: `behaviorCheck ${index}: exactly one of returns or throws required` };
 
   if (hasThrows) {
-    if (typeof throws !== "string") return { error: `probe ${index}: throws must be a string` };
+    if (typeof throws !== "string") return { error: `behaviorCheck ${index}: throws must be a string` };
     return { value: { args, throws } };
   }
 
   return { value: { args, returns } };
 }
 
-function validateProbes(raw: unknown): { value: Probe[] } | { error: string } {
-  if (!Array.isArray(raw) || raw.length === 0) return { error: "probes must be a non-empty array" };
+function validateBehaviorChecks(raw: unknown): { value: BehaviorCheck[] } | { error: string } {
+  if (!Array.isArray(raw) || raw.length === 0) return { error: "behaviorChecks must be a non-empty array" };
 
-  const probes: Probe[] = [];
+  const behaviorChecks: BehaviorCheck[] = [];
   for (let i = 0; i < raw.length; i++) {
-    const probe = validateProbe(raw[i], i + 1);
-    if ("error" in probe) return probe;
-    probes.push(probe.value);
+    const behaviorCheck = validateBehaviorCheck(raw[i], i + 1);
+    if ("error" in behaviorCheck) return behaviorCheck;
+    behaviorChecks.push(behaviorCheck.value);
   }
-  return { value: probes };
+  return { value: behaviorChecks };
 }
 
-function loadProbes(caseDir: string): { value: Probe[] } | { error: string } {
-  const probesPath = join(caseDir, "probes.json");
-  if (!existsSync(probesPath)) return { error: "probes.json is missing" };
+function loadBehaviorChecks(caseDir: string): { value: BehaviorCheck[] } | { error: string } {
+  const behaviorChecksPath = join(caseDir, "behavior-checks.json");
+  if (!existsSync(behaviorChecksPath)) return { error: "behavior-checks.json is missing" };
 
-  const raw: unknown = JSON.parse(readFileSync(probesPath, "utf8"));
-  return validateProbes(raw);
+  const raw: unknown = JSON.parse(readFileSync(behaviorChecksPath, "utf8"));
+  return validateBehaviorChecks(raw);
 }
 
 const EXTENSION_FILENAME = "extension.json";
@@ -265,15 +265,15 @@ function loadExtension(caseDir: string): { value: ExtensionSpec | undefined } | 
   const raw: unknown = JSON.parse(readFileSync(extensionPath, "utf8"));
   if (typeof raw !== "object" || raw === null) return { error: `${EXTENSION_FILENAME}: must be a JSON object` };
 
-  const { task, probes } = raw as Record<string, unknown>;
+  const { task, behaviorChecks } = raw as Record<string, unknown>;
 
   const taskResult = validateTask(task);
   if ("error" in taskResult) return { error: `${EXTENSION_FILENAME}: ${taskResult.error}` };
 
-  const probesResult = validateProbes(probes);
-  if ("error" in probesResult) return { error: `${EXTENSION_FILENAME}: ${probesResult.error}` };
+  const behaviorChecksResult = validateBehaviorChecks(behaviorChecks);
+  if ("error" in behaviorChecksResult) return { error: `${EXTENSION_FILENAME}: ${behaviorChecksResult.error}` };
 
-  return { value: { task: taskResult.value, probes: probesResult.value } };
+  return { value: { task: taskResult.value, behaviorChecks: behaviorChecksResult.value } };
 }
 
 function ensureFilesExist(caseDir: string, files: string[]): { error: string } | undefined {
@@ -325,8 +325,8 @@ function loadCase(caseDir: string, id: string): { manifest: CaseManifest } | { e
   const missingError = ensureFilesExist(caseDir, validated.fields.files);
   if (missingError !== undefined) return { error: `${id}: ${missingError.error}` };
 
-  const probes = loadProbes(caseDir);
-  if ("error" in probes) return { error: `${id}: ${probes.error}` };
+  const behaviorChecks = loadBehaviorChecks(caseDir);
+  if ("error" in behaviorChecks) return { error: `${id}: ${behaviorChecks.error}` };
 
   const reference = loadReference(caseDir, validated.fields.entry, validated.fields.tier);
   if ("error" in reference) return { error: `${id}: ${reference.error}` };
@@ -337,7 +337,7 @@ function loadCase(caseDir: string, id: string): { manifest: CaseManifest } | { e
   return {
     manifest: {
       ...validated.fields,
-      probes: probes.value,
+      behaviorChecks: behaviorChecks.value,
       ...(reference.value !== undefined ? { reference: reference.value } : {}),
       ...(extension.value !== undefined ? { extension: extension.value } : {}),
     },

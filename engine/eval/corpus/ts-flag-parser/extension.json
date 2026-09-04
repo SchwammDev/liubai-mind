@@ -1,6 +1,6 @@
 {
   "task": "Add a --tag <value> flag to parseFlags that attaches a free-form label to the run, taking the following argument as its value the same way --output and --config do. If --tag is the last argument with no value after it, that's an error. When --tag isn't given, the parsed result is exactly as it is today. Keep parseFlags's signature and every existing flag's behavior unchanged.",
-  "probes": [
+  "behaviorChecks": [
     {
       "args": [["--tag", "release"]],
       "returns": {

@@ -12,9 +12,9 @@ import { typescriptExtractor } from "../extract-typescript.ts";
 import { pythonExtractor } from "../extract-python.ts";
 import type { FunctionFacts, Lang } from "../contract.ts";
 import { DEFAULT_POLICY, RULE } from "../policy.ts";
-import { runProbesWithCoverage } from "./probe-coverage.ts";
-import { runProbes } from "./probes.ts";
-import type { ProbeFailure, ProbeOutcome } from "./probes.ts";
+import { runBehaviorChecksWithCoverage } from "./behavior-check-coverage.ts";
+import { runBehaviorChecks } from "./behavior-checks.ts";
+import type { BehaviorCheckFailure, BehaviorCheckOutcome } from "./behavior-checks.ts";
 import { venvPythonAvailable } from "./judge-env.ts";
 import { judgeRows } from "./score.ts";
 
@@ -34,7 +34,7 @@ function tempCorpusDir(): string {
   return mkdtempSync(join(tmpdir(), "eval-corpus-"));
 }
 
-function defaultProbes(): unknown[] {
+function defaultBehaviorChecks(): unknown[] {
   return [{ args: [1], returns: 2 }];
 }
 
@@ -43,13 +43,13 @@ function writeCase(
   id: string,
   manifest: object,
   files: Record<string, string>,
-  probes: unknown[] | null = defaultProbes(),
+  behaviorChecks: unknown[] | null = defaultBehaviorChecks(),
 ): string {
   const caseDir = join(corpusDir, id);
   mkdirSync(caseDir, { recursive: true });
   writeFileSync(join(caseDir, "manifest.json"), JSON.stringify(manifest));
-  if (probes !== null) {
-    writeFileSync(join(caseDir, "probes.json"), JSON.stringify(probes));
+  if (behaviorChecks !== null) {
+    writeFileSync(join(caseDir, "behavior-checks.json"), JSON.stringify(behaviorChecks));
   }
   for (const [name, content] of Object.entries(files)) {
     writeFileSync(join(caseDir, name), content);
@@ -116,7 +116,7 @@ function minimalCaseManifest(over: Partial<CaseManifest> = {}): CaseManifest {
     task: "Improve parse_flags.ts. Keep the public function signature and behavior unchanged.",
     baseline: { decisionPoints: 1, functions: 1, silentHandlers: 0 },
     tier: "easy",
-    probes: [{ args: [[]], returns: {} }],
+    behaviorChecks: [{ args: [[]], returns: {} }],
     ...over,
   };
 }
@@ -131,14 +131,14 @@ test("copyPlan_strips_the_trailing_case_suffix_from_each_file", () => {
   ]);
 });
 
-test("copyPlan_never_copies_manifest_or_probes_json", () => {
+test("copyPlan_never_copies_manifest_or_behaviorChecks_json", () => {
   const kase = minimalCaseManifest();
 
   const plan = copyPlan("/repo/corpus/case-a", kase, "/work/dir");
 
   const copiedBasenames = plan.map((p) => p.from.split("/").pop());
   assert.equal(copiedBasenames.includes("manifest.json"), false);
-  assert.equal(copiedBasenames.includes("probes.json"), false);
+  assert.equal(copiedBasenames.includes("behavior-checks.json"), false);
 });
 
 test("copyPlan_never_copies_reference_files_even_when_the_manifest_has_them", () => {
@@ -253,65 +253,65 @@ test("loadCases_rejects_an_unknown_top_level_manifest_key", () => {
   assert.match(result.error, /unknown top-level key\(s\): bogus/);
 });
 
-test("loadCases_rejects_a_case_without_probes_json", () => {
+test("loadCases_rejects_a_case_without_behaviorChecks_json", () => {
   const dir = tempCorpusDir();
-  writeCase(dir, "no-probes", minimalManifest(), minimalFiles(), null);
+  writeCase(dir, "no-behaviorChecks", minimalManifest(), minimalFiles(), null);
 
   const result = loadCases(dir);
 
   assertRejected(result);
-  assert.match(result.error, /no-probes/);
+  assert.match(result.error, /no-behaviorChecks/);
 });
 
-test("loadCases_rejects_a_probe_with_both_returns_and_throws", () => {
+test("loadCases_rejects_a_behaviorCheck_with_both_returns_and_throws", () => {
   const dir = tempCorpusDir();
-  writeCase(dir, "probe-both", minimalManifest(), minimalFiles(), [{ args: [], returns: 1, throws: "boom" }]);
+  writeCase(dir, "behaviorCheck-both", minimalManifest(), minimalFiles(), [{ args: [], returns: 1, throws: "boom" }]);
 
   const result = loadCases(dir);
 
   assertRejected(result);
-  assert.match(result.error, /probe-both/);
+  assert.match(result.error, /behaviorCheck-both/);
 });
 
-test("loadCases_rejects_a_probe_with_neither_returns_nor_throws", () => {
+test("loadCases_rejects_a_behaviorCheck_with_neither_returns_nor_throws", () => {
   const dir = tempCorpusDir();
-  writeCase(dir, "probe-neither", minimalManifest(), minimalFiles(), [{ args: [] }]);
+  writeCase(dir, "behaviorCheck-neither", minimalManifest(), minimalFiles(), [{ args: [] }]);
 
   const result = loadCases(dir);
 
   assertRejected(result);
-  assert.match(result.error, /probe-neither/);
+  assert.match(result.error, /behaviorCheck-neither/);
 });
 
-test("loadCases_rejects_an_empty_probes_array", () => {
+test("loadCases_rejects_an_empty_behaviorChecks_array", () => {
   const dir = tempCorpusDir();
-  writeCase(dir, "probe-empty", minimalManifest(), minimalFiles(), []);
+  writeCase(dir, "behaviorCheck-empty", minimalManifest(), minimalFiles(), []);
 
   const result = loadCases(dir);
 
   assertRejected(result);
-  assert.match(result.error, /probe-empty/);
+  assert.match(result.error, /behaviorCheck-empty/);
 });
 
-test("loadCases_rejects_a_probe_whose_throws_is_not_a_string", () => {
+test("loadCases_rejects_a_behaviorCheck_whose_throws_is_not_a_string", () => {
   const dir = tempCorpusDir();
-  writeCase(dir, "probe-throws-not-string", minimalManifest(), minimalFiles(), [{ args: [], throws: 42 }]);
+  writeCase(dir, "behaviorCheck-throws-not-string", minimalManifest(), minimalFiles(), [{ args: [], throws: 42 }]);
 
   const result = loadCases(dir);
 
   assertRejected(result);
-  assert.match(result.error, /probe-throws-not-string/);
+  assert.match(result.error, /behaviorCheck-throws-not-string/);
 });
 
-test("loadCases_merges_probes_from_probes_json_into_the_manifest", () => {
+test("loadCases_merges_behaviorChecks_from_behaviorChecks_json_into_the_manifest", () => {
   const dir = tempCorpusDir();
-  const probes = [{ args: [1, 2], returns: 3 }];
-  writeCase(dir, "probe-merge", minimalManifest(), minimalFiles(), probes);
+  const behaviorChecks = [{ args: [1, 2], returns: 3 }];
+  writeCase(dir, "behaviorCheck-merge", minimalManifest(), minimalFiles(), behaviorChecks);
 
   const result = loadCases(dir);
 
   assertLoaded(result);
-  assert.deepEqual(result[0]?.probes, probes);
+  assert.deepEqual(result[0]?.behaviorChecks, behaviorChecks);
 });
 
 function tierFields(kase: CaseManifest | undefined) {
@@ -429,20 +429,20 @@ function readFixtureSource(filename: string): string {
   return readFileSync(join(FIXTURES_DIR, filename), "utf8");
 }
 
-function asProbeableLang(lang: Lang): "typescript" | "python" {
+function asCheckableLang(lang: Lang): "typescript" | "python" {
   if (lang !== "typescript" && lang !== "python") {
-    throw new Error(`asProbeableLang: probes are not runnable for lang "${lang}"`);
+    throw new Error(`asCheckableLang: behaviorChecks are not runnable for lang "${lang}"`);
   }
   return lang;
 }
 
-function describeProbeFailure(failure: ProbeFailure): string {
-  return `probe ${failure.index}: ${failure.reason}`;
+function describeBehaviorCheckFailure(failure: BehaviorCheckFailure): string {
+  return `behaviorCheck ${failure.index}: ${failure.reason}`;
 }
 
-function assertProbesPassed(outcome: ProbeOutcome): void {
-  const reasons = outcome.failures.map(describeProbeFailure).join("; ");
-  assert.equal(outcome.passed, true, `probes did not pass: ${reasons}`);
+function assertBehaviorChecksPassed(outcome: BehaviorCheckOutcome): void {
+  const reasons = outcome.failures.map(describeBehaviorCheckFailure).join("; ");
+  assert.equal(outcome.passed, true, `behaviorChecks did not pass: ${reasons}`);
 }
 
 function assertEntrySymbolFullyCovered(missingInSpan: number[], unreachableLines: number[]): void {
@@ -453,32 +453,32 @@ function assertEntrySymbolFullyCovered(missingInSpan: number[], unreachableLines
   );
 }
 
-async function assertProbesAdequateForCase(id: string, unreachableLines: number[] = []): Promise<void> {
+async function assertBehaviorChecksAdequateForCase(id: string, unreachableLines: number[] = []): Promise<void> {
   const manifest = loadCaseManifest(id);
   const source = readCaseSource(id, `${manifest.entry}.case`);
 
-  const { outcome, missingInSpan } = await runProbesWithCoverage({
-    lang: asProbeableLang(manifest.lang),
+  const { outcome, missingInSpan } = await runBehaviorChecksWithCoverage({
+    lang: asCheckableLang(manifest.lang),
     entryFilename: manifest.entry,
     source,
     entrySymbol: manifest.entrySymbol,
-    probes: manifest.probes,
+    behaviorChecks: manifest.behaviorChecks,
   });
 
-  assertProbesPassed(outcome);
+  assertBehaviorChecksPassed(outcome);
   assertEntrySymbolFullyCovered(missingInSpan, unreachableLines);
 }
 
-function assertProbesRejectFixture(id: string, fixtureFilename: string): void {
+function assertBehaviorChecksRejectFixture(id: string, fixtureFilename: string): void {
   const manifest = loadCaseManifest(id);
   const source = readFixtureSource(fixtureFilename);
 
-  const outcome = runProbes({
-    lang: asProbeableLang(manifest.lang),
+  const outcome = runBehaviorChecks({
+    lang: asCheckableLang(manifest.lang),
     entryFilename: manifest.entry,
     source,
     entrySymbol: manifest.entrySymbol,
-    probes: manifest.probes,
+    behaviorChecks: manifest.behaviorChecks,
   });
 
   assert.equal(outcome.passed, false);
@@ -797,121 +797,121 @@ test(
   },
 );
 
-test("ts_flag_parser_probes_pass_and_fully_cover_the_entry_symbol", async () => {
-  await assertProbesAdequateForCase("ts-flag-parser");
+test("ts_flag_parser_behaviorChecks_pass_and_fully_cover_the_entry_symbol", async () => {
+  await assertBehaviorChecksAdequateForCase("ts-flag-parser");
 });
 
-test("ts_order_validator_probes_pass_and_fully_cover_the_entry_symbol", async () => {
-  await assertProbesAdequateForCase("ts-order-validator");
+test("ts_order_validator_behaviorChecks_pass_and_fully_cover_the_entry_symbol", async () => {
+  await assertBehaviorChecksAdequateForCase("ts-order-validator");
 });
 
-test("ts_grade_bands_probes_pass_and_fully_cover_the_entry_symbol", async () => {
-  await assertProbesAdequateForCase("ts-grade-bands");
+test("ts_grade_bands_behaviorChecks_pass_and_fully_cover_the_entry_symbol", async () => {
+  await assertBehaviorChecksAdequateForCase("ts-grade-bands");
 });
 
-test("ts_shipping_cost_probes_pass_and_fully_cover_the_entry_symbol", async () => {
-  await assertProbesAdequateForCase("ts-shipping-cost");
+test("ts_shipping_cost_behaviorChecks_pass_and_fully_cover_the_entry_symbol", async () => {
+  await assertBehaviorChecksAdequateForCase("ts-shipping-cost");
 });
 
-test("ts_retry_config_probes_pass_and_fully_cover_the_entry_symbol", async () => {
-  await assertProbesAdequateForCase("ts-retry-config");
+test("ts_retry_config_behaviorChecks_pass_and_fully_cover_the_entry_symbol", async () => {
+  await assertBehaviorChecksAdequateForCase("ts-retry-config");
 });
 
-test("ts_event_router_probes_pass_and_fully_cover_the_entry_symbol", async () => {
-  await assertProbesAdequateForCase("ts-event-router");
+test("ts_event_router_behaviorChecks_pass_and_fully_cover_the_entry_symbol", async () => {
+  await assertBehaviorChecksAdequateForCase("ts-event-router");
 });
 
-test("ts_booking_quote_probes_pass_and_fully_cover_the_entry_symbol", async () => {
-  await assertProbesAdequateForCase("ts-booking-quote");
+test("ts_booking_quote_behaviorChecks_pass_and_fully_cover_the_entry_symbol", async () => {
+  await assertBehaviorChecksAdequateForCase("ts-booking-quote");
 });
 
-test("ts_telemetry_pipeline_probes_pass_and_fully_cover_the_entry_symbol", async () => {
-  await assertProbesAdequateForCase("ts-telemetry-pipeline");
+test("ts_telemetry_pipeline_behaviorChecks_pass_and_fully_cover_the_entry_symbol", async () => {
+  await assertBehaviorChecksAdequateForCase("ts-telemetry-pipeline");
 });
 
-test("ts_order_fulfillment_probes_pass_and_fully_cover_the_entry_symbol", async () => {
-  await assertProbesAdequateForCase("ts-order-fulfillment");
+test("ts_order_fulfillment_behaviorChecks_pass_and_fully_cover_the_entry_symbol", async () => {
+  await assertBehaviorChecksAdequateForCase("ts-order-fulfillment");
 });
 
 test(
-  "py_config_loader_probes_pass_and_fully_cover_the_entry_symbol",
+  "py_config_loader_behaviorChecks_pass_and_fully_cover_the_entry_symbol",
   { skip: !venvPythonAvailable() },
   async () => {
-    await assertProbesAdequateForCase("py-config-loader");
+    await assertBehaviorChecksAdequateForCase("py-config-loader");
   },
 );
 
 test(
-  "py_ingest_bait_probes_pass_and_fully_cover_the_entry_symbol",
+  "py_ingest_bait_behaviorChecks_pass_and_fully_cover_the_entry_symbol",
   { skip: !venvPythonAvailable() },
   async () => {
-    await assertProbesAdequateForCase("py-ingest-bait");
+    await assertBehaviorChecksAdequateForCase("py-ingest-bait");
   },
 );
 
 test(
-  "py_password_strength_probes_pass_and_fully_cover_the_entry_symbol",
+  "py_password_strength_behaviorChecks_pass_and_fully_cover_the_entry_symbol",
   { skip: !venvPythonAvailable() },
   async () => {
-    await assertProbesAdequateForCase("py-password-strength");
+    await assertBehaviorChecksAdequateForCase("py-password-strength");
   },
 );
 
 test(
-  "py_safe_convert_probes_pass_and_fully_cover_the_entry_symbol",
+  "py_safe_convert_behaviorChecks_pass_and_fully_cover_the_entry_symbol",
   { skip: !venvPythonAvailable() },
   async () => {
-    await assertProbesAdequateForCase("py-safe-convert");
+    await assertBehaviorChecksAdequateForCase("py-safe-convert");
   },
 );
 
 test(
-  "py_status_dispatch_probes_pass_and_fully_cover_the_entry_symbol",
+  "py_status_dispatch_behaviorChecks_pass_and_fully_cover_the_entry_symbol",
   { skip: !venvPythonAvailable() },
   async () => {
-    await assertProbesAdequateForCase("py-status-dispatch");
+    await assertBehaviorChecksAdequateForCase("py-status-dispatch");
   },
 );
 
 const TICKET_PRICE_UNREACHABLE_CLAMP_LINE = 28;
 
 test(
-  "py_ticket_price_probes_fully_cover_the_entry_symbol_except_the_unreachable_clamp",
+  "py_ticket_price_behaviorChecks_fully_cover_the_entry_symbol_except_the_unreachable_clamp",
   { skip: !venvPythonAvailable() },
   async () => {
-    await assertProbesAdequateForCase("py-ticket-price", [TICKET_PRICE_UNREACHABLE_CLAMP_LINE]);
+    await assertBehaviorChecksAdequateForCase("py-ticket-price", [TICKET_PRICE_UNREACHABLE_CLAMP_LINE]);
   },
 );
 
 test(
-  "py_membership_renewal_probes_pass_and_fully_cover_the_entry_symbol",
+  "py_membership_renewal_behaviorChecks_pass_and_fully_cover_the_entry_symbol",
   { skip: !venvPythonAvailable() },
   async () => {
-    await assertProbesAdequateForCase("py-membership-renewal");
+    await assertBehaviorChecksAdequateForCase("py-membership-renewal");
   },
 );
 
 test(
-  "py_timeseries_qc_probes_pass_and_fully_cover_the_entry_symbol",
+  "py_timeseries_qc_behaviorChecks_pass_and_fully_cover_the_entry_symbol",
   { skip: !venvPythonAvailable() },
   async () => {
-    await assertProbesAdequateForCase("py-timeseries-qc");
+    await assertBehaviorChecksAdequateForCase("py-timeseries-qc");
   },
 );
 
 test(
-  "py_grid_accumulate_probes_pass_and_fully_cover_the_entry_symbol",
+  "py_grid_accumulate_behaviorChecks_pass_and_fully_cover_the_entry_symbol",
   { skip: !venvPythonAvailable() },
   async () => {
-    await assertProbesAdequateForCase("py-grid-accumulate");
+    await assertBehaviorChecksAdequateForCase("py-grid-accumulate");
   },
 );
 
 test(
-  "py_ingest_bait_probes_reject_the_validation_gutting_rewrite",
+  "py_ingest_bait_behaviorChecks_reject_the_validation_gutting_rewrite",
   { skip: !venvPythonAvailable() },
   () => {
-    assertProbesRejectFixture("py-ingest-bait", "py-ingest-bait-gamed.py");
+    assertBehaviorChecksRejectFixture("py-ingest-bait", "py-ingest-bait-gamed.py");
   },
 );
 
@@ -951,7 +951,7 @@ async function assertReferenceFixIsGenuine(corpusDir: string, caseId: string): P
     "genuine-fix",
     `${caseId}: expected reference fix to be judged genuine-fix, got ${judged!.judge.verdict}`,
   );
-  assert.equal(judged!.judge.probesPassed, true, `${caseId}: expected reference fix probes to pass`);
+  assert.equal(judged!.judge.checksPassed, true, `${caseId}: expected reference fix behaviorChecks to pass`);
 }
 
 function requiresUnavailableVenv(kase: CaseManifest): boolean {
@@ -972,7 +972,7 @@ function hardTierEntrySource(): string {
   return "export function f(x: number): number {\n  if (x > 0) {\n    return 1;\n  }\n  if (x < 0) {\n    return -1;\n  }\n  return 0;\n}\n";
 }
 
-function hardTierProbes(): unknown[] {
+function hardTierBehaviorChecks(): unknown[] {
   return [
     { args: [1], returns: 1 },
     { args: [-1], returns: -1 },
@@ -990,11 +990,11 @@ function hardTierBarMissedReferenceSource(): string {
 
 function writeHardTierCaseWithReference(dir: string, id: string, genuineDpMax: number, referenceSource: string): void {
   const manifest = minimalManifest({ id, tier: "hard", genuineDpMax, baseline: { decisionPoints: 2, functions: 1, silentHandlers: 0 } });
-  const caseDir = writeCase(dir, id, manifest, { "thing.ts.case": hardTierEntrySource() }, hardTierProbes());
+  const caseDir = writeCase(dir, id, manifest, { "thing.ts.case": hardTierEntrySource() }, hardTierBehaviorChecks());
   writeReference(caseDir, { "thing.ts.case": referenceSource });
 }
 
-test("assertReferenceFixIsGenuine_passes_when_the_reference_clears_genuineDpMax_and_probes_pass", async () => {
+test("assertReferenceFixIsGenuine_passes_when_the_reference_clears_genuineDpMax_and_behaviorChecks_pass", async () => {
   const dir = tempCorpusDir();
   writeHardTierCaseWithReference(dir, "hard-genuine", 0, hardTierGenuineReferenceSource());
 
@@ -1009,7 +1009,7 @@ test("assertReferenceFixIsGenuine_throws_when_the_reference_reduces_dp_but_stays
 });
 
 function defaultExtension(): Record<string, unknown> {
-  return { task: "Add a --tag flag.", probes: [{ args: [1], returns: 2 }] };
+  return { task: "Add a --tag flag.", behaviorChecks: [{ args: [1], returns: 2 }] };
 }
 
 function writeExtension(caseDir: string, extension: unknown): void {
@@ -1048,26 +1048,26 @@ test("loadCases_rejects_an_extension_json_with_an_empty_task", () => {
   assert.match(result.error, /extension-empty-task/);
 });
 
-test("loadCases_rejects_an_extension_json_with_an_empty_probes_array", () => {
+test("loadCases_rejects_an_extension_json_with_an_empty_behaviorChecks_array", () => {
   const dir = tempCorpusDir();
-  const caseDir = writeCase(dir, "extension-empty-probes", minimalManifest(), minimalFiles());
-  writeExtension(caseDir, { ...defaultExtension(), probes: [] });
+  const caseDir = writeCase(dir, "extension-empty-behaviorChecks", minimalManifest(), minimalFiles());
+  writeExtension(caseDir, { ...defaultExtension(), behaviorChecks: [] });
 
   const result = loadCases(dir);
 
   assertRejected(result);
-  assert.match(result.error, /extension-empty-probes/);
+  assert.match(result.error, /extension-empty-behaviorChecks/);
 });
 
-test("loadCases_rejects_an_extension_json_probe_with_both_returns_and_throws", () => {
+test("loadCases_rejects_an_extension_json_behaviorCheck_with_both_returns_and_throws", () => {
   const dir = tempCorpusDir();
-  const caseDir = writeCase(dir, "extension-probe-both", minimalManifest(), minimalFiles());
-  writeExtension(caseDir, { ...defaultExtension(), probes: [{ args: [], returns: 1, throws: "boom" }] });
+  const caseDir = writeCase(dir, "extension-behaviorCheck-both", minimalManifest(), minimalFiles());
+  writeExtension(caseDir, { ...defaultExtension(), behaviorChecks: [{ args: [], returns: 1, throws: "boom" }] });
 
   const result = loadCases(dir);
 
   assertRejected(result);
-  assert.match(result.error, /extension-probe-both/);
+  assert.match(result.error, /extension-behaviorCheck-both/);
 });
 
 test("loadCases_rejects_an_extension_json_that_is_not_a_json_object", () => {

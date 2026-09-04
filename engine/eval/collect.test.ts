@@ -253,7 +253,7 @@ function writeMinimalCase(corpusDir: string, id: string, tier: Tier, genuineDpMa
       ...(genuineDpMax !== undefined ? { genuineDpMax } : {}),
     }),
   );
-  writeFileSync(join(caseDir, "probes.json"), JSON.stringify([{ args: [1], returns: 2 }]));
+  writeFileSync(join(caseDir, "behavior-checks.json"), JSON.stringify([{ args: [1], returns: 2 }]));
   const source = "export function f(x: number): number {\n  return x;\n}\n";
   writeFileSync(join(caseDir, "thing.ts.case"), source);
   if (tier === "hard") {
