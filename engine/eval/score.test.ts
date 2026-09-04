@@ -261,7 +261,7 @@ function deliveredStamp(over: Partial<Delivered> = {}): Delivered {
   return { packHash: "a".repeat(64), liveRules: [], shadowRules: [], ...over };
 }
 
-function writeTreatmentsDir(treatments: Record<string, Partial<{ expectedZeroFirings: boolean }>>): string {
+function writeTreatmentsDir(treatments: Record<string, Partial<{ expectedZeroNudges: boolean }>>): string {
   const dir = mkdtempSync(join(tmpdir(), "eval-score-treatments-"));
   for (const [id, extra] of Object.entries(treatments)) {
     writeFileSync(join(dir, `${id}.json`), JSON.stringify({ id, env: {}, ...extra }));
@@ -311,7 +311,7 @@ function fullyPopulatedJudgedRow(): JudgedRow {
       turns: 4,
       tokensIn: 100,
       tokensOut: 50,
-      railFirings: railFirings({ cc: 1 }),
+      nudges: nudges({ cc: 1 }),
       durationMs: 5000,
       timedOut: true,
     }),
@@ -348,7 +348,7 @@ test("toJudgedJsonlRow_maps_verdict_dp_and_cost_fields_from_a_fully_populated_ju
     turns: 4,
     tokensIn: 100,
     tokensOut: 50,
-    railFirings: railFirings({ cc: 1 }),
+    nudges: nudges({ cc: 1 }),
     durationMs: 5000,
     timedOut: true,
   });
@@ -481,7 +481,7 @@ function summaryRow(
     meanTurns: null,
     meanTokensIn: null,
     meanTokensOut: null,
-    meanRailFirings: null,
+    meanNudges: null,
     costAvailable: 0,
     ...judgeEnv(),
   };
@@ -682,7 +682,7 @@ test("aggregate_orders_overall_rollup_before_tier_rollups_before_case_details", 
 
 const RULE_NAMES: readonly RuleName[] = Object.values(RULE);
 
-function railFirings(over: Partial<Record<RuleName, number>> = {}): Record<RuleName, number> {
+function nudges(over: Partial<Record<RuleName, number>> = {}): Record<RuleName, number> {
   const base = Object.fromEntries(RULE_NAMES.map((rule) => [rule, 0])) as Record<RuleName, number>;
   return { ...base, ...over };
 }
@@ -711,7 +711,7 @@ test("aggregate_means_duration_across_every_row_in_the_bucket", () => {
 
 test("aggregate_means_turns_and_tokens_only_over_rows_that_report_them", () => {
   const judged = [
-    costJudgedRow("rails-default", "case-a", { turns: 4, tokensIn: 1000, tokensOut: 200, railFirings: railFirings() }),
+    costJudgedRow("rails-default", "case-a", { turns: 4, tokensIn: 1000, tokensOut: 200, nudges: nudges() }),
     costJudgedRow("rails-default", "case-a", {}),
   ];
 
@@ -733,21 +733,21 @@ test("aggregate_reports_null_cost_means_when_no_row_in_the_bucket_reports_cost_f
   assert.equal(rollup.meanTurns, null);
   assert.equal(rollup.meanTokensIn, null);
   assert.equal(rollup.meanTokensOut, null);
-  assert.equal(rollup.meanRailFirings, null);
+  assert.equal(rollup.meanNudges, null);
   assert.equal(rollup.costAvailable, 0);
 });
 
-test("aggregate_means_rail_firings_per_rule_over_rows_that_report_them", () => {
+test("aggregate_means_rail_nudges_per_rule_over_rows_that_report_them", () => {
   const judged = [
-    costJudgedRow("rails-default", "case-a", { turns: 1, tokensIn: 1, tokensOut: 1, railFirings: railFirings({ cc: 2, "discourage-comments": 1 }) }),
-    costJudgedRow("rails-default", "case-a", { turns: 1, tokensIn: 1, tokensOut: 1, railFirings: railFirings({ cc: 4 }) }),
+    costJudgedRow("rails-default", "case-a", { turns: 1, tokensIn: 1, tokensOut: 1, nudges: nudges({ cc: 2, "discourage-comments": 1 }) }),
+    costJudgedRow("rails-default", "case-a", { turns: 1, tokensIn: 1, tokensOut: 1, nudges: nudges({ cc: 4 }) }),
   ];
 
   const summary = aggregate(judged, judgeEnv());
 
   const rollup = costOf(summary, "rails-default", null);
-  assert.equal(rollup.meanRailFirings?.cc, 3);
-  assert.equal(rollup.meanRailFirings?.["discourage-comments"], 0.5);
+  assert.equal(rollup.meanNudges?.cc, 3);
+  assert.equal(rollup.meanNudges?.["discourage-comments"], 0.5);
 });
 
 test("formatMarkdown_renders_one_line_per_treatment_with_counts_and_genuine_rate", () => {
@@ -833,7 +833,7 @@ test("formatMarkdown_renders_the_cost_columns_after_mean_dp_cut", () => {
       meanTurns: 5,
       meanTokensIn: 8000,
       meanTokensOut: 1200,
-      meanRailFirings: railFirings({ cc: 2 }),
+      meanNudges: nudges({ cc: 2 }),
     },
   ];
 
@@ -1399,7 +1399,7 @@ test("runScore_warns_and_scores_normally_when_no_row_in_the_run_carries_a_delive
 test("runScore_refuses_an_arm_whose_delivered_live_rules_never_fired", async () => {
   const treatmentId = "live-silent";
   const treatmentsDir = writeTreatmentsDir({ [treatmentId]: {} });
-  const row = rawRow(treatmentId, "case-a", { delivered: deliveredStamp({ liveRules: ["cc"] }), railFirings: railFirings() });
+  const row = rawRow(treatmentId, "case-a", { delivered: deliveredStamp({ liveRules: ["cc"] }), nudges: nudges() });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
 
@@ -1411,9 +1411,9 @@ test("runScore_refuses_an_arm_whose_delivered_live_rules_never_fired", async () 
   assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
 });
 
-test("runScore_treats_a_silent_arm_as_valid_when_its_treatment_declares_expectedZeroFirings", async () => {
+test("runScore_treats_a_silent_arm_as_valid_when_its_treatment_declares_expectedZeroNudges", async () => {
   const treatmentId = "rails-off-expected";
-  const treatmentsDir = writeTreatmentsDir({ [treatmentId]: { expectedZeroFirings: true } });
+  const treatmentsDir = writeTreatmentsDir({ [treatmentId]: { expectedZeroNudges: true } });
   const packHash = "a".repeat(64);
   const row = tsFlagParserRow(
     {},
@@ -1421,7 +1421,7 @@ test("runScore_treats_a_silent_arm_as_valid_when_its_treatment_declares_expected
       treatmentId,
       provenance: provenance({ treatmentId, phrasingPackHash: packHash }),
       delivered: deliveredStamp({ packHash, liveRules: ["cc"] }),
-      railFirings: railFirings(),
+      nudges: nudges(),
     },
   );
   const runDir = tempRunDir();
@@ -1436,7 +1436,7 @@ test("runScore_treats_a_silent_arm_as_valid_when_its_treatment_declares_expected
 test("runScore_refuses_an_arm_whose_delivered_shadow_rules_never_fired", async () => {
   const treatmentId = "shadow-silent";
   const treatmentsDir = writeTreatmentsDir({ [treatmentId]: {} });
-  const row = rawRow(treatmentId, "case-a", { delivered: deliveredStamp({ shadowRules: ["cc"] }), shadowFirings: railFirings() });
+  const row = rawRow(treatmentId, "case-a", { delivered: deliveredStamp({ shadowRules: ["cc"] }), shadowNudges: nudges() });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
 
@@ -1458,7 +1458,7 @@ test("runScore_writes_a_summary_and_prints_a_validity_block_for_a_fully_delivere
       treatmentId,
       provenance: provenance({ treatmentId, phrasingPackHash: packHash }),
       delivered: deliveredStamp({ packHash, liveRules: ["cc"] }),
-      railFirings: railFirings({ cc: 2 }),
+      nudges: nudges({ cc: 2 }),
     },
   );
   const runDir = tempRunDir();
@@ -1467,7 +1467,7 @@ test("runScore_writes_a_summary_and_prints_a_validity_block_for_a_fully_delivere
   const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, new RegExp(`${treatmentId}: repetitions=1 liveFirings=2 shadowFirings=0 delivered=ok`));
+  assert.match(result.stdout, new RegExp(`${treatmentId}: repetitions=1 liveNudges=2 shadowNudges=0 delivered=ok`));
   const blockIndex = result.stdout.indexOf("delivery validity");
   const tableIndex = result.stdout.indexOf("| treatment |");
   assert.ok(blockIndex >= 0 && tableIndex > blockIndex);
@@ -1494,7 +1494,7 @@ function promptCarriedTask(): string {
   return `Improve parse_flags.ts. Keep the public function signature and behavior unchanged.\n\n${PROMPT_ARM_MESSAGE}`;
 }
 
-test("runScore_scores_a_prompt_carried_arm_as_verified_with_no_stamp_or_firing_checks", async () => {
+test("runScore_scores_a_prompt_carried_arm_as_verified_with_no_stamp_or_nudge_checks", async () => {
   const treatmentId = "cc-delta-prompt";
   const treatmentsDir = writePromptTreatmentsDir(treatmentId);
   const row = tsFlagParserRow({}, { treatmentId, task: promptCarriedTask() });
@@ -1504,7 +1504,7 @@ test("runScore_scores_a_prompt_carried_arm_as_verified_with_no_stamp_or_firing_c
   const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, new RegExp(`${treatmentId}: repetitions=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
+  assert.match(result.stdout, new RegExp(`${treatmentId}: repetitions=1 liveNudges=0 shadowNudges=0 delivered=prompt`));
   assert.doesNotMatch(result.stdout, /unverifiable/);
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });
@@ -1550,7 +1550,7 @@ test("runScore_scores_a_mixed_run_applying_each_arms_own_delivery_checks", async
       treatmentId: railTreatmentId,
       provenance: provenance({ treatmentId: railTreatmentId, phrasingPackHash: packHash }),
       delivered: deliveredStamp({ packHash, liveRules: ["cc"] }),
-      railFirings: railFirings({ cc: 2 }),
+      nudges: nudges({ cc: 2 }),
     },
   );
   const runDir = tempRunDir();
@@ -1559,18 +1559,18 @@ test("runScore_scores_a_mixed_run_applying_each_arms_own_delivery_checks", async
   const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, new RegExp(`${promptTreatmentId}: repetitions=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
-  assert.match(result.stdout, new RegExp(`${railTreatmentId}: repetitions=1 liveFirings=2 shadowFirings=0 delivered=ok`));
+  assert.match(result.stdout, new RegExp(`${promptTreatmentId}: repetitions=1 liveNudges=0 shadowNudges=0 delivered=prompt`));
+  assert.match(result.stdout, new RegExp(`${railTreatmentId}: repetitions=1 liveNudges=2 shadowNudges=0 delivered=ok`));
   assert.doesNotMatch(result.stdout, /unverifiable/);
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });
 
-test("runScore_exempts_a_prompt_carried_arm_from_the_live_rules_firing_floor", async () => {
+test("runScore_exempts_a_prompt_carried_arm_from_the_live_rules_nudge_floor", async () => {
   const treatmentId = "cc-delta-prompt";
   const treatmentsDir = writePromptTreatmentsDir(treatmentId);
   const row = tsFlagParserRow(
     {},
-    { treatmentId, task: promptCarriedTask(), delivered: deliveredStamp({ liveRules: ["cc"] }), railFirings: railFirings() },
+    { treatmentId, task: promptCarriedTask(), delivered: deliveredStamp({ liveRules: ["cc"] }), nudges: nudges() },
   );
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
@@ -1607,7 +1607,7 @@ test("runScore_verifies_a_prompt_carried_row_whose_task_carries_the_placeholders
   const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, new RegExp(`${treatmentId}: repetitions=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
+  assert.match(result.stdout, new RegExp(`${treatmentId}: repetitions=1 liveNudges=0 shadowNudges=0 delivered=prompt`));
 });
 
 test("runScore_refuses_a_prompt_carried_row_whose_task_still_carries_the_unfilled_placeholder_template", async () => {

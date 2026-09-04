@@ -564,27 +564,27 @@ test("aggregateFollowUp_means_lines_added_and_lines_removed_across_the_bucket", 
   assert.equal(rollup.meanLinesRemoved, 4);
 });
 
-function railFirings(over: Partial<Record<RuleName, number>> = {}): Record<RuleName, number> {
+function nudges(over: Partial<Record<RuleName, number>> = {}): Record<RuleName, number> {
   const base = Object.fromEntries(Object.values(RULE).map((rule) => [rule, 0])) as Record<RuleName, number>;
   return { ...base, ...over };
 }
 
-function assertCostSummary(summary: FollowUpSummaryRow[], treatmentId: string, expected: { meanTurns: number | null; meanRailFiringsTotal: number | null; costAvailable: number }): void {
+function assertCostSummary(summary: FollowUpSummaryRow[], treatmentId: string, expected: { meanTurns: number | null; meanNudgesTotal: number | null; costAvailable: number }): void {
   const rollup = rollupOf(summary, treatmentId);
   assert.equal(rollup.meanTurns, expected.meanTurns);
-  assert.equal(rollup.meanRailFiringsTotal, expected.meanRailFiringsTotal);
+  assert.equal(rollup.meanNudgesTotal, expected.meanNudgesTotal);
   assert.equal(rollup.costAvailable, expected.costAvailable);
 }
 
-test("aggregateFollowUp_means_turns_and_total_rail_firings_only_over_rows_that_report_them", () => {
+test("aggregateFollowUp_means_turns_and_total_rail_nudges_only_over_rows_that_report_them", () => {
   const judged = [
-    judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix", { turns: 4, railFirings: railFirings({ cc: 2, "discourage-comments": 1 }) }),
+    judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix", { turns: 4, nudges: nudges({ cc: 2, "discourage-comments": 1 }) }),
     judgedFollowUpRow("rails-default", "case-b", "extended", "genuine-fix", {}),
   ];
 
   const summary = aggregateFollowUp(judged);
 
-  assertCostSummary(summary, "rails-default", { meanTurns: 4, meanRailFiringsTotal: 3, costAvailable: 1 });
+  assertCostSummary(summary, "rails-default", { meanTurns: 4, meanNudgesTotal: 3, costAvailable: 1 });
 });
 
 test("aggregateFollowUp_reports_null_not_zero_for_cost_fields_when_no_row_in_the_bucket_reports_them", () => {
@@ -592,7 +592,7 @@ test("aggregateFollowUp_reports_null_not_zero_for_cost_fields_when_no_row_in_the
 
   const summary = aggregateFollowUp(judged);
 
-  assertCostSummary(summary, "rails-default", { meanTurns: null, meanRailFiringsTotal: null, costAvailable: 0 });
+  assertCostSummary(summary, "rails-default", { meanTurns: null, meanNudgesTotal: null, costAvailable: 0 });
 });
 
 test("aggregateFollowUp_stamps_every_row_as_follow_up", () => {

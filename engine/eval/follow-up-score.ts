@@ -34,7 +34,7 @@ export interface FollowUpSummaryRow {
   meanLinesAdded: number | null;
   meanLinesRemoved: number | null;
   meanTurns: number | null;
-  meanRailFiringsTotal: number | null;
+  meanNudgesTotal: number | null;
   costAvailable: number;
 }
 
@@ -227,20 +227,20 @@ interface FollowUpAccumulator {
   linesAddedSum: number;
   linesRemovedSum: number;
   turnsSum: number;
-  railFiringsTotalSum: number;
+  nudgesTotalSum: number;
   costAvailable: number;
 }
 
 function newAccumulator(): FollowUpAccumulator {
-  return { counts: emptyFollowUpCounts(), total: 0, linesAddedSum: 0, linesRemovedSum: 0, turnsSum: 0, railFiringsTotalSum: 0, costAvailable: 0 };
+  return { counts: emptyFollowUpCounts(), total: 0, linesAddedSum: 0, linesRemovedSum: 0, turnsSum: 0, nudgesTotalSum: 0, costAvailable: 0 };
 }
 
-function railFiringsTotal(railFirings: Record<RuleName, number>): number {
-  return RULE_NAMES.reduce((sum, rule) => sum + railFirings[rule], 0);
+function nudgesTotal(nudges: Record<RuleName, number>): number {
+  return RULE_NAMES.reduce((sum, rule) => sum + nudges[rule], 0);
 }
 
-function costFieldsPresent(row: RawRow): row is RawRow & { turns: number; railFirings: Record<RuleName, number> } {
-  return row.turns !== undefined && row.railFirings !== undefined;
+function costFieldsPresent(row: RawRow): row is RawRow & { turns: number; nudges: Record<RuleName, number> } {
+  return row.turns !== undefined && row.nudges !== undefined;
 }
 
 function addRow(acc: FollowUpAccumulator, judged: JudgedFollowUpRow): void {
@@ -251,7 +251,7 @@ function addRow(acc: FollowUpAccumulator, judged: JudgedFollowUpRow): void {
   if (!costFieldsPresent(judged.row)) return;
   acc.costAvailable += 1;
   acc.turnsSum += judged.row.turns;
-  acc.railFiringsTotalSum += railFiringsTotal(judged.row.railFirings);
+  acc.nudgesTotalSum += nudgesTotal(judged.row.nudges);
 }
 
 function meanOf(sum: number, count: number): number | null {
@@ -275,7 +275,7 @@ function finalizeRow(treatmentId: string, caseId: string | null, stratum: string
     meanLinesAdded: meanOf(acc.linesAddedSum, acc.total),
     meanLinesRemoved: meanOf(acc.linesRemovedSum, acc.total),
     meanTurns: meanOf(acc.turnsSum, acc.costAvailable),
-    meanRailFiringsTotal: meanOf(acc.railFiringsTotalSum, acc.costAvailable),
+    meanNudgesTotal: meanOf(acc.nudgesTotalSum, acc.costAvailable),
     costAvailable: acc.costAvailable,
   };
 }
@@ -336,13 +336,13 @@ function treatmentCell(row: FollowUpSummaryRow): string {
 
 function markdownRow(row: FollowUpSummaryRow): string {
   const c = row.counts;
-  return `| ${treatmentCell(row)} | ${row.total} | ${c.extended} | ${c["extension-failed"]} | ${c.regressed} | ${c.broken} | ${c.untouched} | ${c.errored} | ${c["timed-out"]} | ${formatPercent(row.extensionSuccessRate)} | ${formatMean(row.meanLinesAdded)} | ${formatMean(row.meanLinesRemoved)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanRailFiringsTotal)} |`;
+  return `| ${treatmentCell(row)} | ${row.total} | ${c.extended} | ${c["extension-failed"]} | ${c.regressed} | ${c.broken} | ${c.untouched} | ${c.errored} | ${c["timed-out"]} | ${formatPercent(row.extensionSuccessRate)} | ${formatMean(row.meanLinesAdded)} | ${formatMean(row.meanLinesRemoved)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanNudgesTotal)} |`;
 }
 
 export function formatFollowUpMarkdown(summary: FollowUpSummaryRow[]): string {
   const rollups = summary.filter((r) => r.caseId === null);
   const header =
-    "| treatment | n | extended | extension-failed | regressed | broken | untouched | errored | timed-out | extension % | mean added | mean removed | mean turns | mean rails |";
+    "| treatment | n | extended | extension-failed | regressed | broken | untouched | errored | timed-out | extension % | mean added | mean removed | mean turns | mean nudges |";
   const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
   return [header, divider, ...rollups.map(markdownRow)].join("\n");
 }

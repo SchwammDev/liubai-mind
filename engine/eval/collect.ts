@@ -171,7 +171,7 @@ export function sumTokenUsage(stdoutJsonl: string): TokenUsage {
 
 const RULE_NAMES: readonly RuleName[] = Object.values(RULE);
 
-function emptyRailFirings(): Record<RuleName, number> {
+function emptyNudges(): Record<RuleName, number> {
   return Object.fromEntries(RULE_NAMES.map((rule) => [rule, 0])) as Record<RuleName, number>;
 }
 
@@ -210,8 +210,8 @@ function countRuleMarkersIn(text: string, marker: string): number {
   return count;
 }
 
-export function countRailFirings(stdoutJsonl: string): Record<RuleName, number> {
-  const counts = emptyRailFirings();
+export function countNudges(stdoutJsonl: string): Record<RuleName, number> {
+  const counts = emptyNudges();
 
   for (const line of nonEmptyLines(stdoutJsonl)) {
     for (const text of toolResultTexts(line)) {
@@ -224,8 +224,8 @@ export function countRailFirings(stdoutJsonl: string): Record<RuleName, number> 
   return counts;
 }
 
-export function countShadowFirings(logContents: string): Record<RuleName, number> {
-  const counts = emptyRailFirings();
+export function countShadowNudges(logContents: string): Record<RuleName, number> {
+  const counts = emptyNudges();
 
   for (const line of nonEmptyLines(logContents)) {
     const parsed = parseJsonLine(line);
@@ -370,10 +370,10 @@ export async function spawnForItem(
   return { outcome, durationMs: Date.now() - start };
 }
 
-function readShadowFirings(workDir: string): Record<RuleName, number> | undefined {
+function readShadowNudges(workDir: string): Record<RuleName, number> | undefined {
   const shadowLogPath = join(workDir, ".liubai", "shadow.jsonl");
   if (!existsSync(shadowLogPath)) return undefined;
-  return countShadowFirings(readFileSync(shadowLogPath, "utf8"));
+  return countShadowNudges(readFileSync(shadowLogPath, "utf8"));
 }
 
 export function readDelivered(workDir: string): RawRow["delivered"] {
@@ -393,7 +393,7 @@ export function buildRawRowCore(
   outcome: RunOutcome,
   durationMs: number,
   snapshot: WorkDirSnapshot,
-  shadowFirings?: Record<RuleName, number>,
+  shadowNudges?: Record<RuleName, number>,
   delivered?: RawRow["delivered"],
   sentTask?: string,
 ): Omit<RawRow, "caseId" | "treatmentId" | "repetition"> {
@@ -422,8 +422,8 @@ export function buildRawRowCore(
     tokensIn: tokenUsage.tokensIn,
     tokensOut: tokenUsage.tokensOut,
     cacheReadTokens: tokenUsage.cacheReadTokens,
-    railFirings: countRailFirings(outcome.stdoutJsonl),
-    ...(shadowFirings !== undefined ? { shadowFirings } : {}),
+    nudges: countNudges(outcome.stdoutJsonl),
+    ...(shadowNudges !== undefined ? { shadowNudges } : {}),
     ...(delivered !== undefined ? { delivered } : {}),
     ...(agentError !== undefined ? { agentError } : {}),
   };
@@ -443,7 +443,7 @@ function buildRawRow(
   outcome: RunOutcome,
   durationMs: number,
   snapshot: WorkDirSnapshot,
-  shadowFirings: Record<RuleName, number> | undefined,
+  shadowNudges: Record<RuleName, number> | undefined,
   delivered: RawRow["delivered"],
   sentTask: string | undefined,
 ): RawRow {
@@ -451,7 +451,7 @@ function buildRawRow(
     caseId: item.kase.id,
     treatmentId: item.treatment.id,
     repetition: item.repetition,
-    ...buildRawRowCore(ctx, item.treatment.id, packContent, outcome, durationMs, snapshot, shadowFirings, delivered, sentTask),
+    ...buildRawRowCore(ctx, item.treatment.id, packContent, outcome, durationMs, snapshot, shadowNudges, delivered, sentTask),
   };
 }
 
@@ -466,10 +466,10 @@ async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult>
   try {
     const { outcome, durationMs } = await spawnForItem(ctx, task, workDir, env);
     const snapshot = snapshotWorkDir(workDir, plan);
-    const shadowFirings = readShadowFirings(workDir);
+    const shadowNudges = readShadowNudges(workDir);
     const delivered = readDelivered(workDir);
     const sentTask = item.treatment.delivery === "prompt" ? task : undefined;
-    const row = buildRawRow(ctx, item, packContent, outcome, durationMs, snapshot, shadowFirings, delivered, sentTask);
+    const row = buildRawRow(ctx, item, packContent, outcome, durationMs, snapshot, shadowNudges, delivered, sentTask);
     return { row, stdoutJsonl: outcome.stdoutJsonl };
   } catch (err) {
     return { failure: failureMessage(item, err) };

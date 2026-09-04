@@ -4,7 +4,7 @@ export interface TreatmentManifest {
   id: string;
   env: Record<string, string>;
   phrasingPack?: string;
-  expectedZeroFirings?: boolean;
+  expectedZeroNudges?: boolean;
   delivery?: "prompt" | "rail";
 }
 
@@ -91,8 +91,8 @@ export interface RawRow {
   tokensIn?: number;
   tokensOut?: number;
   cacheReadTokens?: number;
-  railFirings?: Record<RuleName, number>;
-  shadowFirings?: Record<RuleName, number>;
+  nudges?: Record<RuleName, number>;
+  shadowNudges?: Record<RuleName, number>;
   delivered?: { packHash: string | null; liveRules: string[]; shadowRules: string[] };
   agentError?: string;
   followUp?: FollowUpInfo;
