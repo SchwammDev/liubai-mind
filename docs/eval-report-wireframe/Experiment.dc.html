@@ -1,0 +1,184 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Patrick Hand", "Segoe Print", "Comic Sans MS", cursive; color: #2b2b2b; background: #fbfaf7; font-size: 15px; }
+    a { color: #2b2b2b; } a:hover { color: #000; }
+    .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+    .box { border: 1.5px solid #2b2b2b; border-radius: 3px; background: #fff; }
+    .dash { border: 1.5px dashed #8a8a8a; border-radius: 3px; }
+    .muted { color: #7a7a7a; }
+    .chip { display: inline-block; padding: 1px 8px; border: 1.5px solid #2b2b2b; border-radius: 12px; font-size: 13px; background: #fff; }
+    .chip.fill { background: #2b2b2b; color: #fff; }
+    .chip.flag { border-color: #b3261e; color: #b3261e; }
+    .crumb { display: flex; gap: 8px; align-items: center; font-size: 14px; color: #7a7a7a; }
+    .crumb b { color: #2b2b2b; }
+    table { border-collapse: collapse; width: 100%; }
+    th { text-align: left; font-weight: normal; color: #7a7a7a; border-bottom: 1.5px solid #2b2b2b; padding: 6px 8px; font-size: 14px; }
+    td { padding: 7px 8px; border-bottom: 1px solid #ddd; vertical-align: top; }
+    .bar { display: flex; height: 14px; width: 180px; border: 1.5px solid #2b2b2b; overflow: hidden; }
+    .bar div { height: 100%; }
+    .bar .g { background: #2b2b2b; } .bar .m { background: #8a8a8a; } .bar .x { background: repeating-linear-gradient(45deg,#fff 0 3px,#8a8a8a 3px 5px); } .bar .w { background: #fff; }
+    .btn { display: inline-block; padding: 4px 12px; border: 1.5px solid #2b2b2b; border-radius: 3px; background: #fff; font-size: 14px; }
+    .flagline { border: 1.5px solid #b3261e; color: #b3261e; background: #fff6f5; padding: 8px 12px; border-radius: 3px; }
+    .code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.5; }
+    .code div { white-space: pre; min-height: 1.5em; }
+    .code .del { background: #eee; text-decoration: line-through; color: #7a7a7a; }
+    .code .add { background: #2b2b2b; color: #fff; }
+    .code .ln { color: #b0b0b0; display: inline-block; width: 28px; }
+  </style>
+</helmet>
+<div style="width: 1450px; min-height: 1500px; padding: 28px 32px; display: flex; flex-direction: column; gap: 18px; background: #fbfaf7;">
+  <div class="crumb"><span>Experiments</span><span>›</span><b>coaching vs bare metric · hard cases · with follow-up tasks</b></div>
+  <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 24px;">
+    <div style="display: flex; flex-direction: column; gap: 6px;">
+      <div style="font-size: 26px;">coaching vs bare metric</div>
+      <div style="font-size: 16px;">Does coaching wording beat the bare complexity number when the agent extends code it changed before?</div>
+      <div class="muted">Two steps. Step 1 was run folder coaching-v1-hard-flash: the first task on the original source. Step 2 is this experiment: a follow-up task on each step 1 result, plus 5 controls per treatment that get the follow-up task on the original source instead.</div>
+    </div>
+    <div class="box" style="padding: 10px 14px; width: 340px; flex-shrink: 0;">
+      <div class="muted" style="font-size: 13px;">outcome (from the experiment manifest)</div>
+      <div>Verdicts at ceiling for both treatments. Cost metrics carry the signal: coaching spends fewer turns. #64 held.</div>
+    </div>
+  </div>
+
+  <div class="dash muted" style="padding: 8px 12px; font-size: 14px;">setup check: same liubai commit 3250ea4 · same model · wording packs differ (a91f… vs 7c02…) · both start from run <span class="mono">coaching-v1-hard-flash</span> ✓</div>
+
+  <div style="font-size: 18px; margin-top: 6px;">Treatments</div>
+  <table class="box">
+    <thead><tr><th style="width: 24px;"></th><th style="width: 170px;">treatment</th><th style="width: 230px;">what differs</th><th style="width: 200px;">verdicts (25 repetitions)</th><th style="width: 100px;">extended</th><th style="width: 90px;">mean turns</th><th style="width: 110px;">mean input tokens</th><th>rail nudges per repetition</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="muted">▸</td>
+        <td><b>coaching-v1</b><br><span class="muted mono" style="font-size: 12px;">run folder st-coaching-v1-hard-flash</span></td>
+        <td style="font-size: 13.5px;">wording pack <span class="mono">coaching-v1</span><br>delivered through rails</td>
+        <td><div class="bar"><div class="g" style="width: 76%;"></div><div class="m" style="width: 12%;"></div><div class="x" style="width: 8%;"></div><div class="w" style="width: 4%;"></div></div></td>
+        <td class="mono">19 of 25</td>
+        <td class="mono">9.8</td>
+        <td class="mono">61 k</td>
+        <td class="mono">1.4</td>
+      </tr>
+      <tr style="background: #f3f2ee;">
+        <td class="muted">▾</td>
+        <td><b>bare-metric-v1</b><br><span class="muted mono" style="font-size: 12px;">run folder st-bare-metric-v1-hard-flash</span></td>
+        <td style="font-size: 13.5px;">wording pack <span class="mono">bare-metric-v1</span><br>delivered through rails</td>
+        <td><div class="bar"><div class="g" style="width: 72%;"></div><div class="m" style="width: 8%;"></div><div class="x" style="width: 16%;"></div><div class="w" style="width: 4%;"></div></div></td>
+        <td class="mono">18 of 25</td>
+        <td class="mono">13.1</td>
+        <td class="mono">84 k</td>
+        <td class="mono">2.2</td>
+      </tr>
+      <tr style="background: #f3f2ee;">
+        <td colspan="8" style="padding: 12px 16px 16px 40px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div class="muted" style="font-size: 14px;">25 repetitions, worst first · each one is 1 of 25 in the "extended" count above</div>
+            <div style="display: flex; gap: 8px;"><span class="chip fill">all</span><span class="chip">not extended</span><span class="chip">rail nudged</span><span class="chip">controls</span></div>
+          </div>
+          <table style="background: #fff; border: 1.5px solid #2b2b2b;">
+            <thead><tr><th style="width: 190px;">case · repetition</th><th style="width: 130px;">verdict</th><th style="width: 150px;">starts from</th><th style="width: 110px;">lines added / removed</th><th style="width: 60px;">turns</th><th style="width: 90px;">input tokens</th><th style="width: 110px;">rail nudges</th><th>detail (only what other columns lack)</th><th style="width: 140px;"></th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="mono">py-grid-accumulate · 3</td>
+                <td><span class="chip flag">regressed</span></td>
+                <td style="font-size: 13.5px;">earlier result, repetition 3</td>
+                <td class="mono">+41 / −12</td>
+                <td class="mono">17</td>
+                <td class="mono">102 k</td>
+                <td class="mono">complexity ×3</td>
+                <td class="mono" style="font-size: 12.5px;">4 functions added · accumulate_grid complexity 9 → 6 · nudges at turns 5, 7, 11</td>
+                <td><span class="btn">review</span> <span class="btn">transcript</span></td>
+              </tr>
+              <tr>
+                <td class="mono">ts-telemetry-pipeline · 1</td>
+                <td><span class="chip flag">broken</span></td>
+                <td style="font-size: 13.5px;">earlier result, repetition 1</td>
+                <td class="mono">+8 / −30</td>
+                <td class="mono">6</td>
+                <td class="mono">38 k</td>
+                <td class="mono">—</td>
+                <td class="mono" style="font-size: 12.5px;">file no longer parses · 1 function removed</td>
+                <td><span class="btn">review</span> <span class="btn">transcript</span></td>
+              </tr>
+              <tr>
+                <td class="mono">py-timeseries-qc · 5</td>
+                <td><span class="chip">extension-failed</span></td>
+                <td style="font-size: 13.5px;">earlier result, repetition 5</td>
+                <td class="mono">+14 / −2</td>
+                <td class="mono">10</td>
+                <td class="mono">57 k</td>
+                <td class="mono">complexity ×1</td>
+                <td class="mono" style="font-size: 12.5px;">check failed: outliers-exclude-moderate</td>
+                <td><span class="btn">review</span> <span class="btn">transcript</span></td>
+              </tr>
+              <tr>
+                <td class="mono">py-timeseries-qc · 2</td>
+                <td><span class="chip">untouched</span></td>
+                <td style="font-size: 13.5px;">earlier result, repetition 2</td>
+                <td class="mono">+0 / −0</td>
+                <td class="mono">4</td>
+                <td class="mono">21 k</td>
+                <td class="mono">—</td>
+                <td class="mono" style="font-size: 12.5px;">no edit · ended with text</td>
+                <td><span class="btn">review</span> <span class="btn">transcript</span></td>
+              </tr>
+              <tr>
+                <td class="mono">py-grid-accumulate · 1</td>
+                <td><span class="chip fill">extended</span></td>
+                <td style="font-size: 13.5px;">earlier result, repetition 1</td>
+                <td class="mono">+19 / −3</td>
+                <td class="mono">9</td>
+                <td class="mono">49 k</td>
+                <td class="mono">complexity ×1</td>
+                <td class="mono muted" style="font-size: 12.5px;">—</td>
+                <td><span class="btn">review</span> <span class="btn">transcript</span></td>
+              </tr>
+              <tr><td colspan="9" class="muted" style="text-align: center;">… 20 more extended</td></tr>
+              <tr style="background: #f3f2ee;">
+                <td class="mono">py-grid-accumulate · control</td>
+                <td><span class="chip fill">extended</span></td>
+                <td style="font-size: 13.5px;">original source</td>
+                <td class="mono">+22 / −4</td>
+                <td class="mono">8</td>
+                <td class="mono">44 k</td>
+                <td class="mono">—</td>
+                <td class="mono muted" style="font-size: 12.5px;">—</td>
+                <td><span class="btn">review</span> <span class="btn">transcript</span></td>
+              </tr>
+              <tr><td colspan="9" class="muted" style="text-align: center;">… 4 more controls</td></tr>
+            </tbody>
+          </table>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="muted" style="font-size: 13px; display: flex; gap: 16px;">
+    <span>verdicts:</span>
+    <span><span style="display:inline-block;width:12px;height:12px;background:#2b2b2b;vertical-align:middle;"></span> extended · follow-up done, earlier change intact</span>
+    <span><span style="display:inline-block;width:12px;height:12px;background:#8a8a8a;vertical-align:middle;"></span> extension-failed · behavior checks fail</span>
+    <span><span style="display:inline-block;width:12px;height:12px;background:repeating-linear-gradient(45deg,#fff 0 3px,#8a8a8a 3px 5px);border:1px solid #8a8a8a;vertical-align:middle;"></span> regressed / broken · earlier change undone, or file no longer parses</span>
+    <span><span style="display:inline-block;width:12px;height:12px;background:#fff;border:1px solid #8a8a8a;vertical-align:middle;"></span> untouched / errored / timed out</span>
+  </div>
+
+  <div style="font-size: 18px; margin-top: 10px;">Per case</div>
+  <table class="box">
+    <thead><tr><th style="width: 220px;">case</th><th style="width: 200px;">coaching-v1</th><th style="width: 200px;">bare-metric-v1</th><th>where they part</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">py-grid-accumulate</td><td><div class="bar" style="width: 160px;"><div class="g" style="width: 100%;"></div></div></td><td><div class="bar" style="width: 160px;"><div class="g" style="width: 80%;"></div><div class="x" style="width: 20%;"></div></div></td><td class="muted">bare-metric repetition 3 regressed: helper split to lower the complexity number</td></tr>
+      <tr><td class="mono">py-timeseries-qc</td><td><div class="bar" style="width: 160px;"><div class="g" style="width: 60%;"></div><div class="m" style="width: 40%;"></div></div></td><td><div class="bar" style="width: 160px;"><div class="g" style="width: 60%;"></div><div class="m" style="width: 20%;"></div><div class="w" style="width: 20%;"></div></div></td><td class="muted">both struggle with the 'alert' rule</td></tr>
+      <tr><td class="mono">py-membership-renewal</td><td><div class="bar" style="width: 160px;"><div class="g" style="width: 80%;"></div><div class="m" style="width: 20%;"></div></div></td><td><div class="bar" style="width: 160px;"><div class="g" style="width: 80%;"></div><div class="x" style="width: 20%;"></div></div></td><td class="muted">—</td></tr>
+      <tr><td class="mono">ts-telemetry-pipeline</td><td><div class="bar" style="width: 160px;"><div class="g" style="width: 80%;"></div><div class="x" style="width: 20%;"></div></div></td><td><div class="bar" style="width: 160px;"><div class="g" style="width: 60%;"></div><div class="x" style="width: 40%;"></div></div></td><td class="muted">—</td></tr>
+      <tr><td class="mono">ts-booking-quote</td><td><div class="bar" style="width: 160px;"><div class="g" style="width: 60%;"></div><div class="m" style="width: 20%;"></div><div class="w" style="width: 20%;"></div></div></td><td><div class="bar" style="width: 160px;"><div class="g" style="width: 80%;"></div><div class="m" style="width: 20%;"></div></div></td><td class="muted">coaching repetition 4 timed out</td></tr>
+    </tbody>
+  </table>
+</div>
+</x-dc>
+</body>
+</html>

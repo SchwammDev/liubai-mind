@@ -1,0 +1,129 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Patrick Hand", "Segoe Print", "Comic Sans MS", cursive; color: #2b2b2b; background: #fbfaf7; font-size: 15px; }
+    a { color: #2b2b2b; } a:hover { color: #000; }
+    .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+    .box { border: 1.5px solid #2b2b2b; border-radius: 3px; background: #fff; }
+    .dash { border: 1.5px dashed #8a8a8a; border-radius: 3px; }
+    .muted { color: #7a7a7a; }
+    .chip { display: inline-block; padding: 1px 8px; border: 1.5px solid #2b2b2b; border-radius: 12px; font-size: 13px; background: #fff; }
+    .chip.fill { background: #2b2b2b; color: #fff; }
+    .chip.flag { border-color: #b3261e; color: #b3261e; }
+    .crumb { display: flex; gap: 8px; align-items: center; font-size: 14px; color: #7a7a7a; }
+    .crumb b { color: #2b2b2b; }
+    table { border-collapse: collapse; width: 100%; }
+    th { text-align: left; font-weight: normal; color: #7a7a7a; border-bottom: 1.5px solid #2b2b2b; padding: 6px 8px; font-size: 14px; }
+    td { padding: 7px 8px; border-bottom: 1px solid #ddd; vertical-align: top; }
+    .bar { display: flex; height: 14px; width: 180px; border: 1.5px solid #2b2b2b; overflow: hidden; }
+    .bar div { height: 100%; }
+    .bar .g { background: #2b2b2b; } .bar .m { background: #8a8a8a; } .bar .x { background: repeating-linear-gradient(45deg,#fff 0 3px,#8a8a8a 3px 5px); } .bar .w { background: #fff; }
+    .btn { display: inline-block; padding: 4px 12px; border: 1.5px solid #2b2b2b; border-radius: 3px; background: #fff; font-size: 14px; }
+    .flagline { border: 1.5px solid #b3261e; color: #b3261e; background: #fff6f5; padding: 8px 12px; border-radius: 3px; }
+    .code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.5; }
+    .code div { white-space: pre; min-height: 1.5em; }
+    .code .del { background: #eee; text-decoration: line-through; color: #7a7a7a; }
+    .code .add { background: #2b2b2b; color: #fff; }
+    .code .ln { color: #b0b0b0; display: inline-block; width: 28px; }
+  </style>
+</helmet>
+<div style="width: 1450px; min-height: 1060px; padding: 24px 28px; display: flex; flex-direction: column; gap: 14px; background: #fbfaf7;">
+  <div class="crumb"><span>…</span><span>›</span><span>bare-metric-v1</span><span>›</span><span>py-grid-accumulate · repetition 3</span><span>›</span><b>transcript</b></div>
+  <div style="display: flex; justify-content: space-between; align-items: center;">
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <span class="muted">show</span>
+      <span class="chip fill">messages</span><span class="chip fill">tool calls</span><span class="chip">tool results</span><span class="chip fill">rail nudges</span><span class="chip" style="text-decoration: line-through;">thinking</span>
+      <span class="muted mono" style="margin-left: 8px;">thinking: not recorded in this transcript</span>
+    </div>
+    <div style="display: flex; gap: 8px;"><span class="btn">‹ review</span><span class="btn">raw transcript file</span></div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 1fr 260px; gap: 16px; align-items: start;">
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+
+      <div class="box" style="padding: 10px 14px; border-left-width: 6px;">
+        <div class="muted" style="font-size: 13px;">turn 1 · user</div>
+        <div>Add per-cell quality weighting to accumulate_grid. Keep the public function signature and existing behavior for cells without a quality_factor unchanged.</div>
+      </div>
+
+      <div class="box" style="padding: 10px 14px;">
+        <div class="muted" style="font-size: 13px;">turn 2 · assistant · tool call · 2.1 s</div>
+        <div class="mono">bash  cd /tmp/eval-work-H9Y4s3 &amp;&amp; rg -n "accumulate_grid" .</div>
+        <div class="muted mono" style="margin-top: 4px;">▸ result · 3 lines</div>
+      </div>
+
+      <div class="box" style="padding: 10px 14px;">
+        <div class="muted" style="font-size: 13px;">turn 3 · assistant · tool call · 1.4 s</div>
+        <div class="mono">read  accumulate_grid.py</div>
+        <div class="muted mono" style="margin-top: 4px;">▸ result · 58 lines</div>
+      </div>
+
+      <div class="box" style="padding: 10px 14px;">
+        <div class="muted" style="font-size: 13px;">turn 4 · assistant · text</div>
+        <div>I'll add the weighting inside the loop so the existing clamp still applies.</div>
+      </div>
+
+      <div class="box" style="padding: 10px 14px;">
+        <div class="muted" style="font-size: 13px;">turn 5 · assistant · tool call · 0.9 s</div>
+        <div class="mono">edit  accumulate_grid.py  +6 / −1</div>
+        <div class="muted mono" style="margin-top: 4px;">▸ diff</div>
+      </div>
+
+      <div class="dash" style="padding: 10px 14px; background: #f3f2ee;">
+        <div class="muted" style="font-size: 13px;">turn 5 · rail nudge · complexity · 1 of 3</div>
+        <div class="mono" style="font-size: 12.5px;">Cyclomatic complexity of accumulate_grid rose. Consider whether the new branch belongs here.</div>
+      </div>
+
+      <div class="box" style="padding: 10px 14px;">
+        <div class="muted" style="font-size: 13px;">turn 6 · assistant · text</div>
+        <div>The complexity warning suggests extracting the per-cell logic. I'll split it into helpers.</div>
+      </div>
+
+      <div class="box" style="padding: 10px 14px;">
+        <div class="muted" style="font-size: 13px;">turn 7 · assistant · tool call · 1.1 s</div>
+        <div class="mono">edit  accumulate_grid.py  +18 / −9</div>
+        <div class="muted mono" style="margin-top: 4px;">▸ diff</div>
+      </div>
+
+      <div class="dash" style="padding: 10px 14px; background: #f3f2ee;">
+        <div class="muted" style="font-size: 13px;">turn 7 · rail nudge · complexity · 2 of 3</div>
+        <div class="mono" style="font-size: 12.5px;">…</div>
+      </div>
+
+      <div class="muted" style="text-align: center;">… turns 8 to 17</div>
+
+      <div class="box" style="padding: 10px 14px;">
+        <div class="muted" style="font-size: 13px;">turn 17 · assistant · text · final</div>
+        <div>Done. Added quality weighting and reduced complexity by extracting three helpers.</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <div class="box" style="padding: 10px 14px;">
+        <div class="muted" style="font-size: 13px;">per turn</div>
+        <div class="mono" style="font-size: 12.5px; line-height: 1.7;">turn · input · output tokens<br>1 · 4.1 k · 0<br>2 · 4.3 k · 60<br>3 · 4.4 k · 40<br>4 · 6.9 k · 120<br>5 · 7.0 k · 310<br>6 · 7.6 k · 90<br>7 · 7.8 k · 640<br>…<br>17 · 11.2 k · 80</div>
+      </div>
+      <div class="box" style="padding: 10px 14px;">
+        <div class="muted" style="font-size: 13px;">tools used</div>
+        <div class="mono" style="font-size: 12.5px; line-height: 1.7;">bash ×4<br>read ×3<br>edit ×6<br>write ×1 (test file)</div>
+      </div>
+      <div class="box" style="padding: 10px 14px;">
+        <div class="muted" style="font-size: 13px;">jump to</div>
+        <div style="line-height: 1.7;">first edit · turn 5<br>rail nudges · turns 5, 7, 11<br>test file created · turn 14<br>final message · 17</div>
+      </div>
+      <div class="dash muted" style="padding: 10px 14px; font-size: 13px;">2 automatic retries at turn 9 after provider errors, collapsed</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
