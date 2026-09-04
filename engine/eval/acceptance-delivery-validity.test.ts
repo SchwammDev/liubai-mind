@@ -14,8 +14,8 @@ import { healthyProbeReporter } from "./probe-doubles.ts";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const CORPUS_DIR = join(import.meta.dirname, "corpus");
-const CONDITIONS_DIR = join(import.meta.dirname, "conditions");
-const CONDITION_ID = "cc-delta-numberless";
+const TREATMENTS_DIR = join(import.meta.dirname, "treatments");
+const TREATMENT_ID = "cc-delta-numberless";
 const CASE_ID = "ts-flag-parser";
 const WRONG_PACK_HASH = "f".repeat(64);
 
@@ -31,9 +31,9 @@ function collectOpts(over: Partial<CollectOpts> = {}): CollectOpts {
     reps: 1,
     model: "claude-test-model",
     cases: [CASE_ID],
-    conditions: [CONDITION_ID],
+    treatments: [TREATMENT_ID],
     corpusDir: CORPUS_DIR,
-    conditionsDir: CONDITIONS_DIR,
+    treatmentsDir: TREATMENTS_DIR,
     ...over,
   };
 }
@@ -96,7 +96,7 @@ async function collectPackedArm(spawner: PiSpawner, probeSpawner: ProbeSpawner):
 }
 
 async function scoreRun(runDir: string): Promise<{ status: number; stdout: string }> {
-  return runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir: CONDITIONS_DIR });
+  return runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir: TREATMENTS_DIR });
 }
 
 function assertCollectSucceeded(result: CollectResult): void {
@@ -117,8 +117,8 @@ function assertDeliveryValidityBlockPrinted(stdout: string): void {
   assert.match(stdout, /delivery validity:/);
 }
 
-function assertArmSummaryRowPresent(stdout: string, conditionId: string): void {
-  assert.match(stdout, new RegExp(`\\| ${conditionId} \\|`));
+function assertArmSummaryRowPresent(stdout: string, treatmentId: string): void {
+  assert.match(stdout, new RegExp(`\\| ${treatmentId} \\|`));
 }
 
 function assertSummaryWritten(runDir: string): void {
@@ -129,9 +129,9 @@ function assertNoSummaryWritten(runDir: string): void {
   assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
 }
 
-function assertCollectAbortedAtCanary(result: CollectResult, conditionId: string): void {
+function assertCollectAbortedAtCanary(result: CollectResult, treatmentId: string): void {
   assert.equal(result.status, 1);
-  assert.match(result.stderr, new RegExp(conditionId));
+  assert.match(result.stderr, new RegExp(treatmentId));
 }
 
 function assertRepSpawnerNeverInvoked(calls: unknown[]): void {
@@ -151,7 +151,7 @@ test("a_delivered_packed_arm_scores_with_a_verified_delivery_validity_block", as
   assertScoreAccepts(scored);
   assertSummaryWritten(runDir);
   assertDeliveryValidityBlockPrinted(scored.stdout);
-  assertArmSummaryRowPresent(scored.stdout, CONDITION_ID);
+  assertArmSummaryRowPresent(scored.stdout, TREATMENT_ID);
 });
 
 test("an_undelivered_packed_arm_is_refused_by_score", async () => {
@@ -169,7 +169,7 @@ test("broken_delivery_aborts_the_run_at_the_canary_before_any_rep_runs", async (
 
   const { result, runDir } = await collectPackedArm(spawner, brokenDeliveryProbe());
 
-  assertCollectAbortedAtCanary(result, CONDITION_ID);
+  assertCollectAbortedAtCanary(result, TREATMENT_ID);
   assertRepSpawnerNeverInvoked(calls);
   assertNoRawRowWritten(runDir);
 });

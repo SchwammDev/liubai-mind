@@ -3,12 +3,12 @@ import { join } from "node:path";
 
 import type { Lang, Extracted, RuleName } from "../contract.ts";
 import { RULE } from "../contract.ts";
-import type { CaseManifest, ConditionManifest } from "./eval-contract.ts";
+import type { CaseManifest, TreatmentManifest } from "./eval-contract.ts";
 import type { RawRow, Metrics, Verdict, GamedReason, JudgeResult, Provenance, Tier } from "./eval-contract.ts";
 import { decisionPoints, classifyVerdict } from "./judge.ts";
 import { countSilentHandlers } from "./silent-handlers.ts";
 import { loadCases, declaredFiles } from "./corpus.ts";
-import { loadConditions } from "./conditions.ts";
+import { loadTreatments } from "./treatments.ts";
 import { promptCarriedArmMessage } from "./prompt-carried-message.ts";
 import { runProbes } from "./probes.ts";
 import { scanReferences } from "./references.ts";
@@ -32,7 +32,7 @@ export interface JudgeEnv {
 }
 
 export interface SummaryRow {
-  conditionId: string;
+  treatmentId: string;
   caseId: string | null;
   tier: Tier | null;
   counts: Record<Verdict, number>;
@@ -63,7 +63,7 @@ const FALLBACK_AGENT_ERROR = "agent error";
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const ANSWER_KEY_PREFIXES = [join(REPO_ROOT, "engine", "eval"), ".pi/agent/engine/eval"];
 const RAIL_PATH_PREFIXES = [REPO_ROOT, "/.pi/", "~/.pi"];
-const DEFAULT_CONDITIONS_DIR = join(import.meta.dirname, "conditions");
+const DEFAULT_TREATMENTS_DIR = join(import.meta.dirname, "treatments");
 
 function silentHandlerLang(lang: Lang): "typescript" | "python" {
   if (lang === "typescript") return "typescript";
@@ -156,7 +156,7 @@ function assertNoDroppedReferences(row: RawRow, unresolved: string[]): void {
     const hit = droppedHitFor(candidate, dropped);
     if (hit === undefined) continue;
     throw new Error(
-      `score: ${row.conditionId}/${row.caseId}#${row.rep} references ${candidate} which the snapshot dropped (${hit}); row cannot be judged`,
+      `score: ${row.treatmentId}/${row.caseId}#${row.rep} references ${candidate} which the snapshot dropped (${hit}); row cannot be judged`,
     );
   }
 }
@@ -219,7 +219,7 @@ export interface ContaminationCheck {
 }
 
 function transcriptPathFor(runDir: string, row: RawRow): string {
-  return join(runDir, "transcripts", `${row.caseId}.${row.conditionId}.${row.rep}.jsonl`);
+  return join(runDir, "transcripts", `${row.caseId}.${row.treatmentId}.${row.rep}.jsonl`);
 }
 
 function readTranscriptIfPresent(path: string): string | undefined {
@@ -288,9 +288,9 @@ function emptyGamedReasons(): Record<GamedReason, number> {
   return Object.fromEntries(GAMED_REASONS.map((r) => [r, 0])) as Record<GamedReason, number>;
 }
 
-function newSummaryRow(conditionId: string, caseId: string | null, tier: Tier | null, env: JudgeEnv): SummaryRow {
+function newSummaryRow(treatmentId: string, caseId: string | null, tier: Tier | null, env: JudgeEnv): SummaryRow {
   return {
-    conditionId,
+    treatmentId,
     caseId,
     tier,
     counts: emptyCounts(),
@@ -320,8 +320,8 @@ function addJudgeToRow(bucket: SummaryRow, judge: JudgeResult, contaminated: boo
   if (consultedRail) bucket.railConsults += 1;
 }
 
-function detailKey(conditionId: string, caseId: string): string {
-  return `${conditionId}\0${caseId}`;
+function detailKey(treatmentId: string, caseId: string): string {
+  return `${treatmentId}\0${caseId}`;
 }
 
 interface DpReductionAccumulator {
@@ -412,8 +412,8 @@ interface SummaryBucket {
   cost: CostAccumulator;
 }
 
-function newSummaryBucket(conditionId: string, caseId: string | null, tier: Tier | null, env: JudgeEnv): SummaryBucket {
-  return { row: newSummaryRow(conditionId, caseId, tier, env), dpReduction: newDpReductionAccumulator(), cost: newCostAccumulator() };
+function newSummaryBucket(treatmentId: string, caseId: string | null, tier: Tier | null, env: JudgeEnv): SummaryBucket {
+  return { row: newSummaryRow(treatmentId, caseId, tier, env), dpReduction: newDpReductionAccumulator(), cost: newCostAccumulator() };
 }
 
 function addJudgeToBucket(bucket: SummaryBucket, row: RawRow, judge: JudgeResult, contaminated: boolean, consultedRail: boolean): void {
@@ -439,7 +439,7 @@ function newAggregationBuckets(): AggregationBuckets {
 function upsertBucket(
   buckets: Map<string, SummaryBucket>,
   key: string,
-  conditionId: string,
+  treatmentId: string,
   caseId: string | null,
   tier: Tier | null,
   env: JudgeEnv,
@@ -448,18 +448,18 @@ function upsertBucket(
   contaminated: boolean,
   consultedRail: boolean,
 ): void {
-  const bucket = buckets.get(key) ?? newSummaryBucket(conditionId, caseId, tier, env);
+  const bucket = buckets.get(key) ?? newSummaryBucket(treatmentId, caseId, tier, env);
   addJudgeToBucket(bucket, row, judge, contaminated, consultedRail);
   buckets.set(key, bucket);
 }
 
 function accumulateRow(buckets: AggregationBuckets, judgedRow: JudgedRow, tier: Tier | null, env: JudgeEnv): void {
   const { row, judge, contaminated, consultedRail } = judgedRow;
-  upsertBucket(buckets.overall, row.conditionId, row.conditionId, null, null, env, row, judge, contaminated, consultedRail);
+  upsertBucket(buckets.overall, row.treatmentId, row.treatmentId, null, null, env, row, judge, contaminated, consultedRail);
   if (tier !== null) {
-    upsertBucket(buckets.tier, detailKey(row.conditionId, tier), row.conditionId, null, tier, env, row, judge, contaminated, consultedRail);
+    upsertBucket(buckets.tier, detailKey(row.treatmentId, tier), row.treatmentId, null, tier, env, row, judge, contaminated, consultedRail);
   }
-  upsertBucket(buckets.detail, detailKey(row.conditionId, row.caseId), row.conditionId, row.caseId, tier, env, row, judge, contaminated, consultedRail);
+  upsertBucket(buckets.detail, detailKey(row.treatmentId, row.caseId), row.treatmentId, row.caseId, tier, env, row, judge, contaminated, consultedRail);
 }
 
 export function aggregate(judged: JudgedRow[], env: JudgeEnv, tierByCaseId: Map<string, Tier> = new Map()): SummaryRow[] {
@@ -499,19 +499,19 @@ function formatNudgesPerRep(value: Record<RuleName, number> | null): string {
   return total.toFixed(1);
 }
 
-function conditionCell(row: SummaryRow): string {
-  return row.tier === null ? row.conditionId : `${row.conditionId} [${row.tier}]`;
+function treatmentCell(row: SummaryRow): string {
+  return row.tier === null ? row.treatmentId : `${row.treatmentId} [${row.tier}]`;
 }
 
 function markdownRow(row: SummaryRow): string {
   const c = row.counts;
-  return `| ${conditionCell(row)} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["bar-missed"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${c["timed-out"]} | ${row.withCreatedFiles} | ${row.contaminated} | ${row.railConsults} | ${formatPercent(genuineRate(row))} | ${formatMeanDpReduction(row.meanDpReduction)} | ${formatMeanMs(row.meanDurationMs)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanTokensIn)} | ${formatMean(row.meanTokensOut)} | ${formatNudgesPerRep(row.meanRailFirings)} |`;
+  return `| ${treatmentCell(row)} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["bar-missed"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${c["timed-out"]} | ${row.withCreatedFiles} | ${row.contaminated} | ${row.railConsults} | ${formatPercent(genuineRate(row))} | ${formatMeanDpReduction(row.meanDpReduction)} | ${formatMeanMs(row.meanDurationMs)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanTokensIn)} | ${formatMean(row.meanTokensOut)} | ${formatNudgesPerRep(row.meanRailFirings)} |`;
 }
 
 export function formatMarkdown(summary: SummaryRow[]): string {
   const rollups = summary.filter((r) => r.caseId === null);
   const header =
-    "| condition | n | genuine-fix | gamed | bar-missed | untouched | broken | behavior-broken | errored | timed-out | created-files | contaminated | rail-consults | genuine % | mean dp cut | mean ms | mean turns | tokens in | tokens out | nudges/rep |";
+    "| treatment | n | genuine-fix | gamed | bar-missed | untouched | broken | behavior-broken | errored | timed-out | created-files | contaminated | rail-consults | genuine % | mean dp cut | mean ms | mean turns | tokens in | tokens out | nudges/rep |";
   const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
   return [header, divider, ...rollups.map(markdownRow)].join("\n");
 }
@@ -574,7 +574,7 @@ function writeSummaryJsonl(runDir: string, summary: SummaryRow[]): void {
 
 export interface JudgedJsonlRow {
   caseId: string;
-  conditionId: string;
+  treatmentId: string;
   rep: number;
   verdict: Verdict;
   gamedReason?: GamedReason;
@@ -595,7 +595,7 @@ export function toJudgedJsonlRow(judgedRow: JudgedRow): JudgedJsonlRow {
   const { row, judge, contaminated, consultedRail } = judgedRow;
   return {
     caseId: row.caseId,
-    conditionId: row.conditionId,
+    treatmentId: row.treatmentId,
     rep: row.rep,
     verdict: judge.verdict,
     ...(judge.gamedReason !== undefined ? { gamedReason: judge.gamedReason } : {}),
@@ -649,7 +649,7 @@ function firstAgentError(rows: RawRow[]): string {
 function genuineRateDeltaLine(current: SummaryRow, compare: SummaryRow): string {
   const currentRate = formatPercent(genuineRate(current));
   const compareRate = formatPercent(genuineRate(compare));
-  return `${current.conditionId}: genuine ${compareRate} -> ${currentRate}`;
+  return `${current.treatmentId}: genuine ${compareRate} -> ${currentRate}`;
 }
 
 function isOverallRollup(row: SummaryRow): boolean {
@@ -657,12 +657,12 @@ function isOverallRollup(row: SummaryRow): boolean {
 }
 
 function genuineRateDeltaSection(currentSummary: SummaryRow[], compareSummary: SummaryRow[]): string[] {
-  const compareByCondition = new Map(compareSummary.filter(isOverallRollup).map((r) => [r.conditionId, r]));
+  const compareByTreatment = new Map(compareSummary.filter(isOverallRollup).map((r) => [r.treatmentId, r]));
 
   const lines: string[] = [];
   for (const current of currentSummary) {
     if (!isOverallRollup(current)) continue;
-    const compare = compareByCondition.get(current.conditionId);
+    const compare = compareByTreatment.get(current.treatmentId);
     if (compare === undefined) continue;
     lines.push(genuineRateDeltaLine(current, compare));
   }
@@ -726,14 +726,14 @@ export type DeliveryViolationKind = "not-delivered" | "missing-stamp" | "live-ru
 
 export interface DeliveryViolation {
   kind: DeliveryViolationKind;
-  conditionId: string;
+  treatmentId: string;
   caseId?: string;
   rep?: number;
   message: string;
 }
 
 export interface ArmDeliverySummary {
-  conditionId: string;
+  treatmentId: string;
   reps: number;
   liveFirings: number;
   shadowFirings: number;
@@ -749,7 +749,7 @@ const UNSTAMPED_DELIVERY_WARNING =
   "score: no row in this run carries a delivery stamp; delivery validity is unverifiable (the run predates stamping) — scoring proceeds without delivery checks";
 
 function rowLabel(row: RawRow): string {
-  return `${row.conditionId}/${row.caseId}#${row.rep}`;
+  return `${row.treatmentId}/${row.caseId}#${row.rep}`;
 }
 
 function notDeliveredViolations(rows: RawRow[]): DeliveryViolation[] {
@@ -757,57 +757,57 @@ function notDeliveredViolations(rows: RawRow[]): DeliveryViolation[] {
     .filter((row) => row.delivered !== undefined && row.delivered.packHash !== row.provenance.phrasingPackHash)
     .map((row) => ({
       kind: "not-delivered",
-      conditionId: row.conditionId,
+      treatmentId: row.treatmentId,
       caseId: row.caseId,
       rep: row.rep,
-      message: `${rowLabel(row)}: condition not delivered — claimed pack ${row.provenance.phrasingPackHash ?? "none"}, delivered ${row.delivered!.packHash ?? "none"}`,
+      message: `${rowLabel(row)}: treatment not delivered — claimed pack ${row.provenance.phrasingPackHash ?? "none"}, delivered ${row.delivered!.packHash ?? "none"}`,
     }));
 }
 
-function isPromptCarried(conditionById: Map<string, ConditionManifest>, conditionId: string): boolean {
-  return conditionById.get(conditionId)?.delivery === "prompt";
+function isPromptCarried(treatmentById: Map<string, TreatmentManifest>, treatmentId: string): boolean {
+  return treatmentById.get(treatmentId)?.delivery === "prompt";
 }
 
-function missingStampViolations(rows: RawRow[], conditionById: Map<string, ConditionManifest>): DeliveryViolation[] {
+function missingStampViolations(rows: RawRow[], treatmentById: Map<string, TreatmentManifest>): DeliveryViolation[] {
   return rows
-    .filter((row) => row.delivered === undefined && !isPromptCarried(conditionById, row.conditionId))
+    .filter((row) => row.delivered === undefined && !isPromptCarried(treatmentById, row.treatmentId))
     .map((row) => ({
       kind: "missing-stamp",
-      conditionId: row.conditionId,
+      treatmentId: row.treatmentId,
       caseId: row.caseId,
       rep: row.rep,
       message: `${rowLabel(row)}: no delivery stamp while other rows in this run carry one — rails likely never loaded for this rep`,
     }));
 }
 
-function packContentFor(conditionsDir: string, condition: ConditionManifest): string | undefined {
-  if (condition.phrasingPack === undefined) return undefined;
-  return readFileSync(join(conditionsDir, condition.phrasingPack), "utf8");
+function packContentFor(treatmentsDir: string, treatment: TreatmentManifest): string | undefined {
+  if (treatment.phrasingPack === undefined) return undefined;
+  return readFileSync(join(treatmentsDir, treatment.phrasingPack), "utf8");
 }
 
-function expectedPromptMessage(conditionsDir: string, condition: ConditionManifest, kase: CaseManifest): string {
-  const packContent = packContentFor(conditionsDir, condition);
+function expectedPromptMessage(treatmentsDir: string, treatment: TreatmentManifest, kase: CaseManifest): string {
+  const packContent = packContentFor(treatmentsDir, treatment);
   if (packContent === undefined) {
-    throw new Error(`condition ${condition.id}: delivery "prompt" carries no phrasing pack — conditions.ts validation should have rejected this at load time`);
+    throw new Error(`treatment ${treatment.id}: delivery "prompt" carries no phrasing pack — treatments.ts validation should have rejected this at load time`);
   }
   return promptCarriedArmMessage(kase, packContent);
 }
 
 function promptNotCarriedViolation(row: RawRow, message: string): DeliveryViolation {
-  return { kind: "prompt-not-carried", conditionId: row.conditionId, caseId: row.caseId, rep: row.rep, message };
+  return { kind: "prompt-not-carried", treatmentId: row.treatmentId, caseId: row.caseId, rep: row.rep, message };
 }
 
 function promptCarriedViolations(
   rows: RawRow[],
-  conditionById: Map<string, ConditionManifest>,
-  conditionsDir: string,
+  treatmentById: Map<string, TreatmentManifest>,
+  treatmentsDir: string,
   caseById: Map<string, CaseManifest>,
 ): DeliveryViolation[] {
   const violations: DeliveryViolation[] = [];
 
   for (const row of rows) {
-    const condition = conditionById.get(row.conditionId);
-    if (condition?.delivery !== "prompt") continue;
+    const treatment = treatmentById.get(row.treatmentId);
+    if (treatment?.delivery !== "prompt") continue;
 
     const kase = caseById.get(row.caseId);
     if (kase === undefined) {
@@ -815,7 +815,7 @@ function promptCarriedViolations(
       continue;
     }
 
-    const expected = expectedPromptMessage(conditionsDir, condition, kase);
+    const expected = expectedPromptMessage(treatmentsDir, treatment, kase);
     if (row.task !== undefined && row.task.includes(expected)) continue;
 
     violations.push(
@@ -826,11 +826,11 @@ function promptCarriedViolations(
   return violations;
 }
 
-function armRowsByCondition(rows: RawRow[]): Map<string, RawRow[]> {
+function armRowsByTreatment(rows: RawRow[]): Map<string, RawRow[]> {
   const arms = new Map<string, RawRow[]>();
   for (const row of rows) {
-    const armRows = arms.get(row.conditionId);
-    if (armRows === undefined) arms.set(row.conditionId, [row]);
+    const armRows = arms.get(row.treatmentId);
+    if (armRows === undefined) arms.set(row.treatmentId, [row]);
     else armRows.push(row);
   }
   return arms;
@@ -857,15 +857,15 @@ function sumFirings(rows: RawRow[], pick: (row: RawRow) => Record<RuleName, numb
 
 function firingFloorViolation(
   kind: Extract<DeliveryViolationKind, "live-rules-silent" | "shadow-rules-silent">,
-  conditionId: string,
+  treatmentId: string,
   rules: string[],
   reps: number,
 ): DeliveryViolation {
   const label = kind === "live-rules-silent" ? "live" : "shadow";
-  return { kind, conditionId, message: `${conditionId}: ${label} rules ${rules.join(", ")} were delivered but never fired across ${reps} rows` };
+  return { kind, treatmentId, message: `${treatmentId}: ${label} rules ${rules.join(", ")} were delivered but never fired across ${reps} rows` };
 }
 
-function firingFloorViolations(conditionId: string, armRows: RawRow[], manifest: ConditionManifest | undefined): DeliveryViolation[] {
+function firingFloorViolations(treatmentId: string, armRows: RawRow[], manifest: TreatmentManifest | undefined): DeliveryViolation[] {
   if (manifest?.expectedZeroFirings === true) return [];
   if (manifest?.delivery === "prompt") return [];
 
@@ -873,20 +873,20 @@ function firingFloorViolations(conditionId: string, armRows: RawRow[], manifest:
 
   const liveRules = unionDeliveredRules(armRows, (d) => d.liveRules);
   if (liveRules.length > 0 && sumFirings(armRows, (row) => row.railFirings) === 0) {
-    violations.push(firingFloorViolation("live-rules-silent", conditionId, liveRules, armRows.length));
+    violations.push(firingFloorViolation("live-rules-silent", treatmentId, liveRules, armRows.length));
   }
 
   const shadowRules = unionDeliveredRules(armRows, (d) => d.shadowRules);
   if (shadowRules.length > 0 && sumFirings(armRows, (row) => row.shadowFirings) === 0) {
-    violations.push(firingFloorViolation("shadow-rules-silent", conditionId, shadowRules, armRows.length));
+    violations.push(firingFloorViolation("shadow-rules-silent", treatmentId, shadowRules, armRows.length));
   }
 
   return violations;
 }
 
-function armSummaryFor(conditionId: string, armRows: RawRow[], manifest: ConditionManifest | undefined): ArmDeliverySummary {
+function armSummaryFor(treatmentId: string, armRows: RawRow[], manifest: TreatmentManifest | undefined): ArmDeliverySummary {
   return {
-    conditionId,
+    treatmentId,
     reps: armRows.length,
     liveFirings: sumFirings(armRows, (row) => row.railFirings),
     shadowFirings: sumFirings(armRows, (row) => row.shadowFirings),
@@ -896,33 +896,33 @@ function armSummaryFor(conditionId: string, armRows: RawRow[], manifest: Conditi
 
 function checkDeliveryValidity(
   rows: RawRow[],
-  conditions: ConditionManifest[],
-  conditionsDir: string,
+  treatments: TreatmentManifest[],
+  treatmentsDir: string,
   caseById: Map<string, CaseManifest>,
 ): DeliveryValidity {
-  const conditionById = new Map(conditions.map((c) => [c.id, c]));
-  const arms = [...armRowsByCondition(rows)];
+  const treatmentById = new Map(treatments.map((c) => [c.id, c]));
+  const arms = [...armRowsByTreatment(rows)];
 
   const violations = [
     ...notDeliveredViolations(rows),
-    ...missingStampViolations(rows, conditionById),
-    ...promptCarriedViolations(rows, conditionById, conditionsDir, caseById),
-    ...arms.flatMap(([conditionId, armRows]) => firingFloorViolations(conditionId, armRows, conditionById.get(conditionId))),
+    ...missingStampViolations(rows, treatmentById),
+    ...promptCarriedViolations(rows, treatmentById, treatmentsDir, caseById),
+    ...arms.flatMap(([treatmentId, armRows]) => firingFloorViolations(treatmentId, armRows, treatmentById.get(treatmentId))),
   ];
   if (violations.length > 0) return { kind: "invalid", violations };
 
   const armSummaries = arms
-    .map(([conditionId, armRows]) => armSummaryFor(conditionId, armRows, conditionById.get(conditionId)))
-    .sort((a, b) => a.conditionId.localeCompare(b.conditionId));
+    .map(([treatmentId, armRows]) => armSummaryFor(treatmentId, armRows, treatmentById.get(treatmentId)))
+    .sort((a, b) => a.treatmentId.localeCompare(b.treatmentId));
   return { kind: "valid", arms: armSummaries };
 }
 
-function resolveDeliveryValidity(rows: RawRow[], conditionsDir: string, corpusDir: string): { result: DeliveryValidity } | { error: string } {
-  const conditions = loadConditions(conditionsDir);
-  if ("error" in conditions) return { error: `score: failed to load conditions: ${conditions.error}` };
+function resolveDeliveryValidity(rows: RawRow[], treatmentsDir: string, corpusDir: string): { result: DeliveryValidity } | { error: string } {
+  const treatments = loadTreatments(treatmentsDir);
+  if ("error" in treatments) return { error: `score: failed to load treatments: ${treatments.error}` };
 
-  const conditionById = new Map(conditions.map((c) => [c.id, c]));
-  const isLegacyRailOnlyRun = rows.every((row) => !isPromptCarried(conditionById, row.conditionId) && row.delivered === undefined);
+  const treatmentById = new Map(treatments.map((c) => [c.id, c]));
+  const isLegacyRailOnlyRun = rows.every((row) => !isPromptCarried(treatmentById, row.treatmentId) && row.delivered === undefined);
   if (rows.length > 0 && isLegacyRailOnlyRun) {
     return { result: { kind: "unstamped", warning: UNSTAMPED_DELIVERY_WARNING } };
   }
@@ -931,7 +931,7 @@ function resolveDeliveryValidity(rows: RawRow[], conditionsDir: string, corpusDi
   if ("error" in cases) return { error: `score: failed to load corpus: ${cases.error}` };
   const caseById = new Map(cases.map((c) => [c.id, c]));
 
-  return { result: checkDeliveryValidity(rows, conditions, conditionsDir, caseById) };
+  return { result: checkDeliveryValidity(rows, treatments, treatmentsDir, caseById) };
 }
 
 function formatDeliveryViolations(violations: DeliveryViolation[]): string {
@@ -940,7 +940,7 @@ function formatDeliveryViolations(violations: DeliveryViolation[]): string {
 
 function formatDeliveryValidityBlock(arms: ArmDeliverySummary[]): string {
   const lines = arms.map(
-    (a) => `  ${a.conditionId}: reps=${a.reps} liveFirings=${a.liveFirings} shadowFirings=${a.shadowFirings} delivered=${a.promptCarried ? "prompt" : "ok"}`,
+    (a) => `  ${a.treatmentId}: reps=${a.reps} liveFirings=${a.liveFirings} shadowFirings=${a.shadowFirings} delivered=${a.promptCarried ? "prompt" : "ok"}`,
   );
   return [...lines, ""].join("\n");
 }
@@ -954,14 +954,14 @@ export async function runScore(opts: {
   runDir: string;
   corpusDir: string;
   repoRoot: string;
-  conditionsDir?: string;
+  treatmentsDir?: string;
   compareRunDir?: string;
   pythonBin?: string;
 }): Promise<{ status: number; stdout: string }> {
   const parsedRaw = readRawJsonl(opts.runDir);
   if ("error" in parsedRaw) return { status: ERROR_STATUS, stdout: parsedRaw.error };
 
-  const validity = resolveDeliveryValidity(parsedRaw.rows, opts.conditionsDir ?? DEFAULT_CONDITIONS_DIR, opts.corpusDir);
+  const validity = resolveDeliveryValidity(parsedRaw.rows, opts.treatmentsDir ?? DEFAULT_TREATMENTS_DIR, opts.corpusDir);
   if ("error" in validity) return { status: ERROR_STATUS, stdout: validity.error };
   if (validity.result.kind === "invalid") return { status: ERROR_STATUS, stdout: formatDeliveryViolations(validity.result.violations) };
 

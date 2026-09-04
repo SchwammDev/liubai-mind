@@ -1,6 +1,6 @@
 import type { Lang, RuleName } from "../contract.ts";
 
-export interface ConditionManifest {
+export interface TreatmentManifest {
   id: string;
   env: Record<string, string>;
   phrasingPack?: string;
@@ -61,7 +61,7 @@ export interface JudgeResult {
 }
 
 export interface Provenance {
-  conditionId: string;
+  treatmentId: string;
   phrasingPackHash: string | null;
   liubaiSha: string;
   model: string;
@@ -76,7 +76,7 @@ export interface SecondTouchInfo {
 
 export interface RawRow {
   caseId: string;
-  conditionId: string;
+  treatmentId: string;
   rep: number;
   provenance: Provenance;
   task?: string;

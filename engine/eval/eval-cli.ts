@@ -15,7 +15,7 @@ export type ParsedCli =
       parallel: number;
       timeoutMs?: number;
       cases?: string[];
-      conditions?: string[];
+      treatments?: string[];
       tier?: Tier;
     }
   | {
@@ -26,7 +26,7 @@ export type ParsedCli =
       parallel: number;
       timeoutMs?: number;
       cases?: string[];
-      conditions?: string[];
+      treatments?: string[];
     }
   | { cmd: "score"; run: string; compare?: string }
   | { error: string };
@@ -42,8 +42,8 @@ const DEFAULT_PARALLEL = 1;
 
 const USAGE = [
   "Usage:",
-  "  liubai eval collect --run <name> --model <provider/id> [--reps N] [--parallel N] [--timeout-ms N] [--case id]... [--condition id]... [--tier <easy|hard>]",
-  "  liubai eval second-touch --run <newRun> --source-run <existingRun> --model <provider/id> [--parallel N] [--timeout-ms N] [--case id]... [--condition id]...",
+  "  liubai eval collect --run <name> --model <provider/id> [--reps N] [--parallel N] [--timeout-ms N] [--case id]... [--treatment id]... [--tier <easy|hard>]",
+  "  liubai eval second-touch --run <newRun> --source-run <existingRun> --model <provider/id> [--parallel N] [--timeout-ms N] [--case id]... [--treatment id]...",
   "  liubai eval score --run <name> [--compare <otherRunName>]",
 ].join("\n");
 
@@ -59,7 +59,7 @@ interface CollectAccum {
   timeoutMsRaw?: string;
   tierRaw?: string;
   cases: string[];
-  conditions: string[];
+  treatments: string[];
 }
 
 interface SecondTouchAccum {
@@ -69,7 +69,7 @@ interface SecondTouchAccum {
   parallelRaw?: string;
   timeoutMsRaw?: string;
   cases: string[];
-  conditions: string[];
+  treatments: string[];
 }
 
 interface ScoreAccum {
@@ -99,7 +99,7 @@ function collectFlagHandlers(): FlagHandlers<CollectAccum> {
     "--parallel": (a, v) => { a.parallelRaw = v; },
     "--timeout-ms": (a, v) => { a.timeoutMsRaw = v; },
     "--case": (a, v) => { a.cases.push(v); },
-    "--condition": (a, v) => { a.conditions.push(v); },
+    "--treatment": (a, v) => { a.treatments.push(v); },
     "--tier": (a, v) => { a.tierRaw = v; },
   };
 }
@@ -112,7 +112,7 @@ function secondTouchFlagHandlers(): FlagHandlers<SecondTouchAccum> {
     "--parallel": (a, v) => { a.parallelRaw = v; },
     "--timeout-ms": (a, v) => { a.timeoutMsRaw = v; },
     "--case": (a, v) => { a.cases.push(v); },
-    "--condition": (a, v) => { a.conditions.push(v); },
+    "--treatment": (a, v) => { a.treatments.push(v); },
   };
 }
 
@@ -149,7 +149,7 @@ function collectOptionalFields(accum: CollectAccum, tier: Tier | undefined): Par
   return {
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     ...(accum.cases.length > 0 ? { cases: accum.cases } : {}),
-    ...(accum.conditions.length > 0 ? { conditions: accum.conditions } : {}),
+    ...(accum.treatments.length > 0 ? { treatments: accum.treatments } : {}),
     ...(tier !== undefined ? { tier } : {}),
   };
 }
@@ -178,7 +178,7 @@ function buildCollectResult(accum: CollectAccum): ParsedCli {
 }
 
 function parseCollectArgs(args: string[]): ParsedCli {
-  const accum: CollectAccum = { cases: [], conditions: [] };
+  const accum: CollectAccum = { cases: [], treatments: [] };
   const flagError = consumeFlags(args, collectFlagHandlers(), accum);
   if (flagError !== undefined) return usageError(flagError.error);
   return buildCollectResult(accum);
@@ -190,7 +190,7 @@ function secondTouchOptionalFields(accum: SecondTouchAccum): Partial<Extract<Par
   return {
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     ...(accum.cases.length > 0 ? { cases: accum.cases } : {}),
-    ...(accum.conditions.length > 0 ? { conditions: accum.conditions } : {}),
+    ...(accum.treatments.length > 0 ? { treatments: accum.treatments } : {}),
   };
 }
 
@@ -213,7 +213,7 @@ function buildSecondTouchResult(accum: SecondTouchAccum): ParsedCli {
 }
 
 function parseSecondTouchArgs(args: string[]): ParsedCli {
-  const accum: SecondTouchAccum = { cases: [], conditions: [] };
+  const accum: SecondTouchAccum = { cases: [], treatments: [] };
   const flagError = consumeFlags(args, secondTouchFlagHandlers(), accum);
   if (flagError !== undefined) return usageError(flagError.error);
   return buildSecondTouchResult(accum);
@@ -254,7 +254,7 @@ async function runCollectCmd(
     model: parsed.model,
     ...(parsed.timeoutMs !== undefined ? { timeoutMs: parsed.timeoutMs } : {}),
     ...(parsed.cases !== undefined ? { cases: parsed.cases } : {}),
-    ...(parsed.conditions !== undefined ? { conditions: parsed.conditions } : {}),
+    ...(parsed.treatments !== undefined ? { treatments: parsed.treatments } : {}),
     ...(parsed.tier !== undefined ? { tier: parsed.tier } : {}),
   });
 
@@ -280,7 +280,7 @@ async function runSecondTouchCmd(
     model: parsed.model,
     ...(parsed.timeoutMs !== undefined ? { timeoutMs: parsed.timeoutMs } : {}),
     ...(parsed.cases !== undefined ? { cases: parsed.cases } : {}),
-    ...(parsed.conditions !== undefined ? { conditions: parsed.conditions } : {}),
+    ...(parsed.treatments !== undefined ? { treatments: parsed.treatments } : {}),
   });
 
   return {

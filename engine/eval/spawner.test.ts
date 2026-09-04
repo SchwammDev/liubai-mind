@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { buildBwrapArgs, buildSpawnEnv, defaultPiSpawner, defaultProbeSpawner } from "./spawner.ts";
 import type { RunSpec } from "./spawner.ts";
 import { evaluateCanary } from "./canary.ts";
-import type { ConditionManifest } from "./eval-contract.ts";
+import type { TreatmentManifest } from "./eval-contract.ts";
 
 function stubRepoRoot(piScript: string): string {
   const root = mkdtempSync(join(tmpdir(), "eval-stub-pi-"));
@@ -45,7 +45,7 @@ test("buildSpawnEnv_strips_experiment_toggles_inherited_from_the_parent_shell", 
   assert.deepEqual(env, { PATH: "/bin" });
 });
 
-test("buildSpawnEnv_applies_condition_env_over_the_sanitized_base", () => {
+test("buildSpawnEnv_applies_treatment_env_over_the_sanitized_base", () => {
   const parent = { PATH: "/bin", LIUBAI_RAILS_OFF: "1" };
 
   const env = buildSpawnEnv(parent, { LIUBAI_RAILS_OFF: "1", LIUBAI_PHRASING_PACK: "/packs/coaching.json" });
@@ -492,7 +492,7 @@ function realRepoRoot(): string {
   return join(import.meta.dirname, "..", "..");
 }
 
-function packedCondition(id: string): ConditionManifest {
+function packedTreatment(id: string): TreatmentManifest {
   return { id, env: {}, phrasingPack: "pack.json" };
 }
 
@@ -521,7 +521,7 @@ test(
     const outcome = await defaultProbeSpawner(realRepoRoot())({ cwd: workDir, env: { LIUBAI_PHRASING_PACK: packContent } });
 
     const verdict = evaluateCanary({
-      condition: packedCondition("probe-integration"),
+      treatment: packedTreatment("probe-integration"),
       packContent,
       exitCode: outcome.exitCode,
       stdout: outcome.stdout,
@@ -542,7 +542,7 @@ test(
     const outcome = await defaultProbeSpawner(realRepoRoot())({ cwd: workDir, env: { LIUBAI_PHRASING_PACK: deliveredPack } });
 
     const verdict = evaluateCanary({
-      condition: packedCondition("probe-integration-mismatch"),
+      treatment: packedTreatment("probe-integration-mismatch"),
       packContent: expectedPack,
       exitCode: outcome.exitCode,
       stdout: outcome.stdout,

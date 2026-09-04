@@ -20,14 +20,14 @@ export function gitSha(repoRoot: string): string {
 }
 
 export function buildProvenance(input: {
-  conditionId: string;
+  treatmentId: string;
   packBytes: string | null;
   repoRoot: string;
   model: string;
   now: string;
 }): Provenance {
   return {
-    conditionId: input.conditionId,
+    treatmentId: input.treatmentId,
     phrasingPackHash: packHash(input.packBytes),
     liubaiSha: gitSha(input.repoRoot),
     model: input.model,

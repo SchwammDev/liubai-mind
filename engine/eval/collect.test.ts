@@ -76,8 +76,8 @@ function baseOpts(over: Partial<CollectOpts> = {}): CollectOpts {
   };
 }
 
-function twoCaseTwoConditionOpts(spawner: PiSpawner): CollectOpts {
-  return baseOpts({ cases: ["ts-flag-parser", "ts-order-validator"], conditions: ["control", "rails-default"], spawner });
+function twoCaseTwoTreatmentOpts(spawner: PiSpawner): CollectOpts {
+  return baseOpts({ cases: ["ts-flag-parser", "ts-order-validator"], treatments: ["control", "rails-default"], spawner });
 }
 
 function readRawRows(runDir: string): RawRow[] {
@@ -95,7 +95,7 @@ function firstRow(runDir: string): RawRow {
 }
 
 function pairKey(row: RawRow): string {
-  return `${row.caseId}/${row.conditionId}/${row.rep}`;
+  return `${row.caseId}/${row.treatmentId}/${row.rep}`;
 }
 
 function assertRawRowCounts(result: { rowsWritten: number; rowsSkipped: number }, written: number, skipped: number): void {
@@ -174,8 +174,8 @@ function deletingSpawner(filename: string): PiSpawner {
   };
 }
 
-function parallelOpts(cases: string[], conditions: string[], spawner: PiSpawner, parallel: number): CollectOpts {
-  return baseOpts({ cases, conditions, spawner, parallel });
+function parallelOpts(cases: string[], treatments: string[], spawner: PiSpawner, parallel: number): CollectOpts {
+  return baseOpts({ cases, treatments, spawner, parallel });
 }
 
 function assertPartialFailureReportsStatusOne(result: { status: number; rowsWritten: number; stderr: string }, written: number): void {
@@ -210,8 +210,8 @@ function rejectFirstThenMutate(): PiSpawner {
   };
 }
 
-function tempPackedConditionsDir(): string {
-  const dir = tempDir("eval-conditions-");
+function tempPackedTreatmentsDir(): string {
+  const dir = tempDir("eval-treatments-");
   mkdirSync(join(dir, "packs"), { recursive: true });
   writeFileSync(join(dir, "packs", "pack.json"), '{"CC_NUDGE":{"typescript":{"first":"advice","rest":"advice"}}}');
   writeFileSync(join(dir, "packed.json"), JSON.stringify({ id: "packed", env: {}, phrasingPack: "packs/pack.json" }));
@@ -220,8 +220,8 @@ function tempPackedConditionsDir(): string {
 
 const PROMPT_ARM_MESSAGE = "Complexity moved, it did not leave.";
 
-function tempPromptConditionsDir(): string {
-  const dir = tempDir("eval-conditions-");
+function tempPromptTreatmentsDir(): string {
+  const dir = tempDir("eval-treatments-");
   mkdirSync(join(dir, "packs"), { recursive: true });
   writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_ARM_MESSAGE }));
   writeFileSync(
@@ -271,16 +271,16 @@ function twoTierCorpusDir(): string {
 }
 
 function assertProvenanceStamped(row: RawRow, now: string): void {
-  assert.equal(row.provenance.conditionId, "control");
+  assert.equal(row.provenance.treatmentId, "control");
   assert.equal(row.provenance.phrasingPackHash, null);
   assert.equal(row.provenance.model, "claude-test-model");
   assert.equal(row.provenance.collectedAt, now);
   assert.equal(row.provenance.liubaiSha, gitSha(REPO_ROOT));
 }
 
-test("runCollect_writes_one_raw_row_per_case_condition_rep", async () => {
+test("runCollect_writes_one_raw_row_per_case_treatment_rep", async () => {
   const { spawner } = recordingSpawner((spec) => mutateEveryFile(spec.cwd));
-  const opts = twoCaseTwoConditionOpts(spawner);
+  const opts = twoCaseTwoTreatmentOpts(spawner);
 
   const result = await runCollect(opts);
 
@@ -290,8 +290,8 @@ test("runCollect_writes_one_raw_row_per_case_condition_rep", async () => {
 
 test("runCollect_resumes_by_skipping_keys_already_present_in_raw_jsonl", async () => {
   const { spawner } = recordingSpawner((spec) => mutateEveryFile(spec.cwd));
-  const opts = twoCaseTwoConditionOpts(spawner);
-  writeExistingRawRow(opts.runDir, { caseId: "ts-flag-parser", conditionId: "control", rep: 1 });
+  const opts = twoCaseTwoTreatmentOpts(spawner);
+  writeExistingRawRow(opts.runDir, { caseId: "ts-flag-parser", treatmentId: "control", rep: 1 });
 
   const result = await runCollect(opts);
 
@@ -301,7 +301,7 @@ test("runCollect_resumes_by_skipping_keys_already_present_in_raw_jsonl", async (
 
 test("runCollect_copies_case_files_with_case_suffix_stripped_into_a_fresh_workdir", async () => {
   const { spawner, listings, cwds } = recordingListingSpawner();
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control", "rails-default"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control", "rails-default"], spawner });
 
   await runCollect(opts);
 
@@ -309,30 +309,30 @@ test("runCollect_copies_case_files_with_case_suffix_stripped_into_a_fresh_workdi
   assert.equal(new Set(cwds).size, 2);
 });
 
-test("runCollect_passes_control_condition_env_to_the_spawner", async () => {
+test("runCollect_passes_control_treatment_env_to_the_spawner", async () => {
   const { spawner, calls } = recordingSpawner();
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
   assert.equal(calls[0]?.env.LIUBAI_RAILS_OFF, "1");
 });
 
-test("runCollect_passes_the_phrasing_pack_content_only_for_pack_conditions", async () => {
-  const conditionsDir = tempPackedConditionsDir();
+test("runCollect_passes_the_phrasing_pack_content_only_for_pack_treatments", async () => {
+  const treatmentsDir = tempPackedTreatmentsDir();
   const { spawner, calls } = recordingSpawner();
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["packed"], conditionsDir, spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["packed"], treatmentsDir, spawner });
 
   await runCollect(opts);
 
-  const packContent = readFileSync(join(conditionsDir, "packs", "pack.json"), "utf8");
+  const packContent = readFileSync(join(treatmentsDir, "packs", "pack.json"), "utf8");
   assert.equal(calls[0]?.env.LIUBAI_PHRASING_PACK, packContent);
 });
 
 test("runCollect_stamps_the_phrasing_pack_hash_from_the_content_delivered_to_the_agent", async () => {
-  const conditionsDir = tempPackedConditionsDir();
+  const treatmentsDir = tempPackedTreatmentsDir();
   const { spawner, calls } = recordingSpawner();
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["packed"], conditionsDir, spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["packed"], treatmentsDir, spawner });
 
   await runCollect(opts);
 
@@ -340,19 +340,19 @@ test("runCollect_stamps_the_phrasing_pack_hash_from_the_content_delivered_to_the
   assert.equal(row.provenance.phrasingPackHash, packHash(calls[0]?.env.LIUBAI_PHRASING_PACK ?? null));
 });
 
-test("runCollect_omits_the_phrasing_pack_var_for_packless_conditions", async () => {
+test("runCollect_omits_the_phrasing_pack_var_for_packless_treatments", async () => {
   const { spawner, calls } = recordingSpawner();
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
   assert.equal("LIUBAI_PHRASING_PACK" in (calls[0]?.env ?? {}), false);
 });
 
-test("runCollect_sends_the_case_task_followed_by_the_arm_message_for_a_prompt_delivery_condition", async () => {
-  const conditionsDir = tempPromptConditionsDir();
+test("runCollect_sends_the_case_task_followed_by_the_arm_message_for_a_prompt_delivery_treatment", async () => {
+  const treatmentsDir = tempPromptTreatmentsDir();
   const { spawner, calls } = recordingSpawner();
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["prompt-carried"], conditionsDir, spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["prompt-carried"], treatmentsDir, spawner });
 
   await runCollect(opts);
 
@@ -362,8 +362,8 @@ test("runCollect_sends_the_case_task_followed_by_the_arm_message_for_a_prompt_de
 
 const PROMPT_ARM_TEMPLATE_WITH_PLACEHOLDERS = "{name} still carries {dpBefore} decision points, unchanged from {dpAfter}.";
 
-function tempPlaceholderPromptConditionsDir(): string {
-  const dir = tempDir("eval-conditions-");
+function tempPlaceholderPromptTreatmentsDir(): string {
+  const dir = tempDir("eval-treatments-");
   mkdirSync(join(dir, "packs"), { recursive: true });
   writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_ARM_TEMPLATE_WITH_PLACEHOLDERS }));
   writeFileSync(
@@ -374,9 +374,9 @@ function tempPlaceholderPromptConditionsDir(): string {
 }
 
 test("runCollect_fills_the_arm_messages_placeholders_with_the_cases_entry_symbol_and_decision_points", async () => {
-  const conditionsDir = tempPlaceholderPromptConditionsDir();
+  const treatmentsDir = tempPlaceholderPromptTreatmentsDir();
   const { spawner, calls } = recordingSpawner();
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["prompt-carried"], conditionsDir, spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["prompt-carried"], treatmentsDir, spawner });
 
   await runCollect(opts);
 
@@ -384,10 +384,10 @@ test("runCollect_fills_the_arm_messages_placeholders_with_the_cases_entry_symbol
   assert.equal(calls[0]?.task, `${caseTask}\n\nparseFlags still carries 24 decision points, unchanged from 24.`);
 });
 
-test("runCollect_records_the_sent_task_on_the_raw_row_for_a_prompt_delivery_condition", async () => {
-  const conditionsDir = tempPromptConditionsDir();
+test("runCollect_records_the_sent_task_on_the_raw_row_for_a_prompt_delivery_treatment", async () => {
+  const treatmentsDir = tempPromptTreatmentsDir();
   const { spawner } = recordingSpawner();
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["prompt-carried"], conditionsDir, spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["prompt-carried"], treatmentsDir, spawner });
 
   await runCollect(opts);
 
@@ -395,9 +395,9 @@ test("runCollect_records_the_sent_task_on_the_raw_row_for_a_prompt_delivery_cond
   assert.equal(firstRow(opts.runDir).task, `${caseTask}\n\n${PROMPT_ARM_MESSAGE}`);
 });
 
-test("runCollect_omits_task_from_the_raw_row_for_a_rail_delivery_condition", async () => {
+test("runCollect_omits_task_from_the_raw_row_for_a_rail_delivery_treatment", async () => {
   const { spawner } = recordingSpawner();
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -406,7 +406,7 @@ test("runCollect_omits_task_from_the_raw_row_for_a_rail_delivery_condition", asy
 
 test("runCollect_always_sets_LIUBAI_EVAL_so_the_spawned_agent_sandboxes_its_bash_tool", async () => {
   const { spawner, calls } = recordingSpawner();
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -415,7 +415,7 @@ test("runCollect_always_sets_LIUBAI_EVAL_so_the_spawned_agent_sandboxes_its_bash
 
 test("runCollect_records_the_exit_code_and_timedOut_flag_from_the_spawner_outcome", async () => {
   const spawner = fixedOutcomeSpawner({ exitCode: 7, stdoutJsonl: "", timedOut: true });
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -427,7 +427,7 @@ test("runCollect_records_the_exit_code_and_timedOut_flag_from_the_spawner_outcom
 test("runCollect_captures_final_file_state_from_disk_after_the_spawner_mutates_it", async () => {
   const mutatedSource = "export function parseFlags() { return 1; }\n";
   const spawner = mutatingSpawner("parse_flags.ts", mutatedSource);
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -437,7 +437,7 @@ test("runCollect_captures_final_file_state_from_disk_after_the_spawner_mutates_i
 test("runCollect_stores_the_spawner_stdout_jsonl_under_transcripts", async () => {
   const stdoutJsonl = '{"event":"done"}\n';
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl, timedOut: false });
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -445,10 +445,10 @@ test("runCollect_stores_the_spawner_stdout_jsonl_under_transcripts", async () =>
   assert.equal(readFileSync(transcriptPath, "utf8"), stdoutJsonl);
 });
 
-test("runCollect_stamps_provenance_with_condition_git_sha_model_and_injected_now", async () => {
+test("runCollect_stamps_provenance_with_treatment_git_sha_model_and_injected_now", async () => {
   const now = () => "2026-01-01T00:00:00.000Z";
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner, now });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner, now });
 
   await runCollect(opts);
 
@@ -457,7 +457,7 @@ test("runCollect_stamps_provenance_with_condition_git_sha_model_and_injected_now
 
 test("runCollect_continues_past_a_rejecting_spawner_and_reports_status_1", async () => {
   const spawner = rejectFirstThenMutate();
-  const opts = baseOpts({ cases: ["ts-flag-parser", "ts-order-validator"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser", "ts-order-validator"], treatments: ["control"], spawner });
 
   const result = await runCollect(opts);
 
@@ -466,7 +466,7 @@ test("runCollect_continues_past_a_rejecting_spawner_and_reports_status_1", async
 
 test("runCollect_reports_status_1_and_nothing_spawned_on_a_load_error", async () => {
   const { spawner, calls } = recordingSpawner();
-  const opts = baseOpts({ conditions: ["nonexistent"], spawner });
+  const opts = baseOpts({ treatments: ["nonexistent"], spawner });
 
   const result = await runCollect(opts);
 
@@ -487,7 +487,7 @@ test("runCollect_bounds_the_worker_pool_to_the_parallel_limit", async () => {
 
 test("runCollect_defaults_to_sequential_execution_when_parallel_is_omitted", async () => {
   const { spawner, maxInFlight } = trackingConcurrencySpawner();
-  const opts = baseOpts({ cases: ["ts-flag-parser", "ts-order-validator"], conditions: ["control", "rails-default"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser", "ts-order-validator"], treatments: ["control", "rails-default"], spawner });
 
   await runCollect(opts);
 
@@ -507,7 +507,7 @@ test("runCollect_writes_every_row_when_running_with_parallel_greater_than_one", 
 test("runCollect_resumes_by_skipping_keys_already_present_in_raw_jsonl_with_parallel_greater_than_one", async () => {
   const { spawner } = recordingSpawner((spec) => mutateEveryFile(spec.cwd));
   const opts = parallelOpts(["ts-flag-parser", "ts-order-validator"], ["control", "rails-default"], spawner, 2);
-  writeExistingRawRow(opts.runDir, { caseId: "ts-flag-parser", conditionId: "control", rep: 1 });
+  writeExistingRawRow(opts.runDir, { caseId: "ts-flag-parser", treatmentId: "control", rep: 1 });
 
   const result = await runCollect(opts);
 
@@ -772,7 +772,7 @@ test("runCollect_stamps_turns_tokens_and_rail_firings_from_stdout_onto_the_raw_r
     assistantMessageEndLine({ input: 100, output: 20 }) +
     toolExecutionEndLine(["\n\n[cc] f (CC=9)."]);
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl, timedOut: false });
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -781,7 +781,7 @@ test("runCollect_stamps_turns_tokens_and_rail_firings_from_stdout_onto_the_raw_r
 
 test("runCollect_stamps_the_death_signal_and_stderr_tail_of_a_killed_rep_onto_the_raw_row", async () => {
   const spawner = fixedOutcomeSpawner({ exitCode: -1, stdoutJsonl: "", timedOut: false, signal: "SIGKILL", stderrTail: "gateway stream reset" });
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -800,7 +800,7 @@ function shadowLogSpawner(lines: string[]): PiSpawner {
 
 test("runCollect_stamps_shadowFirings_from_the_workdirs_shadow_log_onto_the_raw_row", async () => {
   const spawner = shadowLogSpawner([shadowLogLine("cc-delta", "a.py"), shadowLogLine("cc-delta", "b.py")]);
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -809,7 +809,7 @@ test("runCollect_stamps_shadowFirings_from_the_workdirs_shadow_log_onto_the_raw_
 
 test("runCollect_omits_shadowFirings_from_the_raw_row_when_no_shadow_log_was_written", async () => {
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -851,7 +851,7 @@ test("readDelivered_is_undefined_when_the_stamp_is_unparseable_json", () => {
 test("runCollect_stamps_delivered_from_the_workdirs_delivered_json_onto_the_raw_row", async () => {
   const delivered = { packHash: null, liveRules: ["cc", "cc-delta"], shadowRules: [] };
   const spawner = deliveredStampSpawner(delivered);
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -860,7 +860,7 @@ test("runCollect_stamps_delivered_from_the_workdirs_delivered_json_onto_the_raw_
 
 test("runCollect_omits_delivered_from_the_raw_row_when_no_delivered_stamp_was_written", async () => {
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -870,7 +870,7 @@ test("runCollect_omits_delivered_from_the_raw_row_when_no_delivered_stamp_was_wr
 test("runCollect_stamps_agentError_into_the_raw_row_when_stdout_reports_a_terminal_retry_failure", async () => {
   const stdoutJsonl = autoRetryEndLine({ success: false, attempt: 2, finalError: "OpenAI API error (404): model not found" });
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl, timedOut: false });
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -880,7 +880,7 @@ test("runCollect_stamps_agentError_into_the_raw_row_when_stdout_reports_a_termin
 test("runCollect_leaves_agentError_absent_when_stdout_shows_only_successful_retries", async () => {
   const stdoutJsonl = autoRetryEndLine({ attempt: 1 });
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl, timedOut: false });
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -891,7 +891,7 @@ test("runCollect_runs_no_work_items_and_reports_a_load_error_when_the_delivery_c
   const { spawner, calls } = recordingSpawner();
   const opts = baseOpts({
     cases: ["ts-flag-parser"],
-    conditions: ["control", "rails-default"],
+    treatments: ["control", "rails-default"],
     spawner,
     probeSpawner: failingProbeSpawner({ stderr: "python rail dead inside the sandbox" }),
   });
@@ -905,14 +905,14 @@ test("runCollect_runs_no_work_items_and_reports_a_load_error_when_the_delivery_c
   assert.match(result.stderr, /python rail dead inside the sandbox/);
 });
 
-test("runCollect_probes_every_condition_in_the_run_before_dispatching_any_work_item", async () => {
+test("runCollect_probes_every_treatment_in_the_run_before_dispatching_any_work_item", async () => {
   const probeCwds: string[] = [];
   const probeSpawner: ProbeSpawner = async (spec) => {
     probeCwds.push(spec.cwd);
     return passingProbeSpawner()(spec);
   };
   const { spawner, calls } = recordingSpawner();
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control", "rails-default"], spawner, probeSpawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control", "rails-default"], spawner, probeSpawner });
 
   await runCollect(opts);
 
@@ -920,8 +920,8 @@ test("runCollect_probes_every_condition_in_the_run_before_dispatching_any_work_i
   assert.equal(calls.length, 2);
 });
 
-test("runCollect_writes_a_canary_json_report_naming_every_probed_condition", async () => {
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control", "rails-default"], spawner: recordingSpawner().spawner });
+test("runCollect_writes_a_canary_json_report_naming_every_probed_treatment", async () => {
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control", "rails-default"], spawner: recordingSpawner().spawner });
 
   await runCollect(opts);
 
@@ -931,7 +931,7 @@ test("runCollect_writes_a_canary_json_report_naming_every_probed_condition", asy
 
 test("runCollect_rejects_a_non_positive_parallel_value_with_a_load_error", async () => {
   const { spawner, calls } = recordingSpawner();
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner, parallel: 0 });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner, parallel: 0 });
 
   const result = await runCollect(opts);
 
@@ -947,7 +947,7 @@ function assertOnlyCasesRan(runDir: string, expectedCaseIds: string[]): void {
 test("runCollect_keeps_only_cases_matching_the_tier_filter", async () => {
   const corpusDir = twoTierCorpusDir();
   const { spawner } = recordingSpawner();
-  const opts = baseOpts({ corpusDir, conditions: ["control"], tier: "easy", spawner });
+  const opts = baseOpts({ corpusDir, treatments: ["control"], tier: "easy", spawner });
 
   const result = await runCollect(opts);
 
@@ -957,7 +957,7 @@ test("runCollect_keeps_only_cases_matching_the_tier_filter", async () => {
 
 test("runCollect_reports_a_load_error_when_the_tier_filter_matches_no_cases", async () => {
   const { spawner, calls } = recordingSpawner();
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], tier: "hard", spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], tier: "hard", spawner });
 
   const result = await runCollect(opts);
 
@@ -974,7 +974,7 @@ function assertBothDeclaredAndExtraFileCaptured(files: Record<string, string>, e
 test("runCollect_captures_files_the_agent_created_beside_the_declared_ones", async () => {
   const helperSource = "export function helper() { return 1; }\n";
   const spawner = mutatingSpawner("helpers.ts", helperSource);
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -983,7 +983,7 @@ test("runCollect_captures_files_the_agent_created_beside_the_declared_ones", asy
 
 test("runCollect_records_dropped_extras_in_snapshotDropped_at_directory_granularity", async () => {
   const spawner = binaryFilesUnderDirSpawner("junk", ["a.bin", "b.bin"]);
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -992,7 +992,7 @@ test("runCollect_records_dropped_extras_in_snapshotDropped_at_directory_granular
 
 test("runCollect_leaves_snapshotDropped_absent_when_nothing_is_dropped", async () => {
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -1002,7 +1002,7 @@ test("runCollect_leaves_snapshotDropped_absent_when_nothing_is_dropped", async (
 test("runCollect_captures_a_declared_file_whole_even_past_the_extra_file_cap", async () => {
   const oversizedSource = "a".repeat(SNAPSHOT_FILE_CAP_BYTES + 1);
   const spawner = mutatingSpawner("parse_flags.ts", oversizedSource);
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -1011,7 +1011,7 @@ test("runCollect_captures_a_declared_file_whole_even_past_the_extra_file_cap", a
 
 test("runCollect_omits_a_declared_file_the_agent_deleted", async () => {
   const spawner = deletingSpawner("parse_flags.ts");
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
@@ -1021,7 +1021,7 @@ test("runCollect_omits_a_declared_file_the_agent_deleted", async () => {
 test("runCollect_records_rail_abort_as_agentError_when_exit_code_is_17_with_completed_assistant_messages", async () => {
   const stdoutJsonl = messageEndLine("stop");
   const spawner = fixedOutcomeSpawner({ exitCode: EVAL_ABORT_EXIT_CODE, stdoutJsonl, timedOut: false });
-  const opts = baseOpts({ cases: ["ts-flag-parser"], conditions: ["control"], spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 

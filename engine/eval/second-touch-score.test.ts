@@ -137,7 +137,7 @@ function noExtensionCorpusDir(caseId: string): string {
 
 function provenance(over: Partial<Provenance> = {}): Provenance {
   return {
-    conditionId: "rails-default",
+    treatmentId: "rails-default",
     phrasingPackHash: null,
     liubaiSha: "abc1234",
     model: "claude-x",
@@ -149,7 +149,7 @@ function provenance(over: Partial<Provenance> = {}): Provenance {
 function sourceRow(caseId: string, over: Partial<RawRow> = {}): RawRow {
   return {
     caseId,
-    conditionId: "rails-default",
+    treatmentId: "rails-default",
     rep: 1,
     provenance: provenance(),
     files: { "thing.ts": identitySource() },
@@ -167,7 +167,7 @@ function secondTouchInfo(over: Partial<SecondTouchInfo> = {}): SecondTouchInfo {
 function seededRow(caseId: string, over: Partial<RawRow> = {}, infoOver: Partial<SecondTouchInfo> = {}): RawRow {
   return {
     caseId,
-    conditionId: "rails-default",
+    treatmentId: "rails-default",
     rep: 1,
     provenance: provenance(),
     files: { "thing.ts": extendedSource() },
@@ -432,36 +432,36 @@ test("sourceDiffCounts_ignores_litter_present_in_the_seed_but_absent_from_final_
 });
 
 function judgedSecondTouchRow(
-  conditionId: string,
+  treatmentId: string,
   caseId: string,
   verdict: SecondTouchVerdict,
   stratum: string,
   over: Partial<RawRow> = {},
   diffCounts: { linesAdded: number; linesRemoved: number } = { linesAdded: 0, linesRemoved: 0 },
 ): JudgedSecondTouchRow {
-  return { row: seededRow(caseId, { conditionId, ...over }), judge: { verdict, ...diffCounts }, stratum };
+  return { row: seededRow(caseId, { treatmentId, ...over }), judge: { verdict, ...diffCounts }, stratum };
 }
 
-function rollupOf(summary: SecondTouchSummaryRow[], conditionId: string): SecondTouchSummaryRow {
-  return summary.find((r) => r.conditionId === conditionId && r.caseId === null && r.stratum === null)!;
+function rollupOf(summary: SecondTouchSummaryRow[], treatmentId: string): SecondTouchSummaryRow {
+  return summary.find((r) => r.treatmentId === treatmentId && r.caseId === null && r.stratum === null)!;
 }
 
-function stratumRowOf(summary: SecondTouchSummaryRow[], conditionId: string, stratum: string): SecondTouchSummaryRow {
-  return summary.find((r) => r.conditionId === conditionId && r.caseId === null && r.stratum === stratum)!;
+function stratumRowOf(summary: SecondTouchSummaryRow[], treatmentId: string, stratum: string): SecondTouchSummaryRow {
+  return summary.find((r) => r.treatmentId === treatmentId && r.caseId === null && r.stratum === stratum)!;
 }
 
-function caseRowOf(summary: SecondTouchSummaryRow[], conditionId: string, caseId: string): SecondTouchSummaryRow {
-  return summary.find((r) => r.conditionId === conditionId && r.caseId === caseId)!;
+function caseRowOf(summary: SecondTouchSummaryRow[], treatmentId: string, caseId: string): SecondTouchSummaryRow {
+  return summary.find((r) => r.treatmentId === treatmentId && r.caseId === caseId)!;
 }
 
-function assertRollupCounts(summary: SecondTouchSummaryRow[], conditionId: string, expected: { total: number; extended: number; regressed: number }): void {
-  const rollup = rollupOf(summary, conditionId);
+function assertRollupCounts(summary: SecondTouchSummaryRow[], treatmentId: string, expected: { total: number; extended: number; regressed: number }): void {
+  const rollup = rollupOf(summary, treatmentId);
   assert.equal(rollup.total, expected.total);
   assert.equal(rollup.counts.extended, expected.extended);
   assert.equal(rollup.counts.regressed, expected.regressed);
 }
 
-test("aggregateSecondTouch_rolls_up_verdict_counts_per_condition_across_every_stratum", () => {
+test("aggregateSecondTouch_rolls_up_verdict_counts_per_treatment_across_every_stratum", () => {
   const judged = [
     judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix"),
     judgedSecondTouchRow("rails-default", "case-b", "regressed", "gamed"),
@@ -473,12 +473,12 @@ test("aggregateSecondTouch_rolls_up_verdict_counts_per_condition_across_every_st
   assertRollupCounts(summary, "rails-default", { total: 2, extended: 1, regressed: 1 });
 });
 
-function assertStratumTotals(summary: SecondTouchSummaryRow[], conditionId: string, expected: Record<string, number>): void {
-  const totals = Object.fromEntries(Object.keys(expected).map((stratum) => [stratum, stratumRowOf(summary, conditionId, stratum).total]));
+function assertStratumTotals(summary: SecondTouchSummaryRow[], treatmentId: string, expected: Record<string, number>): void {
+  const totals = Object.fromEntries(Object.keys(expected).map((stratum) => [stratum, stratumRowOf(summary, treatmentId, stratum).total]));
   assert.deepEqual(totals, expected);
 }
 
-test("aggregateSecondTouch_emits_a_row_per_condition_and_source_verdict_stratum", () => {
+test("aggregateSecondTouch_emits_a_row_per_treatment_and_source_verdict_stratum", () => {
   const judged = [
     judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix"),
     judgedSecondTouchRow("rails-default", "case-b", "regressed", "gamed"),
@@ -502,8 +502,8 @@ test("aggregateSecondTouch_keeps_the_control_stratum_separate_from_seeded_strata
   assert.equal(stratumRowOf(summary, "rails-default", "genuine-fix").counts.extended, 1);
 });
 
-function assertCaseDetailCounts(summary: SecondTouchSummaryRow[], conditionId: string, caseId: string, expected: { total: number; extended: number; regressed: number }): void {
-  const detail = caseRowOf(summary, conditionId, caseId);
+function assertCaseDetailCounts(summary: SecondTouchSummaryRow[], treatmentId: string, caseId: string, expected: { total: number; extended: number; regressed: number }): void {
+  const detail = caseRowOf(summary, treatmentId, caseId);
   assert.equal(detail.total, expected.total);
   assert.equal(detail.counts.extended, expected.extended);
   assert.equal(detail.counts.regressed, expected.regressed);
@@ -569,8 +569,8 @@ function railFirings(over: Partial<Record<RuleName, number>> = {}): Record<RuleN
   return { ...base, ...over };
 }
 
-function assertCostSummary(summary: SecondTouchSummaryRow[], conditionId: string, expected: { meanTurns: number | null; meanRailFiringsTotal: number | null; costAvailable: number }): void {
-  const rollup = rollupOf(summary, conditionId);
+function assertCostSummary(summary: SecondTouchSummaryRow[], treatmentId: string, expected: { meanTurns: number | null; meanRailFiringsTotal: number | null; costAvailable: number }): void {
+  const rollup = rollupOf(summary, treatmentId);
   assert.equal(rollup.meanTurns, expected.meanTurns);
   assert.equal(rollup.meanRailFiringsTotal, expected.meanRailFiringsTotal);
   assert.equal(rollup.costAvailable, expected.costAvailable);
@@ -679,7 +679,7 @@ function writeSourceRun(runsRoot: string, name: string, rows: RawRow[]): void {
 
 function assertScoredAsFirstTouch(result: { status: number; stdout: string }, runDir: string): void {
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /\| condition \|/);
+  assert.match(result.stdout, /\| treatment \|/);
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 }
 

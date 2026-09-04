@@ -13,8 +13,8 @@ import { formatCcDeltaNudge } from "../messages.ts";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const CORPUS_DIR = join(import.meta.dirname, "corpus");
-const CONDITIONS_DIR = join(import.meta.dirname, "conditions");
-const CONDITION_ID = "cc-delta-numberless-prompt";
+const TREATMENTS_DIR = join(import.meta.dirname, "treatments");
+const TREATMENT_ID = "cc-delta-numberless-prompt";
 const CASE_ID = "ts-flag-parser";
 
 const CASE_TASK = caseTask();
@@ -35,7 +35,7 @@ function caseTask(): string {
 }
 
 function armMessage(): string {
-  const pack = JSON.parse(readFileSync(join(CONDITIONS_DIR, "packs", "cc-delta-numberless.json"), "utf8")) as { CC_DELTA_NUDGE: string };
+  const pack = JSON.parse(readFileSync(join(TREATMENTS_DIR, "packs", "cc-delta-numberless.json"), "utf8")) as { CC_DELTA_NUDGE: string };
   const facts = caseFacts();
   return formatCcDeltaNudge(pack.CC_DELTA_NUDGE, {
     name: facts.entrySymbol,
@@ -56,9 +56,9 @@ function collectOpts(over: Partial<CollectOpts> = {}): CollectOpts {
     reps: 2,
     model: "claude-test-model",
     cases: [CASE_ID],
-    conditions: [CONDITION_ID],
+    treatments: [TREATMENT_ID],
     corpusDir: CORPUS_DIR,
-    conditionsDir: CONDITIONS_DIR,
+    treatmentsDir: TREATMENTS_DIR,
     probeSpawner: healthyProbeReporter(),
     ...over,
   };
@@ -80,7 +80,7 @@ async function collectPromptCarriedArm(spawner: PiSpawner, reps: number): Promis
 }
 
 async function scoreRun(runDir: string): Promise<{ status: number; stdout: string }> {
-  return runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir: CONDITIONS_DIR });
+  return runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir: TREATMENTS_DIR });
 }
 
 function stripTheArmMessageFromTheRecordedPrompt(runDir: string): void {
@@ -124,8 +124,8 @@ function assertScoreRefuses(scored: { status: number; stdout: string }, violatio
   assert.match(scored.stdout, new RegExp(`\\[${violationKind}\\]`));
 }
 
-function assertArmSummaryRowPresent(stdout: string, conditionId: string): void {
-  assert.match(stdout, new RegExp(`\\| ${conditionId} \\|`));
+function assertArmSummaryRowPresent(stdout: string, treatmentId: string): void {
+  assert.match(stdout, new RegExp(`\\| ${treatmentId} \\|`));
 }
 
 function assertSummaryWritten(runDir: string): void {
@@ -149,7 +149,7 @@ test("a_prompt_carried_arm_opens_every_rep_with_the_arm_message_and_scores_as_ve
 
   assertScoreVerifiesPromptDelivery(scored);
   assertSummaryWritten(runDir);
-  assertArmSummaryRowPresent(scored.stdout, CONDITION_ID);
+  assertArmSummaryRowPresent(scored.stdout, TREATMENT_ID);
 });
 
 test("a_run_whose_recorded_prompt_lacks_the_arm_message_is_refused_by_score", async () => {

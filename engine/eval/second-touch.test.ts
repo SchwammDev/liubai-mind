@@ -20,7 +20,7 @@ function tempDir(prefix: string): string {
 
 function baseProvenance(over: Partial<Provenance> = {}): Provenance {
   return {
-    conditionId: "rails-default",
+    treatmentId: "rails-default",
     phrasingPackHash: null,
     liubaiSha: "abc1234",
     model: "aqueduct/deepseek-v4-flash-284b",
@@ -32,9 +32,9 @@ function baseProvenance(over: Partial<Provenance> = {}): Provenance {
 function sourceRow(over: Partial<RawRow> = {}): RawRow {
   return {
     caseId: "ts-flag-parser",
-    conditionId: "rails-default",
+    treatmentId: "rails-default",
     rep: 1,
-    provenance: baseProvenance({ conditionId: over.conditionId ?? "rails-default" }),
+    provenance: baseProvenance({ treatmentId: over.treatmentId ?? "rails-default" }),
     files: { "parse_flags.ts": MUTATED_FLAG_PARSER },
     exitCode: 0,
     timedOut: false,
@@ -72,7 +72,7 @@ function readRawRows(runDir: string): RawRow[] {
 
 function rowIdentity(row: RawRow): string {
   const st = row.secondTouch;
-  return `${row.caseId}/${row.conditionId}/${st?.control ? "control" : `seed:${st?.sourceRep}`}`;
+  return `${row.caseId}/${row.treatmentId}/${st?.control ? "control" : `seed:${st?.sourceRep}`}`;
 }
 
 function recordingSpawner(): { spawner: PiSpawner; calls: RunSpec[] } {
@@ -99,8 +99,8 @@ function fileCapturingSpawner(filename: string): { spawner: PiSpawner; capturedC
 
 test("runSecondTouch_never_seeds_from_a_timed_out_source_row", async () => {
   const rows = [
-    sourceRow({ conditionId: "rails-default", rep: 1, timedOut: true }),
-    sourceRow({ conditionId: "rails-default", rep: 2 }),
+    sourceRow({ treatmentId: "rails-default", rep: 1, timedOut: true }),
+    sourceRow({ treatmentId: "rails-default", rep: 2 }),
   ];
   const sourceRunDir = writeSourceRun(rows);
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
@@ -114,10 +114,10 @@ test("runSecondTouch_never_seeds_from_a_timed_out_source_row", async () => {
 
 test("runSecondTouch_derives_one_seeded_item_per_touched_non_errored_source_row_and_one_control_item_per_arm", async () => {
   const rows = [
-    sourceRow({ conditionId: "rails-default", rep: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } }),
-    sourceRow({ conditionId: "rails-default", rep: 2, agentError: "boom" }),
-    sourceRow({ conditionId: "bare-metric-v1", rep: 1, files: { "parse_flags.ts": FLAG_PARSER_SEED } }),
-    sourceRow({ caseId: "ts-order-validator", conditionId: "rails-default", rep: 1, files: {} }),
+    sourceRow({ treatmentId: "rails-default", rep: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } }),
+    sourceRow({ treatmentId: "rails-default", rep: 2, agentError: "boom" }),
+    sourceRow({ treatmentId: "bare-metric-v1", rep: 1, files: { "parse_flags.ts": FLAG_PARSER_SEED } }),
+    sourceRow({ caseId: "ts-order-validator", treatmentId: "rails-default", rep: 1, files: {} }),
   ];
   const sourceRunDir = writeSourceRun(rows);
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
@@ -170,8 +170,8 @@ test("runSecondTouch_materializes_extra_files_the_source_row_created_beside_the_
   assert.equal(capturingHelpers.capturedContents[0], helperContent);
 });
 
-test("runSecondTouch_spawns_the_seeded_item_under_the_same_condition_env_as_the_source_row", async () => {
-  const rows = [sourceRow({ conditionId: "control", files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
+test("runSecondTouch_spawns_the_seeded_item_under_the_same_treatment_env_as_the_source_row", async () => {
+  const rows = [sourceRow({ treatmentId: "control", files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
   const sourceRunDir = writeSourceRun(rows);
   const { spawner, calls } = recordingSpawner();
   const opts = baseOpts(sourceRunDir, { spawner });
@@ -194,7 +194,7 @@ test("runSecondTouch_spawns_the_extension_task_rather_than_the_original_case_tas
 });
 
 test("runSecondTouch_stamps_seeded_rows_with_their_source_run_and_source_rep", async () => {
-  const rows = [sourceRow({ conditionId: "rails-default", rep: 4, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
+  const rows = [sourceRow({ treatmentId: "rails-default", rep: 4, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
   const sourceRunDir = writeSourceRun(rows);
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
   const opts = baseOpts(sourceRunDir, { spawner });
@@ -206,7 +206,7 @@ test("runSecondTouch_stamps_seeded_rows_with_their_source_run_and_source_rep", a
 });
 
 test("runSecondTouch_stamps_control_rows_with_a_null_source_rep", async () => {
-  const rows = [sourceRow({ conditionId: "rails-default", rep: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
+  const rows = [sourceRow({ treatmentId: "rails-default", rep: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
   const sourceRunDir = writeSourceRun(rows);
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
   const opts = baseOpts(sourceRunDir, { spawner });
@@ -223,13 +223,13 @@ function writeExistingSecondTouchRow(runDir: string, row: Partial<RawRow>): void
 }
 
 test("runSecondTouch_resumes_by_skipping_a_seeded_item_already_present_in_raw_jsonl", async () => {
-  const rows = [sourceRow({ conditionId: "rails-default", rep: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
+  const rows = [sourceRow({ treatmentId: "rails-default", rep: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
   const sourceRunDir = writeSourceRun(rows);
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
   const opts = baseOpts(sourceRunDir, { spawner });
   writeExistingSecondTouchRow(opts.runDir, {
     caseId: "ts-flag-parser",
-    conditionId: "rails-default",
+    treatmentId: "rails-default",
     rep: 1,
     secondTouch: { sourceRun: SOURCE_RUN_NAME, sourceRep: 1, control: false },
   });
@@ -241,13 +241,13 @@ test("runSecondTouch_resumes_by_skipping_a_seeded_item_already_present_in_raw_js
 });
 
 test("runSecondTouch_does_not_confuse_a_control_item_with_a_seeded_item_at_the_same_rep_when_resuming", async () => {
-  const rows = [sourceRow({ conditionId: "rails-default", rep: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
+  const rows = [sourceRow({ treatmentId: "rails-default", rep: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
   const sourceRunDir = writeSourceRun(rows);
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
   const opts = baseOpts(sourceRunDir, { spawner });
   writeExistingSecondTouchRow(opts.runDir, {
     caseId: "ts-flag-parser",
-    conditionId: "rails-default",
+    treatmentId: "rails-default",
     rep: 1,
     secondTouch: { sourceRun: SOURCE_RUN_NAME, sourceRep: null, control: true },
   });
