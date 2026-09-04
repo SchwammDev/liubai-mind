@@ -1,0 +1,18 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html",       "title": "1 · Experiments",             "x": 0,    "y": 0,    "w": 1300, "h": 900 },
+    { "file": "Experiment.dc.html", "title": "2 · Experiment with repetitions", "x": 1400, "y": 0,    "w": 1450, "h": 1500 },
+    { "file": "Review.dc.html",     "title": "3 · Repetition review",       "x": 0,    "y": 1660, "w": 1450, "h": 1000 },
+    { "file": "Transcript.dc.html", "title": "4 · Transcript",              "x": 1550, "y": 1660, "w": 1450, "h": 1060 }
+  ],
+  "annotations": [
+    { "id": "q-manifest",  "x": 0,    "y": -170, "w": 340, "text": "Level 1 reads experiments.json: name, question, treatments, control, outcome. Run folders no experiment claims are still listed." },
+    { "id": "q-vocab",     "x": 400,  "y": -170, "w": 340, "text": "Vocabulary used everywhere: treatment (was arm), repetition (was rep), single task / with follow-up tasks (was first / second touch), earlier change / follow-up change, rail nudge (was firing), behavior check (was probe), complexity (was cc). Decided: the code adopts these names too." },
+    { "id": "q-aa",        "x": 1400, "y": -170, "w": 340, "text": "Setup check compares wording pack, delivered rule text, liubai commit and model across treatments. Same rule text on both sides = 'identical treatments' flag at level 1 and 2." },
+    { "id": "q-summary",   "x": 1800, "y": -170, "w": 360, "text": "Decided: no narrative column. The detail cell holds only facts no other column has (functions added or removed, failing check names, nudge turns, abnormal ending) and is blank otherwise. Narrative lives in the review panel and transcript." },
+    { "id": "q-steps",     "x": 0,    "y": 1520, "w": 360, "text": "Experiments with follow-up tasks have three code states (original, after step 1, after step 2); any pair can be compared. Single task experiments have two. 'reference fix' swaps in for 'before' when toggled." },
+    { "id": "q-note",      "x": 420,  "y": 1520, "w": 300, "text": "Decided: the note is typed in the page and saved by a small local serve mode of the report command into a notes file beside the judged file. The static file stays the default output." },
+    { "id": "q-thinking",  "x": 1550, "y": 1520, "w": 340, "text": "Thinking toggle stays visible but disabled when the transcript has none, so the gap is seen rather than hidden. Rail nudges are shown inline at the turn they fired." }
+  ],
+  "launch": { "view": "canvas" }
+}

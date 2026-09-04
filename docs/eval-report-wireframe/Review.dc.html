@@ -1,0 +1,103 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Patrick Hand", "Segoe Print", "Comic Sans MS", cursive; color: #2b2b2b; background: #fbfaf7; font-size: 15px; }
+    a { color: #2b2b2b; } a:hover { color: #000; }
+    .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+    .box { border: 1.5px solid #2b2b2b; border-radius: 3px; background: #fff; }
+    .dash { border: 1.5px dashed #8a8a8a; border-radius: 3px; }
+    .muted { color: #7a7a7a; }
+    .chip { display: inline-block; padding: 1px 8px; border: 1.5px solid #2b2b2b; border-radius: 12px; font-size: 13px; background: #fff; }
+    .chip.fill { background: #2b2b2b; color: #fff; }
+    .chip.flag { border-color: #b3261e; color: #b3261e; }
+    .crumb { display: flex; gap: 8px; align-items: center; font-size: 14px; color: #7a7a7a; }
+    .crumb b { color: #2b2b2b; }
+    table { border-collapse: collapse; width: 100%; }
+    th { text-align: left; font-weight: normal; color: #7a7a7a; border-bottom: 1.5px solid #2b2b2b; padding: 6px 8px; font-size: 14px; }
+    td { padding: 7px 8px; border-bottom: 1px solid #ddd; vertical-align: top; }
+    .bar { display: flex; height: 14px; width: 180px; border: 1.5px solid #2b2b2b; overflow: hidden; }
+    .bar div { height: 100%; }
+    .bar .g { background: #2b2b2b; } .bar .m { background: #8a8a8a; } .bar .x { background: repeating-linear-gradient(45deg,#fff 0 3px,#8a8a8a 3px 5px); } .bar .w { background: #fff; }
+    .btn { display: inline-block; padding: 4px 12px; border: 1.5px solid #2b2b2b; border-radius: 3px; background: #fff; font-size: 14px; }
+    .flagline { border: 1.5px solid #b3261e; color: #b3261e; background: #fff6f5; padding: 8px 12px; border-radius: 3px; }
+    .code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.5; }
+    .code div { white-space: pre; min-height: 1.5em; }
+    .code .del { background: #eee; text-decoration: line-through; color: #7a7a7a; }
+    .code .add { background: #2b2b2b; color: #fff; }
+    .code .ln { color: #b0b0b0; display: inline-block; width: 28px; }
+  </style>
+</helmet>
+<div style="width: 1450px; min-height: 1000px; padding: 24px 28px; display: flex; flex-direction: column; gap: 14px; background: #fbfaf7;">
+  <div class="crumb"><span>Experiments</span><span>›</span><span>coaching vs bare metric · hard cases · with follow-up tasks</span><span>›</span><span>bare-metric-v1</span><span>›</span><b>py-grid-accumulate · repetition 3</b></div>
+  <div style="display: flex; justify-content: space-between; align-items: center;">
+    <div style="display: flex; gap: 14px; align-items: center;">
+      <span class="chip flag" style="font-size: 15px;">regressed</span>
+      <span class="mono">+41 / −12 lines · 17 turns · 102 k input tokens · 38 k output tokens · 3 min 12 s</span>
+      <span class="mono muted">complexity nudge ×3</span>
+    </div>
+    <div style="display: flex; gap: 8px;"><span class="btn">‹ previous repetition</span><span class="btn">next repetition ›</span><span class="btn">transcript</span></div>
+  </div>
+
+  <div style="display: flex; gap: 0; align-items: stretch;" class="box">
+    <div style="flex: 1; padding: 10px 14px; border-right: 1.5px solid #2b2b2b;">
+      <div class="muted" style="font-size: 13px;">state 0 · original source</div>
+      <div class="mono">accumulate_grid.py at commit 3250ea4</div>
+      <div class="mono muted">complexity 14</div>
+    </div>
+    <div style="flex: 1; padding: 10px 14px; border-right: 1.5px solid #2b2b2b;">
+      <div class="muted" style="font-size: 13px;">state 1 · earlier change · run folder coaching-v1-hard-flash, repetition 3</div>
+      <div><span class="chip">genuine-fix</span> <span class="mono muted">complexity 14 → 9 · behavior checks 4 of 4</span></div>
+      <div class="mono muted">Improve accumulate_grid.py. Keep the public…</div>
+    </div>
+    <div style="flex: 1; padding: 10px 14px; background: #f3f2ee;">
+      <div class="muted" style="font-size: 13px;">state 2 · follow-up change · this repetition</div>
+      <div><span class="chip flag">regressed</span> <span class="mono muted">complexity 9 → 6 · behavior checks 4 of 4 · extension present</span></div>
+      <div class="mono muted">Add per-cell quality weighting. Keep the…</div>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 12px; align-items: center;">
+    <span class="muted">compare</span>
+    <span class="chip">original → earlier change</span><span class="chip fill">earlier change → follow-up</span><span class="chip">original → follow-up</span>
+    <span class="muted" style="margin-left: 16px;">against</span>
+    <span class="chip fill">before</span><span class="chip">reference fix</span>
+    <span class="muted" style="margin-left: 16px;">view</span>
+    <span class="chip fill">side by side</span><span class="chip">unified</span>
+    <span style="margin-left: auto;" class="muted mono">files: accumulate_grid.py (modified) · test_accumulate_grid.py (created)</span>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0;" class="box">
+    <div style="padding: 10px 14px; border-right: 1.5px solid #2b2b2b;">
+      <div class="muted mono" style="margin-bottom: 6px;">before · state 1 (earlier change) · accumulate_grid.py</div>
+<div class="code"><div><span class="ln">21</span>def accumulate_grid(cells, weights):</div><div><span class="ln">22</span>    total = 0.0</div><div><span class="ln">23</span>    for cell, w in zip(cells, weights):</div><div><span class="ln">24</span>        if cell.quality &lt; MIN_QUALITY:</div><div><span class="ln">25</span>            continue</div><div><span class="ln">26</span>        if cell.quality &gt;= GOOD_QUALITY:</div><div><span class="ln">27</span>            w = w * GOOD_BONUS</div><div><span class="ln">28</span>        total += clamp(cell.value * w)</div><div><span class="ln">29</span>    return total</div><div><span class="ln">30</span></div><div><span class="ln">31</span></div><div><span class="ln">32</span></div><div><span class="ln">33</span></div><div><span class="ln">34</span></div><div><span class="ln">35</span></div><div><span class="ln">36</span></div></div>
+    </div>
+    <div style="padding: 10px 14px;">
+      <div class="muted mono" style="margin-bottom: 6px;">after · state 2 (follow-up change) · accumulate_grid.py</div>
+<div class="code"><div><span class="ln">21</span>def accumulate_grid(cells, weights):</div><div><span class="ln">22</span>    total = 0.0</div><div><span class="ln">23</span>    for cell, w in zip(cells, weights):</div><div><span class="ln">24</span><span class="add">        total += _cell_contribution(cell, w)</span></div><div><span class="ln">25</span>    return total</div><div><span class="ln">26</span></div><div><span class="ln">27</span><span class="add">def _cell_contribution(cell, w):</span></div><div><span class="ln">28</span><span class="add">    if _skip(cell):</span></div><div><span class="ln">29</span><span class="add">        return 0.0</span></div><div><span class="ln">30</span><span class="add">    return clamp(cell.value * _weight(cell, w))</span></div><div><span class="ln">31</span></div><div><span class="ln">32</span><span class="add">def _skip(cell):</span></div><div><span class="ln">33</span><span class="add">    return cell.quality &lt; MIN_QUALITY</span></div><div><span class="ln">34</span></div><div><span class="ln">35</span><span class="add">def _weight(cell, w):</span></div><div><span class="ln">36</span><span class="add">    return w * GOOD_BONUS * cell.quality_factor if …</span></div></div>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px;">
+    <div class="box" style="padding: 10px 14px;">
+      <div class="muted" style="font-size: 13px;">why this verdict</div>
+      <div>Extension present (quality weighting reaches the total). Regressed because the source diff removed 12 lines that the task did not name, and the reference fix touches only the loop body.</div>
+    </div>
+    <div class="dash" style="padding: 10px 14px;">
+      <div class="muted" style="font-size: 13px;">your note · saved to notes file when the report runs in serve mode</div>
+      <div class="muted">agree or disagree with the automatic verdict, one line</div>
+      <div style="display: flex; justify-content: flex-end; margin-top: 8px;"><span class="btn">save</span></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

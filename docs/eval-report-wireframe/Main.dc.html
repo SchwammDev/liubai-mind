@@ -1,0 +1,112 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Patrick Hand", "Segoe Print", "Comic Sans MS", cursive; color: #2b2b2b; background: #fbfaf7; font-size: 15px; }
+    a { color: #2b2b2b; } a:hover { color: #000; }
+    .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+    .box { border: 1.5px solid #2b2b2b; border-radius: 3px; background: #fff; }
+    .dash { border: 1.5px dashed #8a8a8a; border-radius: 3px; }
+    .muted { color: #7a7a7a; }
+    .chip { display: inline-block; padding: 1px 8px; border: 1.5px solid #2b2b2b; border-radius: 12px; font-size: 13px; background: #fff; }
+    .chip.fill { background: #2b2b2b; color: #fff; }
+    .chip.flag { border-color: #b3261e; color: #b3261e; }
+    .crumb { display: flex; gap: 8px; align-items: center; font-size: 14px; color: #7a7a7a; }
+    .crumb b { color: #2b2b2b; }
+    table { border-collapse: collapse; width: 100%; }
+    th { text-align: left; font-weight: normal; color: #7a7a7a; border-bottom: 1.5px solid #2b2b2b; padding: 6px 8px; font-size: 14px; }
+    td { padding: 7px 8px; border-bottom: 1px solid #ddd; vertical-align: top; }
+    .bar { display: flex; height: 14px; width: 180px; border: 1.5px solid #2b2b2b; overflow: hidden; }
+    .bar div { height: 100%; }
+    .bar .g { background: #2b2b2b; } .bar .m { background: #8a8a8a; } .bar .x { background: repeating-linear-gradient(45deg,#fff 0 3px,#8a8a8a 3px 5px); } .bar .w { background: #fff; }
+    .btn { display: inline-block; padding: 4px 12px; border: 1.5px solid #2b2b2b; border-radius: 3px; background: #fff; font-size: 14px; }
+    .flagline { border: 1.5px solid #b3261e; color: #b3261e; background: #fff6f5; padding: 8px 12px; border-radius: 3px; }
+    .code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.5; }
+    .code div { white-space: pre; min-height: 1.5em; }
+    .code .del { background: #eee; text-decoration: line-through; color: #7a7a7a; }
+    .code .add { background: #2b2b2b; color: #fff; }
+    .code .ln { color: #b0b0b0; display: inline-block; width: 28px; }
+  </style>
+</helmet>
+<div style="width: 1300px; min-height: 900px; padding: 28px 32px; display: flex; flex-direction: column; gap: 20px; background: #fbfaf7;">
+  <div style="display: flex; justify-content: space-between; align-items: baseline;">
+    <div style="font-size: 26px;">Experiments</div>
+    <div class="muted mono">engine/eval/runs · 10 run folders · report generated 2026-09-04</div>
+  </div>
+  <div style="display: flex; gap: 10px; align-items: center;">
+    <span class="chip fill">all</span><span class="chip">open</span><span class="chip">concluded</span>
+    <span class="muted" style="margin-left: 12px;">group by</span><span class="chip fill">milestone</span><span class="chip">model</span>
+  </div>
+
+  <div class="dash muted" style="padding: 8px 12px; font-size: 14px;">
+    An experiment compares treatments: same cases, same model, different rail wording or settings. A <b>single task</b> experiment gives the agent one task on the original source and judges the result. An experiment <b>with follow-up tasks</b> adds a second step: another agent gets a follow-up task on the changed code, to see whether the first change holds up under further work.
+  </div>
+
+  <div class="muted" style="font-size: 14px; margin-top: 4px;">milestone · coaching-over-metrics</div>
+  <table class="box">
+    <thead><tr><th style="width: 210px;">experiment</th><th>question</th><th style="width: 150px;">treatments</th><th style="width: 150px;">model · difficulty</th><th style="width: 150px;">size</th><th style="width: 290px;">outcome</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>coaching vs bare metric</b><br><span class="muted">with follow-up tasks</span></td>
+        <td>Does coaching wording beat the bare complexity number when the agent extends code it changed before?</td>
+        <td><span class="chip">coaching-v1</span> <span class="chip">bare-metric-v1</span></td>
+        <td class="mono">deepseek-v4-flash<br>hard cases</td>
+        <td class="mono">5 cases × 5 repetitions per treatment</td>
+        <td><span class="chip">concluded</span> verdicts at ceiling; cost metrics carry the signal</td>
+      </tr>
+      <tr>
+        <td><b>coaching vs bare metric</b><br><span class="muted">with follow-up tasks</span></td>
+        <td>Same question, standard cases.</td>
+        <td><span class="chip">coaching-v1</span> <span class="chip">bare-metric-v1</span></td>
+        <td class="mono">deepseek-v4-flash<br>standard cases</td>
+        <td class="mono">5 cases × 5 repetitions per treatment</td>
+        <td><span class="chip">concluded</span> no separation</td>
+      </tr>
+      <tr>
+        <td><b>rails-default vs coaching</b><br><span class="muted">single task</span></td>
+        <td>Does the coaching wording change anything over the default rail wording?</td>
+        <td><span class="chip">rails-default</span> <span class="chip">coaching-v1</span></td>
+        <td class="mono">deepseek-v4-flash<br>hard cases</td>
+        <td class="mono">5 cases × 3 repetitions per treatment</td>
+        <td><span class="chip flag">identical treatments</span> both delivered the same rule text since commit ec20e01; result void</td>
+      </tr>
+      <tr>
+        <td><b>numberless prompt</b><br><span class="muted">single task</span></td>
+        <td>Does dropping the counts from the complexity nudge reduce metric gaming?</td>
+        <td><span class="chip">cc-delta-prompt</span> <span class="chip">cc-delta-numberless-prompt</span></td>
+        <td class="mono">deepseek-v4-flash<br>hard cases</td>
+        <td class="mono">5 cases × 3 repetitions per treatment</td>
+        <td><span class="chip">concluded</span> numberless wording became the default (#60)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="muted" style="font-size: 14px; margin-top: 4px;">milestone · subagent-v1</div>
+  <table class="box">
+    <tbody>
+      <tr>
+        <td style="width: 210px;"><b>baseline</b><br><span class="muted">single task</span></td>
+        <td>How does each model do on the corpus with rails switched off?</td>
+        <td style="width: 150px;"><span class="chip">control</span></td>
+        <td style="width: 150px;" class="mono">deepseek-v4-flash<br>qwen-3.6-35b</td>
+        <td style="width: 150px;" class="mono">18 cases × 3 repetitions</td>
+        <td style="width: 290px;"><span class="chip">reference</span> comparison point for every later treatment</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="dash muted" style="padding: 10px 14px; font-size: 14px;">
+    run folders not claimed by any experiment: <span class="mono">dry-run</span>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
