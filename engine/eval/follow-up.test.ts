@@ -4,8 +4,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { runSecondTouch } from "./second-touch.ts";
-import type { SecondTouchOpts } from "./second-touch.ts";
+import { runFollowUp } from "./follow-up.ts";
+import type { FollowUpOpts } from "./follow-up.ts";
 import type { RunSpec, RunOutcome, PiSpawner } from "./spawner.ts";
 import type { RawRow, Provenance } from "./eval-contract.ts";
 
@@ -49,10 +49,10 @@ function writeSourceRun(rows: RawRow[]): string {
   return sourceRunDir;
 }
 
-function baseOpts(sourceRunDir: string, over: Partial<SecondTouchOpts> = {}): SecondTouchOpts {
+function baseOpts(sourceRunDir: string, over: Partial<FollowUpOpts> = {}): FollowUpOpts {
   return {
     repoRoot: REPO_ROOT,
-    runDir: tempDir("eval-second-touch-run-"),
+    runDir: tempDir("eval-follow-up-run-"),
     workRoot: tempDir("eval-work-"),
     sourceRunDir,
     sourceRun: SOURCE_RUN_NAME,
@@ -71,7 +71,7 @@ function readRawRows(runDir: string): RawRow[] {
 }
 
 function rowIdentity(row: RawRow): string {
-  const st = row.secondTouch;
+  const st = row.followUp;
   return `${row.caseId}/${row.treatmentId}/${st?.control ? "control" : `seed:${st?.sourceRepetition}`}`;
 }
 
@@ -97,7 +97,7 @@ function fileCapturingSpawner(filename: string): { spawner: PiSpawner; capturedC
   return { spawner, capturedContents };
 }
 
-test("runSecondTouch_never_seeds_from_a_timed_out_source_row", async () => {
+test("runFollowUp_never_seeds_from_a_timed_out_source_row", async () => {
   const rows = [
     sourceRow({ treatmentId: "rails-default", repetition: 1, timedOut: true }),
     sourceRow({ treatmentId: "rails-default", repetition: 2 }),
@@ -106,13 +106,13 @@ test("runSecondTouch_never_seeds_from_a_timed_out_source_row", async () => {
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
   const opts = baseOpts(sourceRunDir, { spawner });
 
-  await runSecondTouch(opts);
+  await runFollowUp(opts);
 
   const identities = readRawRows(opts.runDir).map(rowIdentity).sort();
   assert.deepEqual(identities, ["ts-flag-parser/rails-default/control", "ts-flag-parser/rails-default/seed:2"]);
 });
 
-test("runSecondTouch_derives_one_seeded_item_per_touched_non_errored_source_row_and_one_control_item_per_arm", async () => {
+test("runFollowUp_derives_one_seeded_item_per_touched_non_errored_source_row_and_one_control_item_per_arm", async () => {
   const rows = [
     sourceRow({ treatmentId: "rails-default", repetition: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } }),
     sourceRow({ treatmentId: "rails-default", repetition: 2, agentError: "boom" }),
@@ -123,7 +123,7 @@ test("runSecondTouch_derives_one_seeded_item_per_touched_non_errored_source_row_
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
   const opts = baseOpts(sourceRunDir, { spawner });
 
-  const result = await runSecondTouch(opts);
+  const result = await runFollowUp(opts);
 
   assert.equal(result.rowsWritten, 3);
   const identities = readRawRows(opts.runDir).map(rowIdentity).sort();
@@ -134,125 +134,125 @@ test("runSecondTouch_derives_one_seeded_item_per_touched_non_errored_source_row_
   ]);
 });
 
-test("runSecondTouch_skips_a_source_row_whose_entry_file_was_dropped_from_the_snapshot", async () => {
+test("runFollowUp_skips_a_source_row_whose_entry_file_was_dropped_from_the_snapshot", async () => {
   const rows = [sourceRow({ files: { "notes.md": "entry exceeded the snapshot cap" } })];
   const sourceRunDir = writeSourceRun(rows);
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
   const opts = baseOpts(sourceRunDir, { spawner });
 
-  await runSecondTouch(opts);
+  await runFollowUp(opts);
 
   const identities = readRawRows(opts.runDir).map(rowIdentity);
   assert.deepEqual(identities, ["ts-flag-parser/rails-default/control"]);
 });
 
-test("runSecondTouch_materializes_every_file_from_the_source_row_into_the_fresh_workdir_before_spawning", async () => {
+test("runFollowUp_materializes_every_file_from_the_source_row_into_the_fresh_workdir_before_spawning", async () => {
   const helperContent = "export function helper() { return 1; }\n";
   const rows = [sourceRow({ files: { "parse_flags.ts": MUTATED_FLAG_PARSER, "helpers.ts": helperContent } })];
   const sourceRunDir = writeSourceRun(rows);
   const capturingFlags = fileCapturingSpawner("parse_flags.ts");
   const opts = baseOpts(sourceRunDir, { spawner: capturingFlags.spawner });
 
-  await runSecondTouch(opts);
+  await runFollowUp(opts);
 
   assert.equal(capturingFlags.capturedContents[0], MUTATED_FLAG_PARSER);
 });
 
-test("runSecondTouch_materializes_extra_files_the_source_row_created_beside_the_declared_entry", async () => {
+test("runFollowUp_materializes_extra_files_the_source_row_created_beside_the_declared_entry", async () => {
   const helperContent = "export function helper() { return 1; }\n";
   const rows = [sourceRow({ files: { "parse_flags.ts": MUTATED_FLAG_PARSER, "helpers.ts": helperContent } })];
   const sourceRunDir = writeSourceRun(rows);
   const capturingHelpers = fileCapturingSpawner("helpers.ts");
   const opts = baseOpts(sourceRunDir, { spawner: capturingHelpers.spawner });
 
-  await runSecondTouch(opts);
+  await runFollowUp(opts);
 
   assert.equal(capturingHelpers.capturedContents[0], helperContent);
 });
 
-test("runSecondTouch_spawns_the_seeded_item_under_the_same_treatment_env_as_the_source_row", async () => {
+test("runFollowUp_spawns_the_seeded_item_under_the_same_treatment_env_as_the_source_row", async () => {
   const rows = [sourceRow({ treatmentId: "control", files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
   const sourceRunDir = writeSourceRun(rows);
   const { spawner, calls } = recordingSpawner();
   const opts = baseOpts(sourceRunDir, { spawner });
 
-  await runSecondTouch(opts);
+  await runFollowUp(opts);
 
   assert.equal(calls[0]?.env.LIUBAI_RAILS_OFF, "1");
 });
 
-test("runSecondTouch_spawns_the_extension_task_rather_than_the_original_case_task", async () => {
+test("runFollowUp_spawns_the_extension_task_rather_than_the_original_case_task", async () => {
   const rows = [sourceRow({ files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
   const sourceRunDir = writeSourceRun(rows);
   const { spawner, calls } = recordingSpawner();
   const opts = baseOpts(sourceRunDir, { spawner });
 
-  await runSecondTouch(opts);
+  await runFollowUp(opts);
 
   const extension = JSON.parse(readFileSync(join(REPO_ROOT, "engine", "eval", "corpus", "ts-flag-parser", "extension.json"), "utf8"));
   assert.equal(calls[0]?.task, extension.task);
 });
 
-test("runSecondTouch_stamps_seeded_rows_with_their_source_run_and_source_repetition", async () => {
+test("runFollowUp_stamps_seeded_rows_with_their_source_run_and_source_repetition", async () => {
   const rows = [sourceRow({ treatmentId: "rails-default", repetition: 4, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
   const sourceRunDir = writeSourceRun(rows);
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
   const opts = baseOpts(sourceRunDir, { spawner });
 
-  await runSecondTouch(opts);
+  await runFollowUp(opts);
 
-  const seeded = readRawRows(opts.runDir).find((r) => r.secondTouch?.control === false);
-  assert.deepEqual(seeded?.secondTouch, { sourceRun: SOURCE_RUN_NAME, sourceRepetition: 4, control: false });
+  const seeded = readRawRows(opts.runDir).find((r) => r.followUp?.control === false);
+  assert.deepEqual(seeded?.followUp, { sourceRun: SOURCE_RUN_NAME, sourceRepetition: 4, control: false });
 });
 
-test("runSecondTouch_stamps_control_rows_with_a_null_source_repetition", async () => {
+test("runFollowUp_stamps_control_rows_with_a_null_source_repetition", async () => {
   const rows = [sourceRow({ treatmentId: "rails-default", repetition: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
   const sourceRunDir = writeSourceRun(rows);
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
   const opts = baseOpts(sourceRunDir, { spawner });
 
-  await runSecondTouch(opts);
+  await runFollowUp(opts);
 
-  const control = readRawRows(opts.runDir).find((r) => r.secondTouch?.control === true);
-  assert.deepEqual(control?.secondTouch, { sourceRun: SOURCE_RUN_NAME, sourceRepetition: null, control: true });
+  const control = readRawRows(opts.runDir).find((r) => r.followUp?.control === true);
+  assert.deepEqual(control?.followUp, { sourceRun: SOURCE_RUN_NAME, sourceRepetition: null, control: true });
 });
 
-function writeExistingSecondTouchRow(runDir: string, row: Partial<RawRow>): void {
+function writeExistingFollowUpRow(runDir: string, row: Partial<RawRow>): void {
   mkdirSync(runDir, { recursive: true });
   writeFileSync(join(runDir, "raw.jsonl"), `${JSON.stringify(row)}\n`);
 }
 
-test("runSecondTouch_resumes_by_skipping_a_seeded_item_already_present_in_raw_jsonl", async () => {
+test("runFollowUp_resumes_by_skipping_a_seeded_item_already_present_in_raw_jsonl", async () => {
   const rows = [sourceRow({ treatmentId: "rails-default", repetition: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
   const sourceRunDir = writeSourceRun(rows);
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
   const opts = baseOpts(sourceRunDir, { spawner });
-  writeExistingSecondTouchRow(opts.runDir, {
+  writeExistingFollowUpRow(opts.runDir, {
     caseId: "ts-flag-parser",
     treatmentId: "rails-default",
     repetition: 1,
-    secondTouch: { sourceRun: SOURCE_RUN_NAME, sourceRepetition: 1, control: false },
+    followUp: { sourceRun: SOURCE_RUN_NAME, sourceRepetition: 1, control: false },
   });
 
-  const result = await runSecondTouch(opts);
+  const result = await runFollowUp(opts);
 
   assert.equal(result.rowsWritten, 1);
   assert.equal(result.rowsSkipped, 1);
 });
 
-test("runSecondTouch_does_not_confuse_a_control_item_with_a_seeded_item_at_the_same_repetition_when_resuming", async () => {
+test("runFollowUp_does_not_confuse_a_control_item_with_a_seeded_item_at_the_same_repetition_when_resuming", async () => {
   const rows = [sourceRow({ treatmentId: "rails-default", repetition: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
   const sourceRunDir = writeSourceRun(rows);
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
   const opts = baseOpts(sourceRunDir, { spawner });
-  writeExistingSecondTouchRow(opts.runDir, {
+  writeExistingFollowUpRow(opts.runDir, {
     caseId: "ts-flag-parser",
     treatmentId: "rails-default",
     repetition: 1,
-    secondTouch: { sourceRun: SOURCE_RUN_NAME, sourceRepetition: null, control: true },
+    followUp: { sourceRun: SOURCE_RUN_NAME, sourceRepetition: null, control: true },
   });
 
-  const result = await runSecondTouch(opts);
+  const result = await runFollowUp(opts);
 
   assert.equal(result.rowsWritten, 1);
   assert.equal(result.rowsSkipped, 1);
@@ -263,36 +263,36 @@ function assertSucceededWithModelMismatchWarning(result: { status: number; stder
   assert.match(result.stderr, new RegExp(`${sourceModel}.*${requestedModel}|${requestedModel}.*${sourceModel}`, "s"));
 }
 
-test("runSecondTouch_warns_but_does_not_fail_when_model_differs_from_the_source_runs_provenance_model", async () => {
+test("runFollowUp_warns_but_does_not_fail_when_model_differs_from_the_source_runs_provenance_model", async () => {
   const rows = [sourceRow({ files: { "parse_flags.ts": MUTATED_FLAG_PARSER }, provenance: baseProvenance({ model: "anthropic/claude-old" }) })];
   const sourceRunDir = writeSourceRun(rows);
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
   const opts = baseOpts(sourceRunDir, { spawner, model: "anthropic/claude-new" });
 
-  const result = await runSecondTouch(opts);
+  const result = await runFollowUp(opts);
 
   assertSucceededWithModelMismatchWarning(result, "anthropic/claude-old", "anthropic/claude-new");
 });
 
-test("runSecondTouch_refuses_to_write_into_the_source_run_directory", async () => {
+test("runFollowUp_refuses_to_write_into_the_source_run_directory", async () => {
   const rows = [sourceRow({ files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
   const sourceRunDir = writeSourceRun(rows);
   const { spawner, calls } = recordingSpawner();
   const opts = baseOpts(sourceRunDir, { spawner, runDir: sourceRunDir });
 
-  const result = await runSecondTouch(opts);
+  const result = await runFollowUp(opts);
 
   assert.equal(result.status, 1);
   assert.equal(calls.length, 0);
 });
 
-test("runSecondTouch_reports_status_1_and_nothing_spawned_when_no_case_in_the_filter_has_an_extension", async () => {
+test("runFollowUp_reports_status_1_and_nothing_spawned_when_no_case_in_the_filter_has_an_extension", async () => {
   const rows = [sourceRow({ caseId: "ts-order-validator", files: {} })];
   const sourceRunDir = writeSourceRun(rows);
   const { spawner, calls } = recordingSpawner();
   const opts = baseOpts(sourceRunDir, { spawner, cases: ["ts-order-validator"] });
 
-  const result = await runSecondTouch(opts);
+  const result = await runFollowUp(opts);
 
   assert.equal(result.status, 1);
   assert.equal(calls.length, 0);

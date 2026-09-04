@@ -23,7 +23,7 @@ import {
 } from "./collect.ts";
 import type { CollectContext, EngineOps, ItemResult } from "./collect.ts";
 
-export interface SecondTouchOpts {
+export interface FollowUpOpts {
   repoRoot: string;
   runDir: string;
   sourceRunDir: string;
@@ -40,18 +40,18 @@ export interface SecondTouchOpts {
   parallel?: number;
 }
 
-export interface SecondTouchResult {
+export interface FollowUpResult {
   status: number;
   rowsWritten: number;
   rowsSkipped: number;
   stderr: string;
 }
 
-interface SecondTouchContext extends CollectContext {
+interface FollowUpContext extends CollectContext {
   sourceRun: string;
 }
 
-interface SecondTouchItem {
+interface FollowUpItem {
   kase: CaseManifest;
   treatment: TreatmentManifest;
   control: boolean;
@@ -87,7 +87,7 @@ function extensionCasesById(cases: CaseManifest[]): Map<string, CaseManifest> {
   return byId;
 }
 
-function loadInputs(opts: SecondTouchOpts, corpusDir: string, treatmentsDir: string): LoadedInputs | { error: string } {
+function loadInputs(opts: FollowUpOpts, corpusDir: string, treatmentsDir: string): LoadedInputs | { error: string } {
   const cases = loadCases(corpusDir, opts.cases);
   if ("error" in cases) return cases;
 
@@ -106,7 +106,7 @@ function loadInputs(opts: SecondTouchOpts, corpusDir: string, treatmentsDir: str
 function modelMismatchWarning(sourceRows: RawRow[], model: string): string | undefined {
   const sourceModel = sourceRows[0]?.provenance.model;
   if (sourceModel === undefined || sourceModel === model) return undefined;
-  return `--model ${model} differs from the source run's provenance model ${sourceModel}; second-touch design assumes the same model returns for the next feature`;
+  return `--model ${model} differs from the source run's provenance model ${sourceModel}; follow-up design assumes the same model returns for the next feature`;
 }
 
 function relevantSourceRows(inputs: LoadedInputs): RawRow[] {
@@ -128,8 +128,8 @@ function isUntouchedRow(row: RawRow, kase: CaseManifest, seedEntryContent: (kase
   return row.files[kase.entry] === seedEntryContent(kase);
 }
 
-function buildSeededItems(rows: RawRow[], inputs: LoadedInputs, seedEntryContent: (kase: CaseManifest) => string): SecondTouchItem[] {
-  const items: SecondTouchItem[] = [];
+function buildSeededItems(rows: RawRow[], inputs: LoadedInputs, seedEntryContent: (kase: CaseManifest) => string): FollowUpItem[] {
+  const items: FollowUpItem[] = [];
   for (const row of rows) {
     if (row.agentError !== undefined) continue;
     if (row.timedOut) continue;
@@ -152,8 +152,8 @@ function treatmentIdsForCase(rows: RawRow[], caseId: string): Set<string> {
   return new Set(rows.filter((r) => r.caseId === caseId).map((r) => r.treatmentId));
 }
 
-function buildControlItems(rows: RawRow[], inputs: LoadedInputs): SecondTouchItem[] {
-  const items: SecondTouchItem[] = [];
+function buildControlItems(rows: RawRow[], inputs: LoadedInputs): FollowUpItem[] {
+  const items: FollowUpItem[] = [];
   for (const kase of inputs.casesWithExtension.values()) {
     for (const treatmentId of treatmentIdsForCase(rows, kase.id)) {
       items.push({ kase, treatment: inputs.treatmentsById.get(treatmentId)!, control: true, sourceRepetition: null });
@@ -162,7 +162,7 @@ function buildControlItems(rows: RawRow[], inputs: LoadedInputs): SecondTouchIte
   return items;
 }
 
-function buildSecondTouchItems(inputs: LoadedInputs, corpusDir: string): SecondTouchItem[] {
+function buildFollowUpItems(inputs: LoadedInputs, corpusDir: string): FollowUpItem[] {
   const relevantRows = relevantSourceRows(inputs);
   const seedEntryContent = seedEntryContentCache(corpusDir);
   return [...buildSeededItems(relevantRows, inputs, seedEntryContent), ...buildControlItems(relevantRows, inputs)];
@@ -172,16 +172,16 @@ function keyParts(caseId: string, treatmentId: string, control: boolean, sourceR
   return `${caseId}\0${treatmentId}\0${control ? "control" : `seed:${sourceRepetition}`}`;
 }
 
-function secondTouchItemKey(item: SecondTouchItem): string {
+function followUpItemKey(item: FollowUpItem): string {
   return keyParts(item.kase.id, item.treatment.id, item.control, item.sourceRepetition);
 }
 
-function secondTouchRowKey(row: RawRow): string {
-  const st = row.secondTouch;
+function followUpRowKey(row: RawRow): string {
+  const st = row.followUp;
   return keyParts(row.caseId, row.treatmentId, st?.control ?? false, st?.sourceRepetition ?? null);
 }
 
-function secondTouchTranscriptFilename(item: SecondTouchItem): string {
+function followUpTranscriptFilename(item: FollowUpItem): string {
   const suffix = item.control ? "control" : `seed-${item.sourceRepetition}`;
   return `${item.kase.id}.${item.treatment.id}.${suffix}.jsonl`;
 }
@@ -197,9 +197,9 @@ function materializeSourceFiles(workDir: string, files: Record<string, string>):
   return plan;
 }
 
-function buildSecondTouchRow(
-  ctx: SecondTouchContext,
-  item: SecondTouchItem,
+function buildFollowUpRow(
+  ctx: FollowUpContext,
+  item: FollowUpItem,
   packContent: string | undefined,
   outcome: RunOutcome,
   durationMs: number,
@@ -212,21 +212,21 @@ function buildSecondTouchRow(
     treatmentId: item.treatment.id,
     repetition: item.control ? 1 : item.sourceRepetition!,
     ...core,
-    secondTouch: { sourceRun: ctx.sourceRun, sourceRepetition: item.control ? null : item.sourceRepetition, control: item.control },
+    followUp: { sourceRun: ctx.sourceRun, sourceRepetition: item.control ? null : item.sourceRepetition, control: item.control },
   };
 }
 
-function secondTouchFailureMessage(item: SecondTouchItem, err: unknown): string {
+function followUpFailureMessage(item: FollowUpItem, err: unknown): string {
   const reason = err instanceof Error ? err.message : String(err);
   const label = item.control ? "control" : `seed:${item.sourceRepetition}`;
   return `${item.kase.id}/${item.treatment.id}/${label}: ${reason}`;
 }
 
-function workDirPlanFor(ctx: SecondTouchContext, item: SecondTouchItem, workDir: string): { to: string }[] {
+function workDirPlanFor(ctx: FollowUpContext, item: FollowUpItem, workDir: string): { to: string }[] {
   return item.control ? copyCaseFiles(ctx.corpusDir, item.kase, workDir) : materializeSourceFiles(workDir, item.sourceFiles!);
 }
 
-async function runSecondTouchItem(ctx: SecondTouchContext, item: SecondTouchItem): Promise<ItemResult> {
+async function runFollowUpItem(ctx: FollowUpContext, item: FollowUpItem): Promise<ItemResult> {
   const workDir = mkdtempSync(join(ctx.workRoot, "eval-work-"));
   const plan = workDirPlanFor(ctx, item, workDir);
   const packPath = packAbsolutePath(ctx.treatmentsDir, item.treatment);
@@ -237,23 +237,23 @@ async function runSecondTouchItem(ctx: SecondTouchContext, item: SecondTouchItem
     const { outcome, durationMs } = await spawnForItem(ctx, item.kase.extension!.task, workDir, env);
     const snapshot = snapshotWorkDir(workDir, plan);
     const delivered = readDelivered(workDir);
-    const row = buildSecondTouchRow(ctx, item, packContent, outcome, durationMs, snapshot, delivered);
+    const row = buildFollowUpRow(ctx, item, packContent, outcome, durationMs, snapshot, delivered);
     return { row, stdoutJsonl: outcome.stdoutJsonl };
   } catch (err) {
-    return { failure: secondTouchFailureMessage(item, err) };
+    return { failure: followUpFailureMessage(item, err) };
   }
 }
 
-const SECOND_TOUCH_OPS: EngineOps<SecondTouchItem, SecondTouchContext> = {
-  keyOf: secondTouchItemKey,
-  run: runSecondTouchItem,
-  transcriptFilename: secondTouchTranscriptFilename,
+const FOLLOW_UP_OPS: EngineOps<FollowUpItem, FollowUpContext> = {
+  keyOf: followUpItemKey,
+  run: runFollowUpItem,
+  transcriptFilename: followUpTranscriptFilename,
 };
 
-function toSecondTouchResult(
+function toFollowUpResult(
   counts: { rowsWritten: number; rowsSkipped: number; failures: string[] },
   warnings: string[],
-): SecondTouchResult {
+): FollowUpResult {
   const failureLine = counts.failures.length > 0 ? `failures: ${counts.failures.join("; ")}` : "";
   return {
     status: counts.failures.length > 0 ? 1 : 0,
@@ -263,11 +263,11 @@ function toSecondTouchResult(
   };
 }
 
-export async function runSecondTouch(opts: SecondTouchOpts): Promise<SecondTouchResult> {
+export async function runFollowUp(opts: FollowUpOpts): Promise<FollowUpResult> {
   const parallelError = validateParallel(opts.parallel);
   if (parallelError !== undefined) return parallelError;
   if (resolve(opts.runDir) === resolve(opts.sourceRunDir)) {
-    return loadError("second-touch must write into a new run, not the source run");
+    return loadError("follow-up must write into a new run, not the source run");
   }
 
   const treatmentsDir = opts.treatmentsDir ?? join(import.meta.dirname, "treatments");
@@ -278,14 +278,14 @@ export async function runSecondTouch(opts: SecondTouchOpts): Promise<SecondTouch
 
   const mismatch = modelMismatchWarning(inputs.sourceRows, opts.model);
   const warnings = mismatch === undefined ? [] : [mismatch];
-  const items = buildSecondTouchItems(inputs, corpusDir);
+  const items = buildFollowUpItems(inputs, corpusDir);
 
   const rawPath = join(opts.runDir, "raw.jsonl");
-  const existingKeys = loadExistingKeys(rawPath, secondTouchRowKey);
+  const existingKeys = loadExistingKeys(rawPath, followUpRowKey);
   mkdirSync(join(opts.runDir, "transcripts"), { recursive: true });
 
-  const ctx: SecondTouchContext = { ...buildContext(opts, corpusDir, treatmentsDir), sourceRun: opts.sourceRun };
-  const counts = await runItemsConcurrently(ctx, opts.runDir, rawPath, items, existingKeys, SECOND_TOUCH_OPS);
+  const ctx: FollowUpContext = { ...buildContext(opts, corpusDir, treatmentsDir), sourceRun: opts.sourceRun };
+  const counts = await runItemsConcurrently(ctx, opts.runDir, rawPath, items, existingKeys, FOLLOW_UP_OPS);
 
-  return toSecondTouchResult(counts, warnings);
+  return toFollowUpResult(counts, warnings);
 }

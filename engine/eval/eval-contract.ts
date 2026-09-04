@@ -68,7 +68,7 @@ export interface Provenance {
   collectedAt: string;
 }
 
-export interface SecondTouchInfo {
+export interface FollowUpInfo {
   sourceRun: string;
   sourceRepetition: number | null;
   control: boolean;
@@ -95,5 +95,5 @@ export interface RawRow {
   shadowFirings?: Record<RuleName, number>;
   delivered?: { packHash: string | null; liveRules: string[]; shadowRules: string[] };
   agentError?: string;
-  secondTouch?: SecondTouchInfo;
+  followUp?: FollowUpInfo;
 }

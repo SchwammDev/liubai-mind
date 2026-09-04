@@ -9,26 +9,26 @@ import { runProbes } from "./probes.ts";
 import { sourceParses } from "./parse-check.ts";
 import { readRawJsonl, judgeRows, runScore, probeLang } from "./score.ts";
 
-export type SecondTouchVerdict = "extended" | "extension-failed" | "regressed" | "broken" | "untouched" | "errored" | "timed-out";
+export type FollowUpVerdict = "extended" | "extension-failed" | "regressed" | "broken" | "untouched" | "errored" | "timed-out";
 
-export interface SecondTouchJudgeResult {
-  verdict: SecondTouchVerdict;
+export interface FollowUpJudgeResult {
+  verdict: FollowUpVerdict;
   linesAdded: number;
   linesRemoved: number;
 }
 
-export interface JudgedSecondTouchRow {
+export interface JudgedFollowUpRow {
   row: RawRow;
-  judge: SecondTouchJudgeResult;
+  judge: FollowUpJudgeResult;
   stratum: string;
 }
 
-export interface SecondTouchSummaryRow {
+export interface FollowUpSummaryRow {
   touch: "second";
   treatmentId: string;
   caseId: string | null;
   stratum: string | null;
-  counts: Record<SecondTouchVerdict, number>;
+  counts: Record<FollowUpVerdict, number>;
   total: number;
   extensionSuccessRate: number | null;
   meanLinesAdded: number | null;
@@ -38,7 +38,7 @@ export interface SecondTouchSummaryRow {
   costAvailable: number;
 }
 
-const SECOND_TOUCH_VERDICTS: readonly SecondTouchVerdict[] = ["extended", "extension-failed", "regressed", "broken", "untouched", "errored", "timed-out"];
+const FOLLOW_UP_VERDICTS: readonly FollowUpVerdict[] = ["extended", "extension-failed", "regressed", "broken", "untouched", "errored", "timed-out"];
 const RULE_NAMES: readonly RuleName[] = Object.values(RULE);
 const SUMMARY_FILENAME = "summary.jsonl";
 const CONTROL_STRATUM = "control";
@@ -130,7 +130,7 @@ function probesPassFor(kase: CaseManifest, probes: Probe[], entrySource: string,
   return outcome.passed;
 }
 
-function classifySecondTouchVerdict(kase: CaseManifest, row: RawRow, seedFiles: Record<string, string>): SecondTouchVerdict {
+function classifyFollowUpVerdict(kase: CaseManifest, row: RawRow, seedFiles: Record<string, string>): FollowUpVerdict {
   if (row.timedOut === true) return "timed-out";
   if (row.agentError !== undefined) return "errored";
 
@@ -156,22 +156,22 @@ function indexSourceRows(sourceRows: RawRow[]): Map<string, RawRow> {
 }
 
 function findSourceRow(sourceRowsByKey: Map<string, RawRow>, row: RawRow): RawRow {
-  const info = row.secondTouch;
+  const info = row.followUp;
   if (info === undefined || info.control || info.sourceRepetition === null) {
-    throw new Error(`second-touch-score: ${row.caseId}/${row.treatmentId}#${row.repetition} is not a seeded second-touch row`);
+    throw new Error(`follow-up-score: ${row.caseId}/${row.treatmentId}#${row.repetition} is not a seeded follow-up row`);
   }
   const found = sourceRowsByKey.get(sourceRowKey(row.caseId, row.treatmentId, info.sourceRepetition));
   if (found === undefined) {
-    throw new Error(`second-touch-score: source row not found for ${row.caseId}/${row.treatmentId}#${info.sourceRepetition}`);
+    throw new Error(`follow-up-score: source row not found for ${row.caseId}/${row.treatmentId}#${info.sourceRepetition}`);
   }
   return found;
 }
 
 function seedFilesFor(row: RawRow, kase: CaseManifest, corpusDir: string, sourceRowsByKey: Map<string, RawRow>): Record<string, string> {
-  if (row.secondTouch === undefined) {
-    throw new Error(`second-touch-score: ${row.caseId}/${row.treatmentId}#${row.repetition} has no secondTouch info`);
+  if (row.followUp === undefined) {
+    throw new Error(`follow-up-score: ${row.caseId}/${row.treatmentId}#${row.repetition} has no followUp info`);
   }
-  return row.secondTouch.control ? pristineFiles(corpusDir, kase) : findSourceRow(sourceRowsByKey, row).files;
+  return row.followUp.control ? pristineFiles(corpusDir, kase) : findSourceRow(sourceRowsByKey, row).files;
 }
 
 async function sourceVerdictOf(
@@ -193,36 +193,36 @@ async function sourceVerdictOf(
 
 function caseFor(cases: CaseManifest[], caseId: string): CaseManifest {
   const kase = cases.find((c) => c.id === caseId);
-  if (kase === undefined) throw new Error(`second-touch-score: unknown case id in raw row: ${caseId}`);
-  if (kase.extension === undefined) throw new Error(`second-touch-score: case has no extension.json: ${caseId}`);
+  if (kase === undefined) throw new Error(`follow-up-score: unknown case id in raw row: ${caseId}`);
+  if (kase.extension === undefined) throw new Error(`follow-up-score: case has no extension.json: ${caseId}`);
   return kase;
 }
 
-export async function judgeSecondTouchRows(rows: RawRow[], sourceRows: RawRow[], corpusDir: string): Promise<JudgedSecondTouchRow[]> {
+export async function judgeFollowUpRows(rows: RawRow[], sourceRows: RawRow[], corpusDir: string): Promise<JudgedFollowUpRow[]> {
   const cases = loadCases(corpusDir);
-  if ("error" in cases) throw new Error(`second-touch-score: failed to load corpus: ${cases.error}`);
+  if ("error" in cases) throw new Error(`follow-up-score: failed to load corpus: ${cases.error}`);
 
   const sourceRowsByKey = indexSourceRows(sourceRows);
   const sourceVerdictCache = new Map<string, Verdict>();
 
-  const judged: JudgedSecondTouchRow[] = [];
+  const judged: JudgedFollowUpRow[] = [];
   for (const row of rows) {
     const kase = caseFor(cases, row.caseId);
     const seedFiles = seedFilesFor(row, kase, corpusDir, sourceRowsByKey);
-    const verdict = classifySecondTouchVerdict(kase, row, seedFiles);
+    const verdict = classifyFollowUpVerdict(kase, row, seedFiles);
     const { linesAdded, linesRemoved } = sourceDiffCounts(seedFiles, row.files, kase.lang);
-    const stratum = row.secondTouch?.control ? CONTROL_STRATUM : await sourceVerdictOf(row, corpusDir, sourceRowsByKey, sourceVerdictCache);
+    const stratum = row.followUp?.control ? CONTROL_STRATUM : await sourceVerdictOf(row, corpusDir, sourceRowsByKey, sourceVerdictCache);
     judged.push({ row, judge: { verdict, linesAdded, linesRemoved }, stratum });
   }
   return judged;
 }
 
-function emptySecondTouchCounts(): Record<SecondTouchVerdict, number> {
-  return Object.fromEntries(SECOND_TOUCH_VERDICTS.map((v) => [v, 0])) as Record<SecondTouchVerdict, number>;
+function emptyFollowUpCounts(): Record<FollowUpVerdict, number> {
+  return Object.fromEntries(FOLLOW_UP_VERDICTS.map((v) => [v, 0])) as Record<FollowUpVerdict, number>;
 }
 
-interface SecondTouchAccumulator {
-  counts: Record<SecondTouchVerdict, number>;
+interface FollowUpAccumulator {
+  counts: Record<FollowUpVerdict, number>;
   total: number;
   linesAddedSum: number;
   linesRemovedSum: number;
@@ -231,8 +231,8 @@ interface SecondTouchAccumulator {
   costAvailable: number;
 }
 
-function newAccumulator(): SecondTouchAccumulator {
-  return { counts: emptySecondTouchCounts(), total: 0, linesAddedSum: 0, linesRemovedSum: 0, turnsSum: 0, railFiringsTotalSum: 0, costAvailable: 0 };
+function newAccumulator(): FollowUpAccumulator {
+  return { counts: emptyFollowUpCounts(), total: 0, linesAddedSum: 0, linesRemovedSum: 0, turnsSum: 0, railFiringsTotalSum: 0, costAvailable: 0 };
 }
 
 function railFiringsTotal(railFirings: Record<RuleName, number>): number {
@@ -243,7 +243,7 @@ function costFieldsPresent(row: RawRow): row is RawRow & { turns: number; railFi
   return row.turns !== undefined && row.railFirings !== undefined;
 }
 
-function addRow(acc: SecondTouchAccumulator, judged: JudgedSecondTouchRow): void {
+function addRow(acc: FollowUpAccumulator, judged: JudgedFollowUpRow): void {
   acc.counts[judged.judge.verdict] += 1;
   acc.total += 1;
   acc.linesAddedSum += judged.judge.linesAdded;
@@ -258,12 +258,12 @@ function meanOf(sum: number, count: number): number | null {
   return count === 0 ? null : sum / count;
 }
 
-function extensionSuccessRateOf(counts: Record<SecondTouchVerdict, number>, total: number): number | null {
+function extensionSuccessRateOf(counts: Record<FollowUpVerdict, number>, total: number): number | null {
   const denominator = total - counts.errored - counts["timed-out"];
   return denominator === 0 ? null : (counts.extended / denominator) * 100;
 }
 
-function finalizeRow(treatmentId: string, caseId: string | null, stratum: string | null, acc: SecondTouchAccumulator): SecondTouchSummaryRow {
+function finalizeRow(treatmentId: string, caseId: string | null, stratum: string | null, acc: FollowUpAccumulator): FollowUpSummaryRow {
   return {
     touch: "second",
     treatmentId,
@@ -280,7 +280,7 @@ function finalizeRow(treatmentId: string, caseId: string | null, stratum: string
   };
 }
 
-function getOrInit(map: Map<string, SecondTouchAccumulator>, key: string): SecondTouchAccumulator {
+function getOrInit(map: Map<string, FollowUpAccumulator>, key: string): FollowUpAccumulator {
   const existing = map.get(key);
   if (existing !== undefined) return existing;
   const created = newAccumulator();
@@ -288,10 +288,10 @@ function getOrInit(map: Map<string, SecondTouchAccumulator>, key: string): Secon
   return created;
 }
 
-export function aggregateSecondTouch(judged: JudgedSecondTouchRow[]): SecondTouchSummaryRow[] {
-  const overall = new Map<string, SecondTouchAccumulator>();
-  const stratumBuckets = new Map<string, SecondTouchAccumulator>();
-  const detail = new Map<string, SecondTouchAccumulator>();
+export function aggregateFollowUp(judged: JudgedFollowUpRow[]): FollowUpSummaryRow[] {
+  const overall = new Map<string, FollowUpAccumulator>();
+  const stratumBuckets = new Map<string, FollowUpAccumulator>();
+  const detail = new Map<string, FollowUpAccumulator>();
   const stratumMeta = new Map<string, { treatmentId: string; stratum: string }>();
   const detailMeta = new Map<string, { treatmentId: string; caseId: string }>();
 
@@ -330,16 +330,16 @@ function formatMean(value: number | null): string {
   return value === null ? "-" : value.toFixed(1);
 }
 
-function treatmentCell(row: SecondTouchSummaryRow): string {
+function treatmentCell(row: FollowUpSummaryRow): string {
   return row.stratum === null ? row.treatmentId : `${row.treatmentId} [${row.stratum}]`;
 }
 
-function markdownRow(row: SecondTouchSummaryRow): string {
+function markdownRow(row: FollowUpSummaryRow): string {
   const c = row.counts;
   return `| ${treatmentCell(row)} | ${row.total} | ${c.extended} | ${c["extension-failed"]} | ${c.regressed} | ${c.broken} | ${c.untouched} | ${c.errored} | ${c["timed-out"]} | ${formatPercent(row.extensionSuccessRate)} | ${formatMean(row.meanLinesAdded)} | ${formatMean(row.meanLinesRemoved)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanRailFiringsTotal)} |`;
 }
 
-export function formatSecondTouchMarkdown(summary: SecondTouchSummaryRow[]): string {
+export function formatFollowUpMarkdown(summary: FollowUpSummaryRow[]): string {
   const rollups = summary.filter((r) => r.caseId === null);
   const header =
     "| treatment | n | extended | extension-failed | regressed | broken | untouched | errored | timed-out | extension % | mean added | mean removed | mean turns | mean rails |";
@@ -347,48 +347,48 @@ export function formatSecondTouchMarkdown(summary: SecondTouchSummaryRow[]): str
   return [header, divider, ...rollups.map(markdownRow)].join("\n");
 }
 
-function writeSecondTouchSummaryJsonl(runDir: string, summary: SecondTouchSummaryRow[]): void {
+function writeFollowUpSummaryJsonl(runDir: string, summary: FollowUpSummaryRow[]): void {
   const content = summary.map((row) => JSON.stringify(row)).join("\n") + "\n";
   writeFileSync(join(runDir, SUMMARY_FILENAME), content);
 }
 
-export interface SecondTouchScoreOpts {
+export interface FollowUpScoreOpts {
   runDir: string;
   sourceRunDir: string;
   corpusDir: string;
 }
 
-export async function runSecondTouchScore(opts: SecondTouchScoreOpts): Promise<{ status: number; stdout: string }> {
+export async function runFollowUpScore(opts: FollowUpScoreOpts): Promise<{ status: number; stdout: string }> {
   const parsedRaw = readRawJsonl(opts.runDir);
   if ("error" in parsedRaw) return { status: 1, stdout: parsedRaw.error };
 
   const sourceParsed = readRawJsonl(opts.sourceRunDir);
   if ("error" in sourceParsed) return { status: 1, stdout: sourceParsed.error };
 
-  let judged: JudgedSecondTouchRow[];
+  let judged: JudgedFollowUpRow[];
   try {
-    judged = await judgeSecondTouchRows(parsedRaw.rows, sourceParsed.rows, opts.corpusDir);
+    judged = await judgeFollowUpRows(parsedRaw.rows, sourceParsed.rows, opts.corpusDir);
   } catch (err) {
     return { status: 1, stdout: err instanceof Error ? err.message : String(err) };
   }
 
-  const summary = aggregateSecondTouch(judged);
-  writeSecondTouchSummaryJsonl(opts.runDir, summary);
-  return { status: 0, stdout: formatSecondTouchMarkdown(summary) };
+  const summary = aggregateFollowUp(judged);
+  writeFollowUpSummaryJsonl(opts.runDir, summary);
+  return { status: 0, stdout: formatFollowUpMarkdown(summary) };
 }
 
 export type TouchKind = { kind: "first" } | { kind: "second"; sourceRun: string } | { error: string };
 
 export function touchKindOf(rows: RawRow[]): TouchKind {
-  const withSecondTouch = rows.filter((row) => row.secondTouch !== undefined);
-  if (withSecondTouch.length === 0) return { kind: "first" };
-  if (withSecondTouch.length !== rows.length) {
-    return { error: "score: run mixes first-touch and second-touch rows; run second-touch scoring or first-touch scoring, not both" };
+  const withFollowUp = rows.filter((row) => row.followUp !== undefined);
+  if (withFollowUp.length === 0) return { kind: "first" };
+  if (withFollowUp.length !== rows.length) {
+    return { error: "score: run mixes single-task and follow-up rows; run follow-up scoring or single-task scoring, not both" };
   }
 
-  const sourceRuns = new Set(withSecondTouch.map((row) => row.secondTouch!.sourceRun));
+  const sourceRuns = new Set(withFollowUp.map((row) => row.followUp!.sourceRun));
   if (sourceRuns.size > 1) {
-    return { error: `score: second-touch run mixes multiple source runs: ${[...sourceRuns].sort().join(", ")}` };
+    return { error: `score: follow-up run mixes multiple source runs: ${[...sourceRuns].sort().join(", ")}` };
   }
 
   return { kind: "second", sourceRun: [...sourceRuns][0]! };
@@ -406,8 +406,8 @@ export async function routeScore(opts: RunScoreOpts, runsRoot: string): Promise<
   if (kind.kind === "first") return runScore(opts);
 
   if (opts.compareRunDir !== undefined) {
-    return { status: 1, stdout: "second-touch-score: --compare is not supported for second-touch runs" };
+    return { status: 1, stdout: "follow-up-score: --compare is not supported for follow-up runs" };
   }
 
-  return runSecondTouchScore({ runDir: opts.runDir, corpusDir: opts.corpusDir, sourceRunDir: join(runsRoot, kind.sourceRun) });
+  return runFollowUpScore({ runDir: opts.runDir, corpusDir: opts.corpusDir, sourceRunDir: join(runsRoot, kind.sourceRun) });
 }
