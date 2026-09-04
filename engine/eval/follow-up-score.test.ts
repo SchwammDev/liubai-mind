@@ -7,15 +7,15 @@ import { join } from "node:path";
 import {
   computeDiffCounts,
   sourceDiffCounts,
-  judgeSecondTouchRows,
-  aggregateSecondTouch,
-  formatSecondTouchMarkdown,
+  judgeFollowUpRows,
+  aggregateFollowUp,
+  formatFollowUpMarkdown,
   touchKindOf,
   routeScore,
-  runSecondTouchScore,
-} from "./second-touch-score.ts";
-import type { JudgedSecondTouchRow, SecondTouchSummaryRow, SecondTouchVerdict } from "./second-touch-score.ts";
-import type { RawRow, Provenance, SecondTouchInfo } from "./eval-contract.ts";
+  runFollowUpScore,
+} from "./follow-up-score.ts";
+import type { JudgedFollowUpRow, FollowUpSummaryRow, FollowUpVerdict } from "./follow-up-score.ts";
+import type { RawRow, Provenance, FollowUpInfo } from "./eval-contract.ts";
 import { RULE } from "../contract.ts";
 import type { RuleName } from "../contract.ts";
 
@@ -42,7 +42,7 @@ function regressedSource(): string {
 const GARBAGE_SOURCE = ")))garbage(((";
 
 function extendableCorpusDir(caseId: string): string {
-  const corpusDir = tempDir("eval-second-touch-score-corpus-");
+  const corpusDir = tempDir("eval-follow-up-score-corpus-");
   const caseDir = join(corpusDir, caseId);
   mkdirSync(caseDir, { recursive: true });
   writeFileSync(
@@ -85,7 +85,7 @@ function shapeWideningObjectSource(): string {
 }
 
 function extendableObjectCorpusDir(caseId: string): string {
-  const corpusDir = tempDir("eval-second-touch-score-corpus-");
+  const corpusDir = tempDir("eval-follow-up-score-corpus-");
   const caseDir = join(corpusDir, caseId);
   mkdirSync(caseDir, { recursive: true });
   writeFileSync(
@@ -114,7 +114,7 @@ function extendableObjectCorpusDir(caseId: string): string {
 }
 
 function noExtensionCorpusDir(caseId: string): string {
-  const corpusDir = tempDir("eval-second-touch-score-corpus-");
+  const corpusDir = tempDir("eval-follow-up-score-corpus-");
   const caseDir = join(corpusDir, caseId);
   mkdirSync(caseDir, { recursive: true });
   writeFileSync(
@@ -160,11 +160,11 @@ function sourceRow(caseId: string, over: Partial<RawRow> = {}): RawRow {
   };
 }
 
-function secondTouchInfo(over: Partial<SecondTouchInfo> = {}): SecondTouchInfo {
+function followUpInfo(over: Partial<FollowUpInfo> = {}): FollowUpInfo {
   return { sourceRun: "source-run", sourceRepetition: 1, control: false, ...over };
 }
 
-function seededRow(caseId: string, over: Partial<RawRow> = {}, infoOver: Partial<SecondTouchInfo> = {}): RawRow {
+function seededRow(caseId: string, over: Partial<RawRow> = {}, infoOver: Partial<FollowUpInfo> = {}): RawRow {
   return {
     caseId,
     treatmentId: "rails-default",
@@ -174,7 +174,7 @@ function seededRow(caseId: string, over: Partial<RawRow> = {}, infoOver: Partial
     exitCode: 0,
     timedOut: false,
     durationMs: 500,
-    secondTouch: secondTouchInfo(infoOver),
+    followUp: followUpInfo(infoOver),
     ...over,
   };
 }
@@ -183,13 +183,13 @@ function controlRow(caseId: string, over: Partial<RawRow> = {}): RawRow {
   return seededRow(caseId, over, { sourceRepetition: null, control: true });
 }
 
-async function judgeOne(corpusDir: string, row: RawRow, sourceRows: RawRow[] = []): Promise<JudgedSecondTouchRow> {
-  const judged = await judgeSecondTouchRows([row], sourceRows, corpusDir);
+async function judgeOne(corpusDir: string, row: RawRow, sourceRows: RawRow[] = []): Promise<JudgedFollowUpRow> {
+  const judged = await judgeFollowUpRows([row], sourceRows, corpusDir);
   return judged[0]!;
 }
 
-test("judgeSecondTouchRows_classifies_an_agent_errored_row_as_errored_before_any_other_check", async () => {
-  const caseId = "second-touch-errored";
+test("judgeFollowUpRows_classifies_an_agent_errored_row_as_errored_before_any_other_check", async () => {
+  const caseId = "follow-up-errored";
   const corpusDir = extendableCorpusDir(caseId);
   const row = seededRow(caseId, { agentError: "boom", files: { "thing.ts": GARBAGE_SOURCE } });
 
@@ -198,8 +198,8 @@ test("judgeSecondTouchRows_classifies_an_agent_errored_row_as_errored_before_any
   assert.equal(judged.judge.verdict, "errored");
 });
 
-test("judgeSecondTouchRows_classifies_a_timed_out_row_as_timed_out_before_checking_the_entry_file", async () => {
-  const caseId = "second-touch-timed-out";
+test("judgeFollowUpRows_classifies_a_timed_out_row_as_timed_out_before_checking_the_entry_file", async () => {
+  const caseId = "follow-up-timed-out";
   const corpusDir = extendableCorpusDir(caseId);
   const row = seededRow(caseId, { timedOut: true, files: {} });
 
@@ -208,8 +208,8 @@ test("judgeSecondTouchRows_classifies_a_timed_out_row_as_timed_out_before_checki
   assert.equal(judged.judge.verdict, "timed-out");
 });
 
-test("judgeSecondTouchRows_prefers_timed_out_over_errored_when_both_apply", async () => {
-  const caseId = "second-touch-timed-out-and-errored";
+test("judgeFollowUpRows_prefers_timed_out_over_errored_when_both_apply", async () => {
+  const caseId = "follow-up-timed-out-and-errored";
   const corpusDir = extendableCorpusDir(caseId);
   const row = seededRow(caseId, { timedOut: true, agentError: "boom", files: { "thing.ts": GARBAGE_SOURCE } });
 
@@ -218,8 +218,8 @@ test("judgeSecondTouchRows_prefers_timed_out_over_errored_when_both_apply", asyn
   assert.equal(judged.judge.verdict, "timed-out");
 });
 
-test("judgeSecondTouchRows_classifies_a_missing_entry_file_as_broken", async () => {
-  const caseId = "second-touch-missing-entry";
+test("judgeFollowUpRows_classifies_a_missing_entry_file_as_broken", async () => {
+  const caseId = "follow-up-missing-entry";
   const corpusDir = extendableCorpusDir(caseId);
   const row = seededRow(caseId, { files: {} });
 
@@ -228,8 +228,8 @@ test("judgeSecondTouchRows_classifies_a_missing_entry_file_as_broken", async () 
   assert.equal(judged.judge.verdict, "broken");
 });
 
-test("judgeSecondTouchRows_classifies_an_unparseable_entry_file_as_broken", async () => {
-  const caseId = "second-touch-unparseable";
+test("judgeFollowUpRows_classifies_an_unparseable_entry_file_as_broken", async () => {
+  const caseId = "follow-up-unparseable";
   const corpusDir = extendableCorpusDir(caseId);
   const row = seededRow(caseId, { files: { "thing.ts": GARBAGE_SOURCE } });
 
@@ -238,8 +238,8 @@ test("judgeSecondTouchRows_classifies_an_unparseable_entry_file_as_broken", asyn
   assert.equal(judged.judge.verdict, "broken");
 });
 
-test("judgeSecondTouchRows_classifies_a_seeded_row_identical_to_the_source_files_as_untouched", async () => {
-  const caseId = "second-touch-untouched-seeded";
+test("judgeFollowUpRows_classifies_a_seeded_row_identical_to_the_source_files_as_untouched", async () => {
+  const caseId = "follow-up-untouched-seeded";
   const corpusDir = extendableCorpusDir(caseId);
   const source = sourceRow(caseId, { files: { "thing.ts": touchedButUnextendedSource() } });
   const row = seededRow(caseId, { files: { "thing.ts": touchedButUnextendedSource() } });
@@ -249,8 +249,8 @@ test("judgeSecondTouchRows_classifies_a_seeded_row_identical_to_the_source_files
   assert.equal(judged.judge.verdict, "untouched");
 });
 
-test("judgeSecondTouchRows_classifies_a_control_row_identical_to_the_pristine_case_files_as_untouched", async () => {
-  const caseId = "second-touch-untouched-control";
+test("judgeFollowUpRows_classifies_a_control_row_identical_to_the_pristine_case_files_as_untouched", async () => {
+  const caseId = "follow-up-untouched-control";
   const corpusDir = extendableCorpusDir(caseId);
   const row = controlRow(caseId, { files: { "thing.ts": identitySource() } });
 
@@ -259,8 +259,8 @@ test("judgeSecondTouchRows_classifies_a_control_row_identical_to_the_pristine_ca
   assert.equal(judged.judge.verdict, "untouched");
 });
 
-test("judgeSecondTouchRows_classifies_a_touched_row_that_fails_the_original_probes_as_regressed", async () => {
-  const caseId = "second-touch-regressed";
+test("judgeFollowUpRows_classifies_a_touched_row_that_fails_the_original_probes_as_regressed", async () => {
+  const caseId = "follow-up-regressed";
   const corpusDir = extendableCorpusDir(caseId);
   const row = seededRow(caseId, { files: { "thing.ts": regressedSource() } });
 
@@ -269,8 +269,8 @@ test("judgeSecondTouchRows_classifies_a_touched_row_that_fails_the_original_prob
   assert.equal(judged.judge.verdict, "regressed");
 });
 
-test("judgeSecondTouchRows_prefers_regressed_over_extension_failed_when_both_probe_sets_fail", async () => {
-  const caseId = "second-touch-precedence";
+test("judgeFollowUpRows_prefers_regressed_over_extension_failed_when_both_probe_sets_fail", async () => {
+  const caseId = "follow-up-precedence";
   const corpusDir = extendableCorpusDir(caseId);
   const row = seededRow(caseId, { files: { "thing.ts": regressedSource() } });
 
@@ -279,8 +279,8 @@ test("judgeSecondTouchRows_prefers_regressed_over_extension_failed_when_both_pro
   assert.equal(judged.judge.verdict, "regressed");
 });
 
-test("judgeSecondTouchRows_prefers_errored_over_broken_when_both_apply", async () => {
-  const caseId = "second-touch-errored-and-broken";
+test("judgeFollowUpRows_prefers_errored_over_broken_when_both_apply", async () => {
+  const caseId = "follow-up-errored-and-broken";
   const corpusDir = extendableCorpusDir(caseId);
   const row = seededRow(caseId, { agentError: "boom", files: { "thing.ts": GARBAGE_SOURCE } });
 
@@ -289,8 +289,8 @@ test("judgeSecondTouchRows_prefers_errored_over_broken_when_both_apply", async (
   assert.equal(judged.judge.verdict, "errored");
 });
 
-test("judgeSecondTouchRows_classifies_original_probes_green_and_extension_probes_red_as_extension_failed", async () => {
-  const caseId = "second-touch-extension-failed";
+test("judgeFollowUpRows_classifies_original_probes_green_and_extension_probes_red_as_extension_failed", async () => {
+  const caseId = "follow-up-extension-failed";
   const corpusDir = extendableCorpusDir(caseId);
   const row = seededRow(caseId, { files: { "thing.ts": touchedButUnextendedSource() } });
 
@@ -299,8 +299,8 @@ test("judgeSecondTouchRows_classifies_original_probes_green_and_extension_probes
   assert.equal(judged.judge.verdict, "extension-failed");
 });
 
-test("judgeSecondTouchRows_classifies_both_probe_sets_green_as_extended", async () => {
-  const caseId = "second-touch-extended";
+test("judgeFollowUpRows_classifies_both_probe_sets_green_as_extended", async () => {
+  const caseId = "follow-up-extended";
   const corpusDir = extendableCorpusDir(caseId);
   const row = seededRow(caseId, { files: { "thing.ts": extendedSource() } });
 
@@ -309,8 +309,8 @@ test("judgeSecondTouchRows_classifies_both_probe_sets_green_as_extended", async 
   assert.equal(judged.judge.verdict, "extended");
 });
 
-test("judgeSecondTouchRows_classifies_a_solution_that_widens_the_returned_shape_as_extended_not_regressed", async () => {
-  const caseId = "second-touch-shape-widening";
+test("judgeFollowUpRows_classifies_a_solution_that_widens_the_returned_shape_as_extended_not_regressed", async () => {
+  const caseId = "follow-up-shape-widening";
   const corpusDir = extendableObjectCorpusDir(caseId);
   const row = seededRow(caseId, { files: { "thing.ts": shapeWideningObjectSource() } });
 
@@ -319,16 +319,16 @@ test("judgeSecondTouchRows_classifies_a_solution_that_widens_the_returned_shape_
   assert.equal(judged.judge.verdict, "extended");
 });
 
-test("judgeSecondTouchRows_throws_when_the_row_case_has_no_extension_spec", async () => {
-  const caseId = "second-touch-no-extension";
+test("judgeFollowUpRows_throws_when_the_row_case_has_no_extension_spec", async () => {
+  const caseId = "follow-up-no-extension";
   const corpusDir = noExtensionCorpusDir(caseId);
   const row = seededRow(caseId, { files: { "thing.ts": extendedSource() } });
 
-  await assert.rejects(() => judgeSecondTouchRows([row], [sourceRow(caseId)], corpusDir), /extension/);
+  await assert.rejects(() => judgeFollowUpRows([row], [sourceRow(caseId)], corpusDir), /extension/);
 });
 
-test("judgeSecondTouchRows_stratifies_a_seeded_row_by_its_source_rows_first_touch_verdict", async () => {
-  const caseId = "second-touch-stratify-bar-missed";
+test("judgeFollowUpRows_stratifies_a_seeded_row_by_its_source_rows_single_task_verdict", async () => {
+  const caseId = "follow-up-stratify-bar-missed";
   const corpusDir = extendableCorpusDir(caseId);
   const source = sourceRow(caseId, { files: { "thing.ts": touchedButUnextendedSource() } });
   const row = seededRow(caseId, { files: { "thing.ts": extendedSource() } });
@@ -338,8 +338,8 @@ test("judgeSecondTouchRows_stratifies_a_seeded_row_by_its_source_rows_first_touc
   assert.equal(judged.stratum, "bar-missed");
 });
 
-test("judgeSecondTouchRows_stratifies_an_untouched_source_row_as_the_untouched_first_touch_verdict", async () => {
-  const caseId = "second-touch-stratify-untouched";
+test("judgeFollowUpRows_stratifies_an_untouched_source_row_as_the_untouched_single_task_verdict", async () => {
+  const caseId = "follow-up-stratify-untouched";
   const corpusDir = extendableCorpusDir(caseId);
   const source = sourceRow(caseId, { files: { "thing.ts": identitySource() } });
   const row = seededRow(caseId, { files: { "thing.ts": extendedSource() } });
@@ -349,8 +349,8 @@ test("judgeSecondTouchRows_stratifies_an_untouched_source_row_as_the_untouched_f
   assert.equal(judged.stratum, "untouched");
 });
 
-test("judgeSecondTouchRows_stratifies_every_control_row_into_the_control_stratum", async () => {
-  const caseId = "second-touch-stratify-control";
+test("judgeFollowUpRows_stratifies_every_control_row_into_the_control_stratum", async () => {
+  const caseId = "follow-up-stratify-control";
   const corpusDir = extendableCorpusDir(caseId);
   const row = controlRow(caseId, { files: { "thing.ts": extendedSource() } });
 
@@ -431,133 +431,133 @@ test("sourceDiffCounts_ignores_litter_present_in_the_seed_but_absent_from_final_
   assert.deepEqual(counts, { linesAdded: 0, linesRemoved: 0 });
 });
 
-function judgedSecondTouchRow(
+function judgedFollowUpRow(
   treatmentId: string,
   caseId: string,
-  verdict: SecondTouchVerdict,
+  verdict: FollowUpVerdict,
   stratum: string,
   over: Partial<RawRow> = {},
   diffCounts: { linesAdded: number; linesRemoved: number } = { linesAdded: 0, linesRemoved: 0 },
-): JudgedSecondTouchRow {
+): JudgedFollowUpRow {
   return { row: seededRow(caseId, { treatmentId, ...over }), judge: { verdict, ...diffCounts }, stratum };
 }
 
-function rollupOf(summary: SecondTouchSummaryRow[], treatmentId: string): SecondTouchSummaryRow {
+function rollupOf(summary: FollowUpSummaryRow[], treatmentId: string): FollowUpSummaryRow {
   return summary.find((r) => r.treatmentId === treatmentId && r.caseId === null && r.stratum === null)!;
 }
 
-function stratumRowOf(summary: SecondTouchSummaryRow[], treatmentId: string, stratum: string): SecondTouchSummaryRow {
+function stratumRowOf(summary: FollowUpSummaryRow[], treatmentId: string, stratum: string): FollowUpSummaryRow {
   return summary.find((r) => r.treatmentId === treatmentId && r.caseId === null && r.stratum === stratum)!;
 }
 
-function caseRowOf(summary: SecondTouchSummaryRow[], treatmentId: string, caseId: string): SecondTouchSummaryRow {
+function caseRowOf(summary: FollowUpSummaryRow[], treatmentId: string, caseId: string): FollowUpSummaryRow {
   return summary.find((r) => r.treatmentId === treatmentId && r.caseId === caseId)!;
 }
 
-function assertRollupCounts(summary: SecondTouchSummaryRow[], treatmentId: string, expected: { total: number; extended: number; regressed: number }): void {
+function assertRollupCounts(summary: FollowUpSummaryRow[], treatmentId: string, expected: { total: number; extended: number; regressed: number }): void {
   const rollup = rollupOf(summary, treatmentId);
   assert.equal(rollup.total, expected.total);
   assert.equal(rollup.counts.extended, expected.extended);
   assert.equal(rollup.counts.regressed, expected.regressed);
 }
 
-test("aggregateSecondTouch_rolls_up_verdict_counts_per_treatment_across_every_stratum", () => {
+test("aggregateFollowUp_rolls_up_verdict_counts_per_treatment_across_every_stratum", () => {
   const judged = [
-    judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix"),
-    judgedSecondTouchRow("rails-default", "case-b", "regressed", "gamed"),
-    judgedSecondTouchRow("control", "case-a", "untouched", "control"),
+    judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix"),
+    judgedFollowUpRow("rails-default", "case-b", "regressed", "gamed"),
+    judgedFollowUpRow("control", "case-a", "untouched", "control"),
   ];
 
-  const summary = aggregateSecondTouch(judged);
+  const summary = aggregateFollowUp(judged);
 
   assertRollupCounts(summary, "rails-default", { total: 2, extended: 1, regressed: 1 });
 });
 
-function assertStratumTotals(summary: SecondTouchSummaryRow[], treatmentId: string, expected: Record<string, number>): void {
+function assertStratumTotals(summary: FollowUpSummaryRow[], treatmentId: string, expected: Record<string, number>): void {
   const totals = Object.fromEntries(Object.keys(expected).map((stratum) => [stratum, stratumRowOf(summary, treatmentId, stratum).total]));
   assert.deepEqual(totals, expected);
 }
 
-test("aggregateSecondTouch_emits_a_row_per_treatment_and_source_verdict_stratum", () => {
+test("aggregateFollowUp_emits_a_row_per_treatment_and_source_verdict_stratum", () => {
   const judged = [
-    judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix"),
-    judgedSecondTouchRow("rails-default", "case-b", "regressed", "gamed"),
-    judgedSecondTouchRow("rails-default", "case-c", "untouched", "control"),
+    judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix"),
+    judgedFollowUpRow("rails-default", "case-b", "regressed", "gamed"),
+    judgedFollowUpRow("rails-default", "case-c", "untouched", "control"),
   ];
 
-  const summary = aggregateSecondTouch(judged);
+  const summary = aggregateFollowUp(judged);
 
   assertStratumTotals(summary, "rails-default", { "genuine-fix": 1, gamed: 1, control: 1 });
 });
 
-test("aggregateSecondTouch_keeps_the_control_stratum_separate_from_seeded_strata", () => {
+test("aggregateFollowUp_keeps_the_control_stratum_separate_from_seeded_strata", () => {
   const judged = [
-    judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix"),
-    judgedSecondTouchRow("rails-default", "case-a", "untouched", "control"),
+    judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix"),
+    judgedFollowUpRow("rails-default", "case-a", "untouched", "control"),
   ];
 
-  const summary = aggregateSecondTouch(judged);
+  const summary = aggregateFollowUp(judged);
 
   assert.equal(stratumRowOf(summary, "rails-default", "control").counts.untouched, 1);
   assert.equal(stratumRowOf(summary, "rails-default", "genuine-fix").counts.extended, 1);
 });
 
-function assertCaseDetailCounts(summary: SecondTouchSummaryRow[], treatmentId: string, caseId: string, expected: { total: number; extended: number; regressed: number }): void {
+function assertCaseDetailCounts(summary: FollowUpSummaryRow[], treatmentId: string, caseId: string, expected: { total: number; extended: number; regressed: number }): void {
   const detail = caseRowOf(summary, treatmentId, caseId);
   assert.equal(detail.total, expected.total);
   assert.equal(detail.counts.extended, expected.extended);
   assert.equal(detail.counts.regressed, expected.regressed);
 }
 
-test("aggregateSecondTouch_emits_a_case_detail_row_aggregated_across_strata", () => {
+test("aggregateFollowUp_emits_a_case_detail_row_aggregated_across_strata", () => {
   const judged = [
-    judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix"),
-    judgedSecondTouchRow("rails-default", "case-a", "regressed", "control"),
+    judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix"),
+    judgedFollowUpRow("rails-default", "case-a", "regressed", "control"),
   ];
 
-  const summary = aggregateSecondTouch(judged);
+  const summary = aggregateFollowUp(judged);
 
   assertCaseDetailCounts(summary, "rails-default", "case-a", { total: 2, extended: 1, regressed: 1 });
 });
 
-test("aggregateSecondTouch_computes_extension_success_rate_over_non_errored_rows", () => {
+test("aggregateFollowUp_computes_extension_success_rate_over_non_errored_rows", () => {
   const judged = [
-    judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix"),
-    judgedSecondTouchRow("rails-default", "case-b", "regressed", "genuine-fix"),
-    judgedSecondTouchRow("rails-default", "case-c", "errored", "genuine-fix"),
+    judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix"),
+    judgedFollowUpRow("rails-default", "case-b", "regressed", "genuine-fix"),
+    judgedFollowUpRow("rails-default", "case-c", "errored", "genuine-fix"),
   ];
 
-  const summary = aggregateSecondTouch(judged);
+  const summary = aggregateFollowUp(judged);
 
   assert.equal(rollupOf(summary, "rails-default").extensionSuccessRate, 50);
 });
 
-test("aggregateSecondTouch_excludes_timed_out_rows_from_the_extension_success_rate_denominator", () => {
+test("aggregateFollowUp_excludes_timed_out_rows_from_the_extension_success_rate_denominator", () => {
   const judged = [
-    judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix"),
-    judgedSecondTouchRow("rails-default", "case-b", "timed-out", "genuine-fix"),
+    judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix"),
+    judgedFollowUpRow("rails-default", "case-b", "timed-out", "genuine-fix"),
   ];
 
-  const summary = aggregateSecondTouch(judged);
+  const summary = aggregateFollowUp(judged);
 
   assert.equal(rollupOf(summary, "rails-default").extensionSuccessRate, 100);
 });
 
-test("aggregateSecondTouch_reports_null_extension_success_rate_when_every_row_errored", () => {
-  const judged = [judgedSecondTouchRow("rails-default", "case-a", "errored", "genuine-fix")];
+test("aggregateFollowUp_reports_null_extension_success_rate_when_every_row_errored", () => {
+  const judged = [judgedFollowUpRow("rails-default", "case-a", "errored", "genuine-fix")];
 
-  const summary = aggregateSecondTouch(judged);
+  const summary = aggregateFollowUp(judged);
 
   assert.equal(rollupOf(summary, "rails-default").extensionSuccessRate, null);
 });
 
-test("aggregateSecondTouch_means_lines_added_and_lines_removed_across_the_bucket", () => {
+test("aggregateFollowUp_means_lines_added_and_lines_removed_across_the_bucket", () => {
   const judged = [
-    judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix", {}, { linesAdded: 4, linesRemoved: 2 }),
-    judgedSecondTouchRow("rails-default", "case-b", "extended", "genuine-fix", {}, { linesAdded: 8, linesRemoved: 6 }),
+    judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix", {}, { linesAdded: 4, linesRemoved: 2 }),
+    judgedFollowUpRow("rails-default", "case-b", "extended", "genuine-fix", {}, { linesAdded: 8, linesRemoved: 6 }),
   ];
 
-  const summary = aggregateSecondTouch(judged);
+  const summary = aggregateFollowUp(judged);
 
   const rollup = rollupOf(summary, "rails-default");
   assert.equal(rollup.meanLinesAdded, 6);
@@ -569,76 +569,76 @@ function railFirings(over: Partial<Record<RuleName, number>> = {}): Record<RuleN
   return { ...base, ...over };
 }
 
-function assertCostSummary(summary: SecondTouchSummaryRow[], treatmentId: string, expected: { meanTurns: number | null; meanRailFiringsTotal: number | null; costAvailable: number }): void {
+function assertCostSummary(summary: FollowUpSummaryRow[], treatmentId: string, expected: { meanTurns: number | null; meanRailFiringsTotal: number | null; costAvailable: number }): void {
   const rollup = rollupOf(summary, treatmentId);
   assert.equal(rollup.meanTurns, expected.meanTurns);
   assert.equal(rollup.meanRailFiringsTotal, expected.meanRailFiringsTotal);
   assert.equal(rollup.costAvailable, expected.costAvailable);
 }
 
-test("aggregateSecondTouch_means_turns_and_total_rail_firings_only_over_rows_that_report_them", () => {
+test("aggregateFollowUp_means_turns_and_total_rail_firings_only_over_rows_that_report_them", () => {
   const judged = [
-    judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix", { turns: 4, railFirings: railFirings({ cc: 2, "discourage-comments": 1 }) }),
-    judgedSecondTouchRow("rails-default", "case-b", "extended", "genuine-fix", {}),
+    judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix", { turns: 4, railFirings: railFirings({ cc: 2, "discourage-comments": 1 }) }),
+    judgedFollowUpRow("rails-default", "case-b", "extended", "genuine-fix", {}),
   ];
 
-  const summary = aggregateSecondTouch(judged);
+  const summary = aggregateFollowUp(judged);
 
   assertCostSummary(summary, "rails-default", { meanTurns: 4, meanRailFiringsTotal: 3, costAvailable: 1 });
 });
 
-test("aggregateSecondTouch_reports_null_not_zero_for_cost_fields_when_no_row_in_the_bucket_reports_them", () => {
-  const judged = [judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix", {})];
+test("aggregateFollowUp_reports_null_not_zero_for_cost_fields_when_no_row_in_the_bucket_reports_them", () => {
+  const judged = [judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix", {})];
 
-  const summary = aggregateSecondTouch(judged);
+  const summary = aggregateFollowUp(judged);
 
   assertCostSummary(summary, "rails-default", { meanTurns: null, meanRailFiringsTotal: null, costAvailable: 0 });
 });
 
-test("aggregateSecondTouch_stamps_every_row_as_second_touch", () => {
-  const judged = [judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix")];
+test("aggregateFollowUp_stamps_every_row_as_follow_up", () => {
+  const judged = [judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix")];
 
-  const summary = aggregateSecondTouch(judged);
+  const summary = aggregateFollowUp(judged);
 
   assert.ok(summary.every((row) => row.touch === "second"));
 });
 
-test("formatSecondTouchMarkdown_renders_a_dash_for_null_cost_fields_never_a_zero", () => {
-  const judged = [judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix")];
-  const summary = aggregateSecondTouch(judged);
+test("formatFollowUpMarkdown_renders_a_dash_for_null_cost_fields_never_a_zero", () => {
+  const judged = [judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix")];
+  const summary = aggregateFollowUp(judged);
 
-  const table = formatSecondTouchMarkdown(summary);
+  const table = formatFollowUpMarkdown(summary);
 
   assert.match(table, /\| rails-default \| 1 \| 1 \| 0 \| 0 \| 0 \| 0 \| 0 \| 0 \| 100\.0% \| 0\.0 \| 0\.0 \| - \| - \|/);
 });
 
-test("formatSecondTouchMarkdown_names_timed_out_as_its_own_column", () => {
+test("formatFollowUpMarkdown_names_timed_out_as_its_own_column", () => {
   const judged = [
-    judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix"),
-    judgedSecondTouchRow("rails-default", "case-b", "timed-out", "genuine-fix"),
+    judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix"),
+    judgedFollowUpRow("rails-default", "case-b", "timed-out", "genuine-fix"),
   ];
-  const summary = aggregateSecondTouch(judged);
+  const summary = aggregateFollowUp(judged);
 
-  const table = formatSecondTouchMarkdown(summary);
+  const table = formatFollowUpMarkdown(summary);
 
   assert.match(table, /\| timed-out \|/);
   assert.match(table, /\| rails-default \| 2 \| 1 \| 0 \| 0 \| 0 \| 0 \| 0 \| 1 \| 100\.0% \|/);
 });
 
-test("formatSecondTouchMarkdown_includes_stratum_rollups_suffixed_with_the_stratum_name", () => {
-  const judged = [judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix")];
-  const summary = aggregateSecondTouch(judged);
+test("formatFollowUpMarkdown_includes_stratum_rollups_suffixed_with_the_stratum_name", () => {
+  const judged = [judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix")];
+  const summary = aggregateFollowUp(judged);
 
-  const table = formatSecondTouchMarkdown(summary);
+  const table = formatFollowUpMarkdown(summary);
 
   assert.match(table, /\| rails-default \[genuine-fix\] \|/);
 });
 
-test("formatSecondTouchMarkdown_excludes_per_case_detail_rows", () => {
-  const judged = [judgedSecondTouchRow("rails-default", "case-a", "extended", "genuine-fix")];
-  const summary = aggregateSecondTouch(judged);
+test("formatFollowUpMarkdown_excludes_per_case_detail_rows", () => {
+  const judged = [judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix")];
+  const summary = aggregateFollowUp(judged);
 
-  const table = formatSecondTouchMarkdown(summary);
+  const table = formatFollowUpMarkdown(summary);
 
   assert.equal(table.split("\n").length, 4);
 });
@@ -647,25 +647,25 @@ function writeRawJsonl(dir: string, rows: RawRow[]): void {
   writeFileSync(join(dir, "raw.jsonl"), rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
 }
 
-test("touchKindOf_reports_first_touch_when_no_row_carries_secondTouch", () => {
+test("touchKindOf_reports_single_task_when_no_row_carries_followUp", () => {
   const kind = touchKindOf([sourceRow("case-a")]);
 
   assert.deepEqual(kind, { kind: "first" });
 });
 
-test("touchKindOf_reports_second_touch_and_the_shared_source_run_when_every_row_carries_secondTouch", () => {
+test("touchKindOf_reports_follow_up_and_the_shared_source_run_when_every_row_carries_followUp", () => {
   const kind = touchKindOf([seededRow("case-a"), controlRow("case-a")]);
 
   assert.deepEqual(kind, { kind: "second", sourceRun: "source-run" });
 });
 
-test("touchKindOf_errors_when_a_run_mixes_first_touch_and_second_touch_rows", () => {
+test("touchKindOf_errors_when_a_run_mixes_single_task_and_follow_up_rows", () => {
   const kind = touchKindOf([sourceRow("case-a"), seededRow("case-a")]);
 
   assert.ok("error" in kind);
 });
 
-test("touchKindOf_errors_when_second_touch_rows_reference_more_than_one_source_run", () => {
+test("touchKindOf_errors_when_follow_up_rows_reference_more_than_one_source_run", () => {
   const kind = touchKindOf([seededRow("case-a", {}, { sourceRun: "run-x" }), seededRow("case-a", {}, { sourceRun: "run-y" })]);
 
   assert.ok("error" in kind);
@@ -677,27 +677,27 @@ function writeSourceRun(runsRoot: string, name: string, rows: RawRow[]): void {
   writeRawJsonl(dir, rows);
 }
 
-function assertScoredAsFirstTouch(result: { status: number; stdout: string }, runDir: string): void {
+function assertScoredAsSingleTask(result: { status: number; stdout: string }, runDir: string): void {
   assert.equal(result.status, 0);
   assert.match(result.stdout, /\| treatment \|/);
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 }
 
-test("routeScore_routes_a_first_touch_run_to_runScore_unchanged", async () => {
+test("routeScore_routes_a_single_task_run_to_runScore_unchanged", async () => {
   const runsRoot = tempDir("eval-score-router-runs-");
   const runDir = join(runsRoot, "target");
   mkdirSync(runDir, { recursive: true });
-  const corpusDir = extendableCorpusDir("second-touch-router-case");
-  writeRawJsonl(runDir, [sourceRow("second-touch-router-case", { files: { "thing.ts": extendedSource() } })]);
+  const corpusDir = extendableCorpusDir("follow-up-router-case");
+  writeRawJsonl(runDir, [sourceRow("follow-up-router-case", { files: { "thing.ts": extendedSource() } })]);
 
   const result = await routeScore({ runDir, corpusDir, repoRoot: join(import.meta.dirname, "..", "..") }, runsRoot);
 
-  assertScoredAsFirstTouch(result, runDir);
+  assertScoredAsSingleTask(result, runDir);
 });
 
-test("routeScore_routes_a_second_touch_run_to_second_touch_scoring", async () => {
+test("routeScore_routes_a_follow_up_run_to_follow_up_scoring", async () => {
   const runsRoot = tempDir("eval-score-router-runs-");
-  const caseId = "second-touch-router-second";
+  const caseId = "follow-up-router-second";
   const corpusDir = extendableCorpusDir(caseId);
   writeSourceRun(runsRoot, "source-run", [sourceRow(caseId)]);
   const runDir = join(runsRoot, "target");
@@ -711,9 +711,9 @@ test("routeScore_routes_a_second_touch_run_to_second_touch_scoring", async () =>
   assert.ok(summary.includes('"touch":"second"'));
 });
 
-test("routeScore_fails_a_run_that_mixes_first_touch_and_second_touch_rows", async () => {
+test("routeScore_fails_a_run_that_mixes_single_task_and_follow_up_rows", async () => {
   const runsRoot = tempDir("eval-score-router-runs-");
-  const caseId = "second-touch-router-mixed";
+  const caseId = "follow-up-router-mixed";
   const corpusDir = extendableCorpusDir(caseId);
   const runDir = join(runsRoot, "target");
   mkdirSync(runDir, { recursive: true });
@@ -722,26 +722,26 @@ test("routeScore_fails_a_run_that_mixes_first_touch_and_second_touch_rows", asyn
   const result = await routeScore({ runDir, corpusDir, repoRoot: join(import.meta.dirname, "..", "..") }, runsRoot);
 
   assert.equal(result.status, 1);
-  assert.match(result.stdout, /mixes first-touch and second-touch/);
+  assert.match(result.stdout, /mixes single-task and follow-up/);
 });
 
 function assertSummaryHasBothStrata(result: { status: number }, runDir: string): void {
   assert.equal(result.status, 0);
   const summaryLines = readFileSync(join(runDir, "summary.jsonl"), "utf8").trim().split("\n");
-  const strata = summaryLines.map((line) => (JSON.parse(line) as SecondTouchSummaryRow).stratum);
+  const strata = summaryLines.map((line) => (JSON.parse(line) as FollowUpSummaryRow).stratum);
   assert.ok(strata.includes("control"));
   assert.ok(strata.includes("untouched"));
 }
 
-test("runSecondTouchScore_writes_a_summary_jsonl_beside_the_second_touch_raw_jsonl", async () => {
-  const caseId = "second-touch-pipeline";
+test("runFollowUpScore_writes_a_summary_jsonl_beside_the_follow_up_raw_jsonl", async () => {
+  const caseId = "follow-up-pipeline";
   const corpusDir = extendableCorpusDir(caseId);
-  const sourceRunDir = tempDir("eval-second-touch-score-source-");
+  const sourceRunDir = tempDir("eval-follow-up-score-source-");
   writeRawJsonl(sourceRunDir, [sourceRow(caseId)]);
-  const runDir = tempDir("eval-second-touch-score-run-");
+  const runDir = tempDir("eval-follow-up-score-run-");
   writeRawJsonl(runDir, [seededRow(caseId, { files: { "thing.ts": extendedSource() } }), controlRow(caseId, { files: { "thing.ts": identitySource() } })]);
 
-  const result = await runSecondTouchScore({ runDir, sourceRunDir, corpusDir });
+  const result = await runFollowUpScore({ runDir, sourceRunDir, corpusDir });
 
   assertSummaryHasBothStrata(result, runDir);
 });

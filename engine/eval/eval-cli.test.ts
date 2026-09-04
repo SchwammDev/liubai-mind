@@ -6,7 +6,7 @@ import { parseCliArgs, runEval } from "./eval-cli.ts";
 import type { ParsedCli } from "./eval-cli.ts";
 import type { CollectOpts, CollectResult } from "./collect.ts";
 import type { runScore } from "./score.ts";
-import type { SecondTouchOpts, SecondTouchResult } from "./second-touch.ts";
+import type { FollowUpOpts, FollowUpResult } from "./follow-up.ts";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 
@@ -211,13 +211,13 @@ test("runEval_wraps_a_thrown_dependency_error_into_a_clean_status_one_failure", 
   assert.match(result.stderr, /ENOENT/);
 });
 
-function secondTouchArgv(...extra: string[]): string[] {
-  return ["second-touch", "--run", "extended", "--source-run", "baseline", "--model", "anthropic/claude-test", ...extra];
+function followUpArgv(...extra: string[]): string[] {
+  return ["follow-up", "--run", "extended", "--source-run", "baseline", "--model", "anthropic/claude-test", ...extra];
 }
 
-function assertParsedSecondTouch(parsed: ParsedCli, over: Partial<Extract<ParsedCli, { cmd: "second-touch" }>>): void {
+function assertParsedFollowUp(parsed: ParsedCli, over: Partial<Extract<ParsedCli, { cmd: "follow-up" }>>): void {
   assert.deepEqual(parsed, {
-    cmd: "second-touch",
+    cmd: "follow-up",
     run: "extended",
     sourceRun: "baseline",
     model: "anthropic/claude-test",
@@ -226,17 +226,17 @@ function assertParsedSecondTouch(parsed: ParsedCli, over: Partial<Extract<Parsed
   });
 }
 
-function recordingSecondTouch(result: SecondTouchResult): { secondTouch: (opts: SecondTouchOpts) => Promise<SecondTouchResult>; calls: SecondTouchOpts[] } {
-  const calls: SecondTouchOpts[] = [];
-  const secondTouch = async (opts: SecondTouchOpts): Promise<SecondTouchResult> => {
+function recordingFollowUp(result: FollowUpResult): { followUp: (opts: FollowUpOpts) => Promise<FollowUpResult>; calls: FollowUpOpts[] } {
+  const calls: FollowUpOpts[] = [];
+  const followUp = async (opts: FollowUpOpts): Promise<FollowUpResult> => {
     calls.push(opts);
     return result;
   };
-  return { secondTouch, calls };
+  return { followUp, calls };
 }
 
-test("parseCliArgs_parses_a_full_second_touch_invocation", () => {
-  const argv = secondTouchArgv(
+test("parseCliArgs_parses_a_full_follow_up_invocation", () => {
+  const argv = followUpArgv(
     "--parallel",
     "3",
     "--timeout-ms",
@@ -248,7 +248,7 @@ test("parseCliArgs_parses_a_full_second_touch_invocation", () => {
 
   const parsed = parseCliArgs(argv);
 
-  assertParsedSecondTouch(parsed, {
+  assertParsedFollowUp(parsed, {
     parallel: 3,
     timeoutMs: 60000,
     cases: ["ts-flag-parser", "ts-order-fulfillment"],
@@ -256,49 +256,49 @@ test("parseCliArgs_parses_a_full_second_touch_invocation", () => {
   });
 });
 
-test("parseCliArgs_defaults_second_touch_parallel_to_one_when_omitted", () => {
-  const parsed = parseCliArgs(secondTouchArgv());
+test("parseCliArgs_defaults_follow_up_parallel_to_one_when_omitted", () => {
+  const parsed = parseCliArgs(followUpArgv());
 
-  assertParsedSecondTouch(parsed, {});
+  assertParsedFollowUp(parsed, {});
 });
 
-test("parseCliArgs_reports_error_when_second_touch_is_missing_run", () => {
-  const parsed = parseCliArgs(["second-touch", "--source-run", "baseline", "--model", "anthropic/claude-test"]);
+test("parseCliArgs_reports_error_when_follow_up_is_missing_run", () => {
+  const parsed = parseCliArgs(["follow-up", "--source-run", "baseline", "--model", "anthropic/claude-test"]);
 
   assert.ok("error" in parsed);
 });
 
-test("parseCliArgs_reports_error_when_second_touch_is_missing_source_run", () => {
-  const parsed = parseCliArgs(["second-touch", "--run", "extended", "--model", "anthropic/claude-test"]);
+test("parseCliArgs_reports_error_when_follow_up_is_missing_source_run", () => {
+  const parsed = parseCliArgs(["follow-up", "--run", "extended", "--model", "anthropic/claude-test"]);
 
   assert.ok("error" in parsed);
 });
 
-test("parseCliArgs_reports_error_when_second_touch_is_missing_model", () => {
-  const parsed = parseCliArgs(["second-touch", "--run", "extended", "--source-run", "baseline"]);
+test("parseCliArgs_reports_error_when_follow_up_is_missing_model", () => {
+  const parsed = parseCliArgs(["follow-up", "--run", "extended", "--source-run", "baseline"]);
 
   assert.ok("error" in parsed);
 });
 
-function assertSecondTouchRunAndSourceRunResolved(calls: SecondTouchOpts[]): void {
+function assertFollowUpRunAndSourceRunResolved(calls: FollowUpOpts[]): void {
   assert.equal(calls[0]?.runDir, join(REPO_ROOT, "engine", "eval", "runs", "extended"));
   assert.equal(calls[0]?.sourceRunDir, join(REPO_ROOT, "engine", "eval", "runs", "baseline"));
   assert.equal(calls[0]?.sourceRun, "baseline");
 }
 
-test("runEval_routes_second_touch_to_the_dependency_with_resolved_run_and_source_run_dirs", async () => {
-  const { secondTouch, calls } = recordingSecondTouch({ status: 0, rowsWritten: 2, rowsSkipped: 0, stderr: "" });
+test("runEval_routes_follow_up_to_the_dependency_with_resolved_run_and_source_run_dirs", async () => {
+  const { followUp, calls } = recordingFollowUp({ status: 0, rowsWritten: 2, rowsSkipped: 0, stderr: "" });
 
-  const result = await runEval(["second-touch", "--run", "extended", "--source-run", "baseline", "--model", "anthropic/claude-test"], { secondTouch });
+  const result = await runEval(["follow-up", "--run", "extended", "--source-run", "baseline", "--model", "anthropic/claude-test"], { followUp });
 
-  assertSecondTouchRunAndSourceRunResolved(calls);
+  assertFollowUpRunAndSourceRunResolved(calls);
   assert.equal(result.stdout, "rows written: 2, skipped: 0");
 });
 
-test("runEval_propagates_second_touch_stderr_and_nonzero_status", async () => {
-  const { secondTouch } = recordingSecondTouch({ status: 1, rowsWritten: 0, rowsSkipped: 0, stderr: "boom" });
+test("runEval_propagates_follow_up_stderr_and_nonzero_status", async () => {
+  const { followUp } = recordingFollowUp({ status: 1, rowsWritten: 0, rowsSkipped: 0, stderr: "boom" });
 
-  const result = await runEval(["second-touch", "--run", "extended", "--source-run", "baseline", "--model", "anthropic/claude-test"], { secondTouch });
+  const result = await runEval(["follow-up", "--run", "extended", "--source-run", "baseline", "--model", "anthropic/claude-test"], { followUp });
 
   assert.equal(result.status, 1);
   assert.equal(result.stderr, "boom");

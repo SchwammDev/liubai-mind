@@ -2,8 +2,8 @@ import { join } from "node:path";
 
 import { runCollect } from "./collect.ts";
 import { runScore } from "./score.ts";
-import { runSecondTouch } from "./second-touch.ts";
-import { routeScore } from "./second-touch-score.ts";
+import { runFollowUp } from "./follow-up.ts";
+import { routeScore } from "./follow-up-score.ts";
 import type { Tier } from "./eval-contract.ts";
 
 export type ParsedCli =
@@ -19,7 +19,7 @@ export type ParsedCli =
       tier?: Tier;
     }
   | {
-      cmd: "second-touch";
+      cmd: "follow-up";
       run: string;
       sourceRun: string;
       model: string;
@@ -43,7 +43,7 @@ const DEFAULT_PARALLEL = 1;
 const USAGE = [
   "Usage:",
   "  liubai eval collect --run <name> --model <provider/id> [--repetitions N] [--parallel N] [--timeout-ms N] [--case id]... [--treatment id]... [--tier <easy|hard>]",
-  "  liubai eval second-touch --run <newRun> --source-run <existingRun> --model <provider/id> [--parallel N] [--timeout-ms N] [--case id]... [--treatment id]...",
+  "  liubai eval follow-up --run <newRun> --source-run <existingRun> --model <provider/id> [--parallel N] [--timeout-ms N] [--case id]... [--treatment id]...",
   "  liubai eval score --run <name> [--compare <otherRunName>]",
 ].join("\n");
 
@@ -62,7 +62,7 @@ interface CollectAccum {
   treatments: string[];
 }
 
-interface SecondTouchAccum {
+interface FollowUpAccum {
   run?: string;
   sourceRun?: string;
   model?: string;
@@ -104,7 +104,7 @@ function collectFlagHandlers(): FlagHandlers<CollectAccum> {
   };
 }
 
-function secondTouchFlagHandlers(): FlagHandlers<SecondTouchAccum> {
+function followUpFlagHandlers(): FlagHandlers<FollowUpAccum> {
   return {
     "--run": (a, v) => { a.run = v; },
     "--source-run": (a, v) => { a.sourceRun = v; },
@@ -184,7 +184,7 @@ function parseCollectArgs(args: string[]): ParsedCli {
   return buildCollectResult(accum);
 }
 
-function secondTouchOptionalFields(accum: SecondTouchAccum): Partial<Extract<ParsedCli, { cmd: "second-touch" }>> {
+function followUpOptionalFields(accum: FollowUpAccum): Partial<Extract<ParsedCli, { cmd: "follow-up" }>> {
   const timeoutMs = accum.timeoutMsRaw === undefined ? undefined : Number(accum.timeoutMsRaw);
 
   return {
@@ -194,29 +194,29 @@ function secondTouchOptionalFields(accum: SecondTouchAccum): Partial<Extract<Par
   };
 }
 
-function buildSecondTouchResult(accum: SecondTouchAccum): ParsedCli {
-  if (accum.run === undefined) return usageError("second-touch requires --run");
-  if (accum.sourceRun === undefined) return usageError("second-touch requires --source-run");
-  if (accum.model === undefined) return usageError("second-touch requires --model");
+function buildFollowUpResult(accum: FollowUpAccum): ParsedCli {
+  if (accum.run === undefined) return usageError("follow-up requires --run");
+  if (accum.sourceRun === undefined) return usageError("follow-up requires --source-run");
+  if (accum.model === undefined) return usageError("follow-up requires --model");
 
   const parallel = parseParallel(accum.parallelRaw);
   if ("error" in parallel) return usageError(parallel.error);
 
   return {
-    cmd: "second-touch",
+    cmd: "follow-up",
     run: accum.run,
     sourceRun: accum.sourceRun,
     model: accum.model,
     parallel: parallel.value,
-    ...secondTouchOptionalFields(accum),
+    ...followUpOptionalFields(accum),
   };
 }
 
-function parseSecondTouchArgs(args: string[]): ParsedCli {
-  const accum: SecondTouchAccum = { cases: [], treatments: [] };
-  const flagError = consumeFlags(args, secondTouchFlagHandlers(), accum);
+function parseFollowUpArgs(args: string[]): ParsedCli {
+  const accum: FollowUpAccum = { cases: [], treatments: [] };
+  const flagError = consumeFlags(args, followUpFlagHandlers(), accum);
   if (flagError !== undefined) return usageError(flagError.error);
-  return buildSecondTouchResult(accum);
+  return buildFollowUpResult(accum);
 }
 
 function parseScoreArgs(args: string[]): ParsedCli {
@@ -231,7 +231,7 @@ function parseScoreArgs(args: string[]): ParsedCli {
 export function parseCliArgs(argv: string[]): ParsedCli {
   const [sub, ...rest] = argv;
   if (sub === "collect") return parseCollectArgs(rest);
-  if (sub === "second-touch") return parseSecondTouchArgs(rest);
+  if (sub === "follow-up") return parseFollowUpArgs(rest);
   if (sub === "score") return parseScoreArgs(rest);
   return usageError(`unknown subcommand: ${sub ?? ""}`);
 }
@@ -265,13 +265,13 @@ async function runCollectCmd(
   };
 }
 
-async function runSecondTouchCmd(
-  parsed: Extract<ParsedCli, { cmd: "second-touch" }>,
-  secondTouch: typeof runSecondTouch,
+async function runFollowUpCmd(
+  parsed: Extract<ParsedCli, { cmd: "follow-up" }>,
+  followUp: typeof runFollowUp,
   repoRoot: string,
   runsRoot: string,
 ): Promise<EvalRunResult> {
-  const result = await secondTouch({
+  const result = await followUp({
     repoRoot,
     runDir: join(runsRoot, parsed.run),
     sourceRunDir: join(runsRoot, parsed.sourceRun),
@@ -312,7 +312,7 @@ function autoDetectScore(runsRoot: string): typeof runScore {
 
 export async function runEval(
   argv: string[],
-  deps?: { collect?: typeof runCollect; secondTouch?: typeof runSecondTouch; score?: typeof runScore },
+  deps?: { collect?: typeof runCollect; followUp?: typeof runFollowUp; score?: typeof runScore },
 ): Promise<EvalRunResult> {
   const parsed = parseCliArgs(argv);
   if ("error" in parsed) return { status: 1, stdout: "", stderr: `${parsed.error}\n` };
@@ -322,7 +322,7 @@ export async function runEval(
 
   try {
     if (parsed.cmd === "collect") return await runCollectCmd(parsed, deps?.collect ?? runCollect, repoRoot, runsRoot);
-    if (parsed.cmd === "second-touch") return await runSecondTouchCmd(parsed, deps?.secondTouch ?? runSecondTouch, repoRoot, runsRoot);
+    if (parsed.cmd === "follow-up") return await runFollowUpCmd(parsed, deps?.followUp ?? runFollowUp, repoRoot, runsRoot);
     return await runScoreCmd(parsed, deps?.score ?? autoDetectScore(runsRoot), repoRoot, runsRoot);
   } catch (err) {
     return { status: 1, stdout: "", stderr: `${formatError(err)}\n` };
