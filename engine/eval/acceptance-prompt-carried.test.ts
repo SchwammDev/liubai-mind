@@ -53,7 +53,7 @@ function collectOpts(over: Partial<CollectOpts> = {}): CollectOpts {
     repoRoot: REPO_ROOT,
     runDir: tempDir("prompt-carried-run-"),
     workRoot: tempDir("prompt-carried-work-"),
-    reps: 2,
+    repetitions: 2,
     model: "claude-test-model",
     cases: [CASE_ID],
     treatments: [TREATMENT_ID],
@@ -73,8 +73,8 @@ function recordingPiSpawner(): { spawner: PiSpawner; calls: RunSpec[] } {
   return { spawner, calls };
 }
 
-async function collectPromptCarriedArm(spawner: PiSpawner, reps: number): Promise<{ result: CollectResult; runDir: string }> {
-  const opts = collectOpts({ spawner, reps });
+async function collectPromptCarriedArm(spawner: PiSpawner, repetitions: number): Promise<{ result: CollectResult; runDir: string }> {
+  const opts = collectOpts({ spawner, repetitions });
   const result = await runCollect(opts);
   return { result, runDir: opts.runDir };
 }
@@ -93,22 +93,22 @@ function stripTheArmMessageFromTheRecordedPrompt(runDir: string): void {
   writeFileSync(rawPath, `${tampered.join("\n")}\n`);
 }
 
-function assertCollectSucceeded(result: CollectResult, reps: number): void {
+function assertCollectSucceeded(result: CollectResult, repetitions: number): void {
   assert.equal(result.status, 0);
-  assert.equal(result.rowsWritten, reps);
+  assert.equal(result.rowsWritten, repetitions);
 }
 
-function assertEveryRepOpensWithTheCaseTaskAndTheArmMessage(calls: RunSpec[], reps: number): void {
-  assert.equal(calls.length, reps);
+function assertEveryRepetitionOpensWithTheCaseTaskAndTheArmMessage(calls: RunSpec[], repetitions: number): void {
+  assert.equal(calls.length, repetitions);
   for (const spec of calls) {
     assert.ok(spec.task.includes(CASE_TASK), "opening prompt lost the case task");
     assert.ok(spec.task.includes(ARM_MESSAGE), "opening prompt does not carry the arm message");
   }
 }
 
-function assertTheLiveRailIsClosedForEveryRep(calls: RunSpec[]): void {
+function assertTheLiveRailIsClosedForEveryRepetition(calls: RunSpec[]): void {
   for (const spec of calls) {
-    assert.equal(spec.env.LIUBAI_RAILS_OFF, "1", "prompt-carried rep would also receive live rail nudges");
+    assert.equal(spec.env.LIUBAI_RAILS_OFF, "1", "prompt-carried repetition would also receive live rail nudges");
   }
 }
 
@@ -136,14 +136,14 @@ function assertNoSummaryWritten(runDir: string): void {
   assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
 }
 
-test("a_prompt_carried_arm_opens_every_rep_with_the_arm_message_and_scores_as_verified", async () => {
+test("a_prompt_carried_arm_opens_every_repetition_with_the_arm_message_and_scores_as_verified", async () => {
   const { spawner, calls } = recordingPiSpawner();
 
   const { result, runDir } = await collectPromptCarriedArm(spawner, 2);
 
   assertCollectSucceeded(result, 2);
-  assertEveryRepOpensWithTheCaseTaskAndTheArmMessage(calls, 2);
-  assertTheLiveRailIsClosedForEveryRep(calls);
+  assertEveryRepetitionOpensWithTheCaseTaskAndTheArmMessage(calls, 2);
+  assertTheLiveRailIsClosedForEveryRepetition(calls);
 
   const scored = await scoreRun(runDir);
 

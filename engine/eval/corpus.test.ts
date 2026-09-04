@@ -929,7 +929,7 @@ function referenceRawRow(kase: CaseManifest): RawRow {
   return {
     caseId: kase.id,
     treatmentId: "reference",
-    rep: 1,
+    repetition: 1,
     provenance: minimalReferenceProvenance(),
     files: kase.reference ?? {},
     exitCode: 0,

@@ -19,7 +19,7 @@ import type { WorkDirSnapshot } from "./snapshot.ts";
 export interface CollectOpts {
   repoRoot: string;
   runDir: string;
-  reps: number;
+  repetitions: number;
   model: string;
   timeoutMs?: number;
   cases?: string[];
@@ -44,7 +44,7 @@ export interface CollectResult {
 interface WorkItem {
   kase: CaseManifest;
   treatment: TreatmentManifest;
-  rep: number;
+  repetition: number;
 }
 
 export interface CollectContext {
@@ -251,7 +251,7 @@ function terminalAssistantError(lastAssistantEnd: AssistantEnd): string | undefi
 
 function partialRunExitError(exitCode: number): string | undefined {
   if (exitCode === 0) return undefined;
-  if (exitCode === EVAL_ABORT_EXIT_CODE) return `rail aborted the rep under eval (exit ${EVAL_ABORT_EXIT_CODE})`;
+  if (exitCode === EVAL_ABORT_EXIT_CODE) return `rail aborted the repetition under eval (exit ${EVAL_ABORT_EXIT_CODE})`;
   return `agent exited ${exitCode} after a partial run`;
 }
 
@@ -271,20 +271,20 @@ export function detectAgentError(stdoutJsonl: string, exitCode = 0): string | un
   return partialRunExitError(exitCode);
 }
 
-function rowKey(row: { caseId: string; treatmentId: string; rep: number }): string {
-  return `${row.caseId}\0${row.treatmentId}\0${row.rep}`;
+function rowKey(row: { caseId: string; treatmentId: string; repetition: number }): string {
+  return `${row.caseId}\0${row.treatmentId}\0${row.repetition}`;
 }
 
 function itemKey(item: WorkItem): string {
-  return rowKey({ caseId: item.kase.id, treatmentId: item.treatment.id, rep: item.rep });
+  return rowKey({ caseId: item.kase.id, treatmentId: item.treatment.id, repetition: item.repetition });
 }
 
-function buildWorkItems(cases: CaseManifest[], treatments: TreatmentManifest[], reps: number): WorkItem[] {
+function buildWorkItems(cases: CaseManifest[], treatments: TreatmentManifest[], repetitions: number): WorkItem[] {
   const items: WorkItem[] = [];
   for (const kase of cases) {
     for (const treatment of treatments) {
-      for (let rep = 1; rep <= reps; rep += 1) {
-        items.push({ kase, treatment, rep });
+      for (let repetition = 1; repetition <= repetitions; repetition += 1) {
+        items.push({ kase, treatment, repetition });
       }
     }
   }
@@ -350,7 +350,7 @@ export function snapshotWorkDir(workDir: string, plan: { to: string }[]): WorkDi
 
 function failureMessage(item: WorkItem, err: unknown): string {
   const reason = err instanceof Error ? err.message : String(err);
-  return `${item.kase.id}/${item.treatment.id}/${item.rep}: ${reason}`;
+  return `${item.kase.id}/${item.treatment.id}/${item.repetition}: ${reason}`;
 }
 
 export async function spawnForItem(
@@ -396,7 +396,7 @@ export function buildRawRowCore(
   shadowFirings?: Record<RuleName, number>,
   delivered?: RawRow["delivered"],
   sentTask?: string,
-): Omit<RawRow, "caseId" | "treatmentId" | "rep"> {
+): Omit<RawRow, "caseId" | "treatmentId" | "repetition"> {
   const packBytes = packContent === undefined ? null : packContent;
   const provenance = buildProvenance({
     treatmentId,
@@ -450,7 +450,7 @@ function buildRawRow(
   return {
     caseId: item.kase.id,
     treatmentId: item.treatment.id,
-    rep: item.rep,
+    repetition: item.repetition,
     ...buildRawRowCore(ctx, item.treatment.id, packContent, outcome, durationMs, snapshot, shadowFirings, delivered, sentTask),
   };
 }
@@ -477,7 +477,7 @@ async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult>
 }
 
 function workItemTranscriptFilename(item: WorkItem): string {
-  return `${item.kase.id}.${item.treatment.id}.${item.rep}.jsonl`;
+  return `${item.kase.id}.${item.treatment.id}.${item.repetition}.jsonl`;
 }
 
 export function loadError(message: string): CollectResult {
@@ -684,7 +684,7 @@ export async function runCollect(opts: CollectOpts): Promise<CollectResult> {
   mkdirSync(join(opts.runDir, "transcripts"), { recursive: true });
   writeFileSync(join(opts.runDir, "canary.json"), `${JSON.stringify(canary.results, null, 2)}\n`);
 
-  const items = buildWorkItems(tieredCases, treatments, opts.reps);
+  const items = buildWorkItems(tieredCases, treatments, opts.repetitions);
   const counts = await runWorkItems(ctx, opts.runDir, rawPath, items, existingKeys);
 
   return toCollectResult(counts);

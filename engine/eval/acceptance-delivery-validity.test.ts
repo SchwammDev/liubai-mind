@@ -28,7 +28,7 @@ function collectOpts(over: Partial<CollectOpts> = {}): CollectOpts {
     repoRoot: REPO_ROOT,
     runDir: tempDir("acceptance-run-"),
     workRoot: tempDir("acceptance-work-"),
-    reps: 1,
+    repetitions: 1,
     model: "claude-test-model",
     cases: [CASE_ID],
     treatments: [TREATMENT_ID],
@@ -62,7 +62,7 @@ function stampDeliveredPack(workDir: string, stampedPackHash: string | null): vo
   writeFileSync(join(liubaiDir, "delivered.json"), JSON.stringify(stamp));
 }
 
-function repThatDeliversThePack(): PiSpawner {
+function repetitionThatDeliversThePack(): PiSpawner {
   return async (spec) => {
     const packContent = spec.env.LIUBAI_PHRASING_PACK ?? "";
     stampDeliveredPack(spec.cwd, packHash(packContent));
@@ -71,7 +71,7 @@ function repThatDeliversThePack(): PiSpawner {
   };
 }
 
-function repThatDeliversAWrongPackHash(): PiSpawner {
+function repetitionThatDeliversAWrongPackHash(): PiSpawner {
   return async (spec) => {
     const packContent = spec.env.LIUBAI_PHRASING_PACK ?? "";
     stampDeliveredPack(spec.cwd, WRONG_PACK_HASH);
@@ -134,7 +134,7 @@ function assertCollectAbortedAtCanary(result: CollectResult, treatmentId: string
   assert.match(result.stderr, new RegExp(treatmentId));
 }
 
-function assertRepSpawnerNeverInvoked(calls: unknown[]): void {
+function assertRepetitionSpawnerNeverInvoked(calls: unknown[]): void {
   assert.equal(calls.length, 0);
 }
 
@@ -143,7 +143,7 @@ function assertNoRawRowWritten(runDir: string): void {
 }
 
 test("a_delivered_packed_arm_scores_with_a_verified_delivery_validity_block", async () => {
-  const { result, runDir } = await collectPackedArm(repThatDeliversThePack(), healthyProbeReporter());
+  const { result, runDir } = await collectPackedArm(repetitionThatDeliversThePack(), healthyProbeReporter());
   assertCollectSucceeded(result);
 
   const scored = await scoreRun(runDir);
@@ -155,7 +155,7 @@ test("a_delivered_packed_arm_scores_with_a_verified_delivery_validity_block", as
 });
 
 test("an_undelivered_packed_arm_is_refused_by_score", async () => {
-  const { result, runDir } = await collectPackedArm(repThatDeliversAWrongPackHash(), healthyProbeReporter());
+  const { result, runDir } = await collectPackedArm(repetitionThatDeliversAWrongPackHash(), healthyProbeReporter());
   assertCollectSucceeded(result);
 
   const scored = await scoreRun(runDir);
@@ -164,12 +164,12 @@ test("an_undelivered_packed_arm_is_refused_by_score", async () => {
   assertNoSummaryWritten(runDir);
 });
 
-test("broken_delivery_aborts_the_run_at_the_canary_before_any_rep_runs", async () => {
+test("broken_delivery_aborts_the_run_at_the_canary_before_any_repetition_runs", async () => {
   const { spawner, calls } = recordingPiSpawner();
 
   const { result, runDir } = await collectPackedArm(spawner, brokenDeliveryProbe());
 
   assertCollectAbortedAtCanary(result, TREATMENT_ID);
-  assertRepSpawnerNeverInvoked(calls);
+  assertRepetitionSpawnerNeverInvoked(calls);
   assertNoRawRowWritten(runDir);
 });

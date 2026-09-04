@@ -55,7 +55,7 @@ interface SecondTouchItem {
   kase: CaseManifest;
   treatment: TreatmentManifest;
   control: boolean;
-  sourceRep: number | null;
+  sourceRepetition: number | null;
   sourceFiles?: Record<string, string>;
 }
 
@@ -141,7 +141,7 @@ function buildSeededItems(rows: RawRow[], inputs: LoadedInputs, seedEntryContent
       kase,
       treatment: inputs.treatmentsById.get(row.treatmentId)!,
       control: false,
-      sourceRep: row.rep,
+      sourceRepetition: row.repetition,
       sourceFiles: row.files,
     });
   }
@@ -156,7 +156,7 @@ function buildControlItems(rows: RawRow[], inputs: LoadedInputs): SecondTouchIte
   const items: SecondTouchItem[] = [];
   for (const kase of inputs.casesWithExtension.values()) {
     for (const treatmentId of treatmentIdsForCase(rows, kase.id)) {
-      items.push({ kase, treatment: inputs.treatmentsById.get(treatmentId)!, control: true, sourceRep: null });
+      items.push({ kase, treatment: inputs.treatmentsById.get(treatmentId)!, control: true, sourceRepetition: null });
     }
   }
   return items;
@@ -168,21 +168,21 @@ function buildSecondTouchItems(inputs: LoadedInputs, corpusDir: string): SecondT
   return [...buildSeededItems(relevantRows, inputs, seedEntryContent), ...buildControlItems(relevantRows, inputs)];
 }
 
-function keyParts(caseId: string, treatmentId: string, control: boolean, sourceRep: number | null): string {
-  return `${caseId}\0${treatmentId}\0${control ? "control" : `seed:${sourceRep}`}`;
+function keyParts(caseId: string, treatmentId: string, control: boolean, sourceRepetition: number | null): string {
+  return `${caseId}\0${treatmentId}\0${control ? "control" : `seed:${sourceRepetition}`}`;
 }
 
 function secondTouchItemKey(item: SecondTouchItem): string {
-  return keyParts(item.kase.id, item.treatment.id, item.control, item.sourceRep);
+  return keyParts(item.kase.id, item.treatment.id, item.control, item.sourceRepetition);
 }
 
 function secondTouchRowKey(row: RawRow): string {
   const st = row.secondTouch;
-  return keyParts(row.caseId, row.treatmentId, st?.control ?? false, st?.sourceRep ?? null);
+  return keyParts(row.caseId, row.treatmentId, st?.control ?? false, st?.sourceRepetition ?? null);
 }
 
 function secondTouchTranscriptFilename(item: SecondTouchItem): string {
-  const suffix = item.control ? "control" : `seed-${item.sourceRep}`;
+  const suffix = item.control ? "control" : `seed-${item.sourceRepetition}`;
   return `${item.kase.id}.${item.treatment.id}.${suffix}.jsonl`;
 }
 
@@ -210,15 +210,15 @@ function buildSecondTouchRow(
   return {
     caseId: item.kase.id,
     treatmentId: item.treatment.id,
-    rep: item.control ? 1 : item.sourceRep!,
+    repetition: item.control ? 1 : item.sourceRepetition!,
     ...core,
-    secondTouch: { sourceRun: ctx.sourceRun, sourceRep: item.control ? null : item.sourceRep, control: item.control },
+    secondTouch: { sourceRun: ctx.sourceRun, sourceRepetition: item.control ? null : item.sourceRepetition, control: item.control },
   };
 }
 
 function secondTouchFailureMessage(item: SecondTouchItem, err: unknown): string {
   const reason = err instanceof Error ? err.message : String(err);
-  const label = item.control ? "control" : `seed:${item.sourceRep}`;
+  const label = item.control ? "control" : `seed:${item.sourceRepetition}`;
   return `${item.kase.id}/${item.treatment.id}/${label}: ${reason}`;
 }
 

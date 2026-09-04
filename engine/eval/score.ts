@@ -156,7 +156,7 @@ function assertNoDroppedReferences(row: RawRow, unresolved: string[]): void {
     const hit = droppedHitFor(candidate, dropped);
     if (hit === undefined) continue;
     throw new Error(
-      `score: ${row.treatmentId}/${row.caseId}#${row.rep} references ${candidate} which the snapshot dropped (${hit}); row cannot be judged`,
+      `score: ${row.treatmentId}/${row.caseId}#${row.repetition} references ${candidate} which the snapshot dropped (${hit}); row cannot be judged`,
     );
   }
 }
@@ -219,7 +219,7 @@ export interface ContaminationCheck {
 }
 
 function transcriptPathFor(runDir: string, row: RawRow): string {
-  return join(runDir, "transcripts", `${row.caseId}.${row.treatmentId}.${row.rep}.jsonl`);
+  return join(runDir, "transcripts", `${row.caseId}.${row.treatmentId}.${row.repetition}.jsonl`);
 }
 
 function readTranscriptIfPresent(path: string): string | undefined {
@@ -493,7 +493,7 @@ function formatMean(value: number | null): string {
   return value === null ? "-" : value.toFixed(1);
 }
 
-function formatNudgesPerRep(value: Record<RuleName, number> | null): string {
+function formatNudgesPerRepetition(value: Record<RuleName, number> | null): string {
   if (value === null) return "-";
   const total = Object.values(value).reduce((sum, count) => sum + count, 0);
   return total.toFixed(1);
@@ -505,13 +505,13 @@ function treatmentCell(row: SummaryRow): string {
 
 function markdownRow(row: SummaryRow): string {
   const c = row.counts;
-  return `| ${treatmentCell(row)} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["bar-missed"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${c["timed-out"]} | ${row.withCreatedFiles} | ${row.contaminated} | ${row.railConsults} | ${formatPercent(genuineRate(row))} | ${formatMeanDpReduction(row.meanDpReduction)} | ${formatMeanMs(row.meanDurationMs)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanTokensIn)} | ${formatMean(row.meanTokensOut)} | ${formatNudgesPerRep(row.meanRailFirings)} |`;
+  return `| ${treatmentCell(row)} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["bar-missed"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${c["timed-out"]} | ${row.withCreatedFiles} | ${row.contaminated} | ${row.railConsults} | ${formatPercent(genuineRate(row))} | ${formatMeanDpReduction(row.meanDpReduction)} | ${formatMeanMs(row.meanDurationMs)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanTokensIn)} | ${formatMean(row.meanTokensOut)} | ${formatNudgesPerRepetition(row.meanRailFirings)} |`;
 }
 
 export function formatMarkdown(summary: SummaryRow[]): string {
   const rollups = summary.filter((r) => r.caseId === null);
   const header =
-    "| treatment | n | genuine-fix | gamed | bar-missed | untouched | broken | behavior-broken | errored | timed-out | created-files | contaminated | rail-consults | genuine % | mean dp cut | mean ms | mean turns | tokens in | tokens out | nudges/rep |";
+    "| treatment | n | genuine-fix | gamed | bar-missed | untouched | broken | behavior-broken | errored | timed-out | created-files | contaminated | rail-consults | genuine % | mean dp cut | mean ms | mean turns | tokens in | tokens out | nudges/repetition |";
   const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
   return [header, divider, ...rollups.map(markdownRow)].join("\n");
 }
@@ -575,7 +575,7 @@ function writeSummaryJsonl(runDir: string, summary: SummaryRow[]): void {
 export interface JudgedJsonlRow {
   caseId: string;
   treatmentId: string;
-  rep: number;
+  repetition: number;
   verdict: Verdict;
   gamedReason?: GamedReason;
   contaminated: boolean;
@@ -596,7 +596,7 @@ export function toJudgedJsonlRow(judgedRow: JudgedRow): JudgedJsonlRow {
   return {
     caseId: row.caseId,
     treatmentId: row.treatmentId,
-    rep: row.rep,
+    repetition: row.repetition,
     verdict: judge.verdict,
     ...(judge.gamedReason !== undefined ? { gamedReason: judge.gamedReason } : {}),
     contaminated,
@@ -728,13 +728,13 @@ export interface DeliveryViolation {
   kind: DeliveryViolationKind;
   treatmentId: string;
   caseId?: string;
-  rep?: number;
+  repetition?: number;
   message: string;
 }
 
 export interface ArmDeliverySummary {
   treatmentId: string;
-  reps: number;
+  repetitions: number;
   liveFirings: number;
   shadowFirings: number;
   promptCarried: boolean;
@@ -749,7 +749,7 @@ const UNSTAMPED_DELIVERY_WARNING =
   "score: no row in this run carries a delivery stamp; delivery validity is unverifiable (the run predates stamping) — scoring proceeds without delivery checks";
 
 function rowLabel(row: RawRow): string {
-  return `${row.treatmentId}/${row.caseId}#${row.rep}`;
+  return `${row.treatmentId}/${row.caseId}#${row.repetition}`;
 }
 
 function notDeliveredViolations(rows: RawRow[]): DeliveryViolation[] {
@@ -759,7 +759,7 @@ function notDeliveredViolations(rows: RawRow[]): DeliveryViolation[] {
       kind: "not-delivered",
       treatmentId: row.treatmentId,
       caseId: row.caseId,
-      rep: row.rep,
+      repetition: row.repetition,
       message: `${rowLabel(row)}: treatment not delivered — claimed pack ${row.provenance.phrasingPackHash ?? "none"}, delivered ${row.delivered!.packHash ?? "none"}`,
     }));
 }
@@ -775,8 +775,8 @@ function missingStampViolations(rows: RawRow[], treatmentById: Map<string, Treat
       kind: "missing-stamp",
       treatmentId: row.treatmentId,
       caseId: row.caseId,
-      rep: row.rep,
-      message: `${rowLabel(row)}: no delivery stamp while other rows in this run carry one — rails likely never loaded for this rep`,
+      repetition: row.repetition,
+      message: `${rowLabel(row)}: no delivery stamp while other rows in this run carry one — rails likely never loaded for this repetition`,
     }));
 }
 
@@ -794,7 +794,7 @@ function expectedPromptMessage(treatmentsDir: string, treatment: TreatmentManife
 }
 
 function promptNotCarriedViolation(row: RawRow, message: string): DeliveryViolation {
-  return { kind: "prompt-not-carried", treatmentId: row.treatmentId, caseId: row.caseId, rep: row.rep, message };
+  return { kind: "prompt-not-carried", treatmentId: row.treatmentId, caseId: row.caseId, repetition: row.repetition, message };
 }
 
 function promptCarriedViolations(
@@ -859,10 +859,10 @@ function firingFloorViolation(
   kind: Extract<DeliveryViolationKind, "live-rules-silent" | "shadow-rules-silent">,
   treatmentId: string,
   rules: string[],
-  reps: number,
+  repetitions: number,
 ): DeliveryViolation {
   const label = kind === "live-rules-silent" ? "live" : "shadow";
-  return { kind, treatmentId, message: `${treatmentId}: ${label} rules ${rules.join(", ")} were delivered but never fired across ${reps} rows` };
+  return { kind, treatmentId, message: `${treatmentId}: ${label} rules ${rules.join(", ")} were delivered but never fired across ${repetitions} rows` };
 }
 
 function firingFloorViolations(treatmentId: string, armRows: RawRow[], manifest: TreatmentManifest | undefined): DeliveryViolation[] {
@@ -887,7 +887,7 @@ function firingFloorViolations(treatmentId: string, armRows: RawRow[], manifest:
 function armSummaryFor(treatmentId: string, armRows: RawRow[], manifest: TreatmentManifest | undefined): ArmDeliverySummary {
   return {
     treatmentId,
-    reps: armRows.length,
+    repetitions: armRows.length,
     liveFirings: sumFirings(armRows, (row) => row.railFirings),
     shadowFirings: sumFirings(armRows, (row) => row.shadowFirings),
     promptCarried: manifest?.delivery === "prompt",
@@ -940,7 +940,7 @@ function formatDeliveryViolations(violations: DeliveryViolation[]): string {
 
 function formatDeliveryValidityBlock(arms: ArmDeliverySummary[]): string {
   const lines = arms.map(
-    (a) => `  ${a.treatmentId}: reps=${a.reps} liveFirings=${a.liveFirings} shadowFirings=${a.shadowFirings} delivered=${a.promptCarried ? "prompt" : "ok"}`,
+    (a) => `  ${a.treatmentId}: repetitions=${a.repetitions} liveFirings=${a.liveFirings} shadowFirings=${a.shadowFirings} delivered=${a.promptCarried ? "prompt" : "ok"}`,
   );
   return [...lines, ""].join("\n");
 }
