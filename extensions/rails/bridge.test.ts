@@ -330,7 +330,7 @@ function assertFailedOpenWithoutAborting(outcome: ToolOutcome, messages: string[
   assert.deepEqual(railFailures(logs).map((entry) => entry.key), ["extract:python"]);
 }
 
-test("an extractor failure under LIUBAI_EVAL kills the rep through the abort seam instead of degrading the rail", async () => {
+test("an extractor failure under LIUBAI_EVAL kills the repetition through the abort seam instead of degrading the rail", async () => {
   const { abort, messages } = abortSpy();
   const session = railsSession(undefined, new Map(), { abort });
 

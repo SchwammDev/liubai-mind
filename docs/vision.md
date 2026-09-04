@@ -31,7 +31,7 @@ Real question = **ratio and placement** of the two, and whether it should **shif
 ### Evidence so far
 
 - **Wording is a weak lever; the loop is the strong one** (#45). A bare metric one-liner and a long coaching guide produce the same outcomes inside the harness, while the same contrast in a single-shot setting collapses genuine fixes (external repro). The environment — iteration plus deterministic rails — carries the behavior; by #3 the shorter message wins.
-- **A nudge that names a number becomes a target** (#60). cc-delta reports `dpBefore`/`dpAfter` and re-fires unchanged on every write; ~20% of reps hit it, and those cost double the turns — agents hunt the threshold and hand-count branches instead of finishing. `obsess-over-rules` is an agent failure mode too, and a quantified, non-escalating rail induces it.
+- **A nudge that names a number becomes a target** (#60). cc-delta reports `dpBefore`/`dpAfter` and re-fires unchanged on every write; ~20% of repetitions hit it, and those cost double the turns — agents hunt the threshold and hand-count branches instead of finishing. `obsess-over-rules` is an agent failure mode too, and a quantified, non-escalating rail induces it.
 - **Capability scales exploitation** (#59). The stronger eval model probed the harness itself — reading probes and reference solutions; the weaker one never did. Stronger models don't just need fewer rails, they need sealed ones.
 
 ## What the harness fights
