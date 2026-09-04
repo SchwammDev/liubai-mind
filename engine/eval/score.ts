@@ -46,7 +46,7 @@ export interface SummaryRow {
   meanTurns: number | null;
   meanTokensIn: number | null;
   meanTokensOut: number | null;
-  meanRailFirings: Record<RuleName, number> | null;
+  meanNudges: Record<RuleName, number> | null;
   costAvailable: number;
   judgedAtSha: string;
   pyCcBackend: string;
@@ -304,7 +304,7 @@ function newSummaryRow(treatmentId: string, caseId: string | null, tier: Tier | 
     meanTurns: null,
     meanTokensIn: null,
     meanTokensOut: null,
-    meanRailFirings: null,
+    meanNudges: null,
     costAvailable: 0,
     judgedAtSha: env.judgedAtSha,
     pyCcBackend: env.pyCcBackend,
@@ -347,7 +347,7 @@ function meanDpReductionOf(acc: DpReductionAccumulator): number | null {
 
 const RULE_NAMES: readonly RuleName[] = Object.values(RULE);
 
-function zeroRailFirings(): Record<RuleName, number> {
+function zeroNudges(): Record<RuleName, number> {
   return Object.fromEntries(RULE_NAMES.map((rule) => [rule, 0])) as Record<RuleName, number>;
 }
 
@@ -356,16 +356,16 @@ interface CostAccumulator {
   turnsSum: number;
   tokensInSum: number;
   tokensOutSum: number;
-  railFiringsSum: Record<RuleName, number>;
+  nudgesSum: Record<RuleName, number>;
   available: number;
 }
 
 function newCostAccumulator(): CostAccumulator {
-  return { durationSum: 0, turnsSum: 0, tokensInSum: 0, tokensOutSum: 0, railFiringsSum: zeroRailFirings(), available: 0 };
+  return { durationSum: 0, turnsSum: 0, tokensInSum: 0, tokensOutSum: 0, nudgesSum: zeroNudges(), available: 0 };
 }
 
-function costFieldsPresent(row: RawRow): row is RawRow & { turns: number; tokensIn: number; tokensOut: number; railFirings: Record<RuleName, number> } {
-  return row.turns !== undefined && row.tokensIn !== undefined && row.tokensOut !== undefined && row.railFirings !== undefined;
+function costFieldsPresent(row: RawRow): row is RawRow & { turns: number; tokensIn: number; tokensOut: number; nudges: Record<RuleName, number> } {
+  return row.turns !== undefined && row.tokensIn !== undefined && row.tokensOut !== undefined && row.nudges !== undefined;
 }
 
 function addCostMetrics(acc: CostAccumulator, row: RawRow): void {
@@ -376,7 +376,7 @@ function addCostMetrics(acc: CostAccumulator, row: RawRow): void {
   acc.turnsSum += row.turns;
   acc.tokensInSum += row.tokensIn;
   acc.tokensOutSum += row.tokensOut;
-  for (const rule of RULE_NAMES) acc.railFiringsSum[rule] += row.railFirings[rule];
+  for (const rule of RULE_NAMES) acc.nudgesSum[rule] += row.nudges[rule];
 }
 
 function meanOf(sum: number, count: number): number | null {
@@ -388,20 +388,20 @@ interface CostSummary {
   meanTurns: number | null;
   meanTokensIn: number | null;
   meanTokensOut: number | null;
-  meanRailFirings: Record<RuleName, number> | null;
+  meanNudges: Record<RuleName, number> | null;
   costAvailable: number;
 }
 
 function finalizeCost(acc: CostAccumulator, totalRows: number): CostSummary {
-  const meanRailFirings =
-    acc.available === 0 ? null : (Object.fromEntries(RULE_NAMES.map((rule) => [rule, acc.railFiringsSum[rule] / acc.available])) as Record<RuleName, number>);
+  const meanNudges =
+    acc.available === 0 ? null : (Object.fromEntries(RULE_NAMES.map((rule) => [rule, acc.nudgesSum[rule] / acc.available])) as Record<RuleName, number>);
 
   return {
     meanDurationMs: meanOf(acc.durationSum, totalRows),
     meanTurns: meanOf(acc.turnsSum, acc.available),
     meanTokensIn: meanOf(acc.tokensInSum, acc.available),
     meanTokensOut: meanOf(acc.tokensOutSum, acc.available),
-    meanRailFirings,
+    meanNudges,
     costAvailable: acc.available,
   };
 }
@@ -505,7 +505,7 @@ function treatmentCell(row: SummaryRow): string {
 
 function markdownRow(row: SummaryRow): string {
   const c = row.counts;
-  return `| ${treatmentCell(row)} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["bar-missed"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${c["timed-out"]} | ${row.withCreatedFiles} | ${row.contaminated} | ${row.railConsults} | ${formatPercent(genuineRate(row))} | ${formatMeanDpReduction(row.meanDpReduction)} | ${formatMeanMs(row.meanDurationMs)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanTokensIn)} | ${formatMean(row.meanTokensOut)} | ${formatNudgesPerRepetition(row.meanRailFirings)} |`;
+  return `| ${treatmentCell(row)} | ${row.total} | ${c["genuine-fix"]} | ${c.gamed} | ${c["bar-missed"]} | ${c.untouched} | ${c.broken} | ${c["behavior-broken"]} | ${c.errored} | ${c["timed-out"]} | ${row.withCreatedFiles} | ${row.contaminated} | ${row.railConsults} | ${formatPercent(genuineRate(row))} | ${formatMeanDpReduction(row.meanDpReduction)} | ${formatMeanMs(row.meanDurationMs)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanTokensIn)} | ${formatMean(row.meanTokensOut)} | ${formatNudgesPerRepetition(row.meanNudges)} |`;
 }
 
 export function formatMarkdown(summary: SummaryRow[]): string {
@@ -586,7 +586,7 @@ export interface JudgedJsonlRow {
   turns?: number;
   tokensIn?: number;
   tokensOut?: number;
-  railFirings?: Record<RuleName, number>;
+  nudges?: Record<RuleName, number>;
   durationMs: number;
   timedOut: boolean;
 }
@@ -607,7 +607,7 @@ export function toJudgedJsonlRow(judgedRow: JudgedRow): JudgedJsonlRow {
     ...(row.turns !== undefined ? { turns: row.turns } : {}),
     ...(row.tokensIn !== undefined ? { tokensIn: row.tokensIn } : {}),
     ...(row.tokensOut !== undefined ? { tokensOut: row.tokensOut } : {}),
-    ...(row.railFirings !== undefined ? { railFirings: row.railFirings } : {}),
+    ...(row.nudges !== undefined ? { nudges: row.nudges } : {}),
     durationMs: row.durationMs,
     timedOut: row.timedOut,
   };
@@ -735,8 +735,8 @@ export interface DeliveryViolation {
 export interface ArmDeliverySummary {
   treatmentId: string;
   repetitions: number;
-  liveFirings: number;
-  shadowFirings: number;
+  liveNudges: number;
+  shadowNudges: number;
   promptCarried: boolean;
 }
 
@@ -845,17 +845,17 @@ function unionDeliveredRules(rows: RawRow[], pick: (delivered: NonNullable<RawRo
   return [...rules];
 }
 
-function sumFirings(rows: RawRow[], pick: (row: RawRow) => Record<RuleName, number> | undefined): number {
+function sumNudges(rows: RawRow[], pick: (row: RawRow) => Record<RuleName, number> | undefined): number {
   let total = 0;
   for (const row of rows) {
-    const firings = pick(row);
-    if (firings === undefined) continue;
-    for (const count of Object.values(firings)) total += count;
+    const nudges = pick(row);
+    if (nudges === undefined) continue;
+    for (const count of Object.values(nudges)) total += count;
   }
   return total;
 }
 
-function firingFloorViolation(
+function nudgeFloorViolation(
   kind: Extract<DeliveryViolationKind, "live-rules-silent" | "shadow-rules-silent">,
   treatmentId: string,
   rules: string[],
@@ -865,20 +865,20 @@ function firingFloorViolation(
   return { kind, treatmentId, message: `${treatmentId}: ${label} rules ${rules.join(", ")} were delivered but never fired across ${repetitions} rows` };
 }
 
-function firingFloorViolations(treatmentId: string, armRows: RawRow[], manifest: TreatmentManifest | undefined): DeliveryViolation[] {
-  if (manifest?.expectedZeroFirings === true) return [];
+function nudgeFloorViolations(treatmentId: string, armRows: RawRow[], manifest: TreatmentManifest | undefined): DeliveryViolation[] {
+  if (manifest?.expectedZeroNudges === true) return [];
   if (manifest?.delivery === "prompt") return [];
 
   const violations: DeliveryViolation[] = [];
 
   const liveRules = unionDeliveredRules(armRows, (d) => d.liveRules);
-  if (liveRules.length > 0 && sumFirings(armRows, (row) => row.railFirings) === 0) {
-    violations.push(firingFloorViolation("live-rules-silent", treatmentId, liveRules, armRows.length));
+  if (liveRules.length > 0 && sumNudges(armRows, (row) => row.nudges) === 0) {
+    violations.push(nudgeFloorViolation("live-rules-silent", treatmentId, liveRules, armRows.length));
   }
 
   const shadowRules = unionDeliveredRules(armRows, (d) => d.shadowRules);
-  if (shadowRules.length > 0 && sumFirings(armRows, (row) => row.shadowFirings) === 0) {
-    violations.push(firingFloorViolation("shadow-rules-silent", treatmentId, shadowRules, armRows.length));
+  if (shadowRules.length > 0 && sumNudges(armRows, (row) => row.shadowNudges) === 0) {
+    violations.push(nudgeFloorViolation("shadow-rules-silent", treatmentId, shadowRules, armRows.length));
   }
 
   return violations;
@@ -888,8 +888,8 @@ function armSummaryFor(treatmentId: string, armRows: RawRow[], manifest: Treatme
   return {
     treatmentId,
     repetitions: armRows.length,
-    liveFirings: sumFirings(armRows, (row) => row.railFirings),
-    shadowFirings: sumFirings(armRows, (row) => row.shadowFirings),
+    liveNudges: sumNudges(armRows, (row) => row.nudges),
+    shadowNudges: sumNudges(armRows, (row) => row.shadowNudges),
     promptCarried: manifest?.delivery === "prompt",
   };
 }
@@ -907,7 +907,7 @@ function checkDeliveryValidity(
     ...notDeliveredViolations(rows),
     ...missingStampViolations(rows, treatmentById),
     ...promptCarriedViolations(rows, treatmentById, treatmentsDir, caseById),
-    ...arms.flatMap(([treatmentId, armRows]) => firingFloorViolations(treatmentId, armRows, treatmentById.get(treatmentId))),
+    ...arms.flatMap(([treatmentId, armRows]) => nudgeFloorViolations(treatmentId, armRows, treatmentById.get(treatmentId))),
   ];
   if (violations.length > 0) return { kind: "invalid", violations };
 
@@ -940,7 +940,7 @@ function formatDeliveryViolations(violations: DeliveryViolation[]): string {
 
 function formatDeliveryValidityBlock(arms: ArmDeliverySummary[]): string {
   const lines = arms.map(
-    (a) => `  ${a.treatmentId}: repetitions=${a.repetitions} liveFirings=${a.liveFirings} shadowFirings=${a.shadowFirings} delivered=${a.promptCarried ? "prompt" : "ok"}`,
+    (a) => `  ${a.treatmentId}: repetitions=${a.repetitions} liveNudges=${a.liveNudges} shadowNudges=${a.shadowNudges} delivered=${a.promptCarried ? "prompt" : "ok"}`,
   );
   return [...lines, ""].join("\n");
 }

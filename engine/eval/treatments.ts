@@ -67,7 +67,7 @@ interface ManifestFields {
   id: string;
   env: Record<string, string>;
   phrasingPack: string | undefined;
-  expectedZeroFirings: boolean | undefined;
+  expectedZeroNudges: boolean | undefined;
   delivery: "prompt" | "rail" | undefined;
 }
 
@@ -81,8 +81,8 @@ function validateFields(raw: Record<string, unknown>): { fields: ManifestFields 
   const phrasingPack = validateOptionalString(raw.phrasingPack, "phrasingPack");
   if ("error" in phrasingPack) return phrasingPack;
 
-  const expectedZeroFirings = validateOptionalBoolean(raw.expectedZeroFirings, "expectedZeroFirings");
-  if ("error" in expectedZeroFirings) return expectedZeroFirings;
+  const expectedZeroNudges = validateOptionalBoolean(raw.expectedZeroNudges, "expectedZeroNudges");
+  if ("error" in expectedZeroNudges) return expectedZeroNudges;
 
   const delivery = validateDelivery(raw.delivery);
   if ("error" in delivery) return delivery;
@@ -92,7 +92,7 @@ function validateFields(raw: Record<string, unknown>): { fields: ManifestFields 
       id: id.value,
       env: env.value,
       phrasingPack: phrasingPack.value,
-      expectedZeroFirings: expectedZeroFirings.value,
+      expectedZeroNudges: expectedZeroNudges.value,
       delivery: delivery.value,
     },
   };
@@ -103,7 +103,7 @@ function assembleManifest(fields: ManifestFields): TreatmentManifest {
     id: fields.id,
     env: fields.env,
     ...(fields.phrasingPack !== undefined ? { phrasingPack: fields.phrasingPack } : {}),
-    ...(fields.expectedZeroFirings !== undefined ? { expectedZeroFirings: fields.expectedZeroFirings } : {}),
+    ...(fields.expectedZeroNudges !== undefined ? { expectedZeroNudges: fields.expectedZeroNudges } : {}),
     ...(fields.delivery !== undefined ? { delivery: fields.delivery } : {}),
   };
 }

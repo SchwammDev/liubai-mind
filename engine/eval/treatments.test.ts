@@ -90,34 +90,34 @@ test("loadTreatments_accepts_a_treatment_with_a_valid_phrasing_pack", () => {
   assert.equal(result[0]?.phrasingPack, "packs/pack.json");
 });
 
-test("loadTreatments_reads_expectedZeroFirings_true_from_its_manifest", () => {
+test("loadTreatments_reads_expectedZeroNudges_true_from_its_manifest", () => {
   const dir = tempTreatmentsDir();
-  writeTreatment(dir, "zero.json", { id: "zero-firings", env: {}, expectedZeroFirings: true });
+  writeTreatment(dir, "zero.json", { id: "zero-nudges", env: {}, expectedZeroNudges: true });
 
   const result = loadTreatments(dir);
 
   assertLoaded(result);
-  assert.equal(result[0]?.expectedZeroFirings, true);
+  assert.equal(result[0]?.expectedZeroNudges, true);
 });
 
-test("loadTreatments_leaves_expectedZeroFirings_undefined_when_the_manifest_omits_it", () => {
+test("loadTreatments_leaves_expectedZeroNudges_undefined_when_the_manifest_omits_it", () => {
   const dir = tempTreatmentsDir();
   writeTreatment(dir, "plain.json", { id: "plain", env: {} });
 
   const result = loadTreatments(dir);
 
   assertLoaded(result);
-  assert.equal(result[0]?.expectedZeroFirings, undefined);
+  assert.equal(result[0]?.expectedZeroNudges, undefined);
 });
 
-test("loadTreatments_rejects_a_non_boolean_expectedZeroFirings", () => {
+test("loadTreatments_rejects_a_non_boolean_expectedZeroNudges", () => {
   const dir = tempTreatmentsDir();
-  writeTreatment(dir, "bad.json", { id: "bad-zero", env: {}, expectedZeroFirings: "true" });
+  writeTreatment(dir, "bad.json", { id: "bad-zero", env: {}, expectedZeroNudges: "true" });
 
   const result = loadTreatments(dir);
 
   assertRejected(result);
-  assert.match(result.error, /expectedZeroFirings must be a boolean/);
+  assert.match(result.error, /expectedZeroNudges must be a boolean/);
 });
 
 test("loadTreatments_leaves_delivery_undefined_when_the_manifest_omits_it", () => {

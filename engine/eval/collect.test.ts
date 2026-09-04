@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, appen
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { runCollect, detectAgentError, countTurns, sumTokenUsage, countRailFirings, countShadowFirings, readDelivered } from "./collect.ts";
+import { runCollect, detectAgentError, countTurns, sumTokenUsage, countNudges, countShadowNudges, readDelivered } from "./collect.ts";
 import type { CollectOpts } from "./collect.ts";
 import type { RunSpec, RunOutcome, PiSpawner, ProbeOutcome, ProbeSpawner } from "./spawner.ts";
 import { gitSha } from "./provenance.ts";
@@ -689,83 +689,83 @@ function toolExecutionEndLine(texts: string[], isError = false): string {
   return `${JSON.stringify({ type: "tool_execution_end", toolCallId: "1", toolName: "edit", result, isError })}\n`;
 }
 
-test("countRailFirings_counts_a_bracketed_rule_tag_appended_to_a_tool_result", () => {
+test("countNudges_counts_a_bracketed_rule_tag_appended_to_a_tool_result", () => {
   const stdoutJsonl = toolExecutionEndLine(["Successfully replaced 1 block(s).", "\n\n[cc] f (CC=10). too complex."]);
 
-  assert.equal(countRailFirings(stdoutJsonl).cc, 1);
+  assert.equal(countNudges(stdoutJsonl).cc, 1);
 });
 
-test("countRailFirings_counts_a_blocked_result_as_a_firing_of_its_rule", () => {
+test("countNudges_counts_a_blocked_result_as_a_nudge_of_its_rule", () => {
   const stdoutJsonl = toolExecutionEndLine(["[discourage-comments] Blocked: new comments detected"], true);
 
-  assert.equal(countRailFirings(stdoutJsonl)["discourage-comments"], 1);
+  assert.equal(countNudges(stdoutJsonl)["discourage-comments"], 1);
 });
 
-test("countRailFirings_sums_firings_of_the_same_rule_across_separate_tool_calls", () => {
+test("countNudges_sums_nudges_of_the_same_rule_across_separate_tool_calls", () => {
   const stdoutJsonl = toolExecutionEndLine(["\n\n[cc] a (CC=9)."]) + toolExecutionEndLine(["\n\n[cc] a (CC=9)."]);
 
-  assert.equal(countRailFirings(stdoutJsonl).cc, 2);
+  assert.equal(countNudges(stdoutJsonl).cc, 2);
 });
 
-test("countRailFirings_counts_each_rule_independently_when_several_fire_on_one_tool_call", () => {
+test("countNudges_counts_each_rule_independently_when_several_fire_on_one_tool_call", () => {
   const stdoutJsonl = toolExecutionEndLine(["\n\n[cc] a (CC=9).\n\n[type-annotation] missing return type."]);
 
-  const firings = countRailFirings(stdoutJsonl);
+  const nudges = countNudges(stdoutJsonl);
 
-  assert.equal(firings.cc, 1);
-  assert.equal(firings["type-annotation"], 1);
+  assert.equal(nudges.cc, 1);
+  assert.equal(nudges["type-annotation"], 1);
 });
 
-test("countRailFirings_reports_zero_for_a_rule_that_never_fired", () => {
-  const firings = countRailFirings("");
+test("countNudges_reports_zero_for_a_rule_that_never_fired", () => {
+  const nudges = countNudges("");
 
-  assert.equal(firings["test-linearity"], 0);
+  assert.equal(nudges["test-linearity"], 0);
 });
 
 function shadowLogLine(rule: string, path: string): string {
   return `${JSON.stringify({ ts: "2026-08-30T00:00:00.000Z", rule, path })}\n`;
 }
 
-test("countShadowFirings_counts_a_shadowed_rule_firing_once", () => {
+test("countShadowNudges_counts_a_shadowed_rule_nudge_once", () => {
   const log = shadowLogLine("cc-delta", "a.py");
 
-  assert.equal(countShadowFirings(log)["cc-delta"], 1);
+  assert.equal(countShadowNudges(log)["cc-delta"], 1);
 });
 
-test("countShadowFirings_sums_firings_of_the_same_rule_across_lines", () => {
+test("countShadowNudges_sums_nudges_of_the_same_rule_across_lines", () => {
   const log = shadowLogLine("cc-delta", "a.py") + shadowLogLine("cc-delta", "b.py");
 
-  assert.equal(countShadowFirings(log)["cc-delta"], 2);
+  assert.equal(countShadowNudges(log)["cc-delta"], 2);
 });
 
-test("countShadowFirings_ignores_a_rule_name_the_engine_does_not_know", () => {
+test("countShadowNudges_ignores_a_rule_name_the_engine_does_not_know", () => {
   const log = shadowLogLine("not-a-real-rule", "a.py");
 
-  const firings = countShadowFirings(log);
+  const nudges = countShadowNudges(log);
 
-  assert.equal(firings.cc, 0);
-  assert.equal(firings["cc-delta"], 0);
+  assert.equal(nudges.cc, 0);
+  assert.equal(nudges["cc-delta"], 0);
 });
 
-test("countShadowFirings_skips_a_malformed_line_without_losing_the_valid_ones", () => {
+test("countShadowNudges_skips_a_malformed_line_without_losing_the_valid_ones", () => {
   const log = "{ not json\n" + shadowLogLine("cc-delta", "a.py");
 
-  assert.equal(countShadowFirings(log)["cc-delta"], 1);
+  assert.equal(countShadowNudges(log)["cc-delta"], 1);
 });
 
-test("countShadowFirings_reports_zero_for_an_empty_log", () => {
-  assert.equal(countShadowFirings("")["cc-delta"], 0);
+test("countShadowNudges_reports_zero_for_an_empty_log", () => {
+  assert.equal(countShadowNudges("")["cc-delta"], 0);
 });
 
 function assertCostMetricsStamped(row: RawRow): void {
   assert.equal(row.turns, 2);
   assert.equal(row.tokensIn, 100);
   assert.equal(row.tokensOut, 20);
-  assert.equal(row.railFirings?.cc, 1);
-  assert.equal(row.railFirings?.["discourage-comments"], 0);
+  assert.equal(row.nudges?.cc, 1);
+  assert.equal(row.nudges?.["discourage-comments"], 0);
 }
 
-test("runCollect_stamps_turns_tokens_and_rail_firings_from_stdout_onto_the_raw_row", async () => {
+test("runCollect_stamps_turns_tokens_and_rail_nudges_from_stdout_onto_the_raw_row", async () => {
   const stdoutJsonl =
     turnStartLine() +
     turnStartLine() +
@@ -798,22 +798,22 @@ function shadowLogSpawner(lines: string[]): PiSpawner {
   };
 }
 
-test("runCollect_stamps_shadowFirings_from_the_workdirs_shadow_log_onto_the_raw_row", async () => {
+test("runCollect_stamps_shadowNudges_from_the_workdirs_shadow_log_onto_the_raw_row", async () => {
   const spawner = shadowLogSpawner([shadowLogLine("cc-delta", "a.py"), shadowLogLine("cc-delta", "b.py")]);
   const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
-  assert.equal(firstRow(opts.runDir).shadowFirings?.["cc-delta"], 2);
+  assert.equal(firstRow(opts.runDir).shadowNudges?.["cc-delta"], 2);
 });
 
-test("runCollect_omits_shadowFirings_from_the_raw_row_when_no_shadow_log_was_written", async () => {
+test("runCollect_omits_shadowNudges_from_the_raw_row_when_no_shadow_log_was_written", async () => {
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
   const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
-  assert.equal(firstRow(opts.runDir).shadowFirings, undefined);
+  assert.equal(firstRow(opts.runDir).shadowNudges, undefined);
 });
 
 function deliveredStampSpawner(delivered: unknown): PiSpawner {
