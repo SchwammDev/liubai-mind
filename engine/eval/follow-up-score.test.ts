@@ -164,7 +164,7 @@ function followUpInfo(over: Partial<FollowUpInfo> = {}): FollowUpInfo {
   return { sourceRun: "source-run", sourceRepetition: 1, control: false, ...over };
 }
 
-function seededRow(caseId: string, over: Partial<RawRow> = {}, infoOver: Partial<FollowUpInfo> = {}): RawRow {
+function earlierResultRow(caseId: string, over: Partial<RawRow> = {}, infoOver: Partial<FollowUpInfo> = {}): RawRow {
   return {
     caseId,
     treatmentId: "rails-default",
@@ -180,7 +180,7 @@ function seededRow(caseId: string, over: Partial<RawRow> = {}, infoOver: Partial
 }
 
 function controlRow(caseId: string, over: Partial<RawRow> = {}): RawRow {
-  return seededRow(caseId, over, { sourceRepetition: null, control: true });
+  return earlierResultRow(caseId, over, { sourceRepetition: null, control: true });
 }
 
 async function judgeOne(corpusDir: string, row: RawRow, sourceRows: RawRow[] = []): Promise<JudgedFollowUpRow> {
@@ -191,7 +191,7 @@ async function judgeOne(corpusDir: string, row: RawRow, sourceRows: RawRow[] = [
 test("judgeFollowUpRows_classifies_an_agent_errored_row_as_errored_before_any_other_check", async () => {
   const caseId = "follow-up-errored";
   const corpusDir = extendableCorpusDir(caseId);
-  const row = seededRow(caseId, { agentError: "boom", files: { "thing.ts": GARBAGE_SOURCE } });
+  const row = earlierResultRow(caseId, { agentError: "boom", files: { "thing.ts": GARBAGE_SOURCE } });
 
   const judged = await judgeOne(corpusDir, row, [sourceRow(caseId)]);
 
@@ -201,7 +201,7 @@ test("judgeFollowUpRows_classifies_an_agent_errored_row_as_errored_before_any_ot
 test("judgeFollowUpRows_classifies_a_timed_out_row_as_timed_out_before_checking_the_entry_file", async () => {
   const caseId = "follow-up-timed-out";
   const corpusDir = extendableCorpusDir(caseId);
-  const row = seededRow(caseId, { timedOut: true, files: {} });
+  const row = earlierResultRow(caseId, { timedOut: true, files: {} });
 
   const judged = await judgeOne(corpusDir, row, [sourceRow(caseId)]);
 
@@ -211,7 +211,7 @@ test("judgeFollowUpRows_classifies_a_timed_out_row_as_timed_out_before_checking_
 test("judgeFollowUpRows_prefers_timed_out_over_errored_when_both_apply", async () => {
   const caseId = "follow-up-timed-out-and-errored";
   const corpusDir = extendableCorpusDir(caseId);
-  const row = seededRow(caseId, { timedOut: true, agentError: "boom", files: { "thing.ts": GARBAGE_SOURCE } });
+  const row = earlierResultRow(caseId, { timedOut: true, agentError: "boom", files: { "thing.ts": GARBAGE_SOURCE } });
 
   const judged = await judgeOne(corpusDir, row, [sourceRow(caseId)]);
 
@@ -221,7 +221,7 @@ test("judgeFollowUpRows_prefers_timed_out_over_errored_when_both_apply", async (
 test("judgeFollowUpRows_classifies_a_missing_entry_file_as_broken", async () => {
   const caseId = "follow-up-missing-entry";
   const corpusDir = extendableCorpusDir(caseId);
-  const row = seededRow(caseId, { files: {} });
+  const row = earlierResultRow(caseId, { files: {} });
 
   const judged = await judgeOne(corpusDir, row, [sourceRow(caseId)]);
 
@@ -231,18 +231,18 @@ test("judgeFollowUpRows_classifies_a_missing_entry_file_as_broken", async () => 
 test("judgeFollowUpRows_classifies_an_unparseable_entry_file_as_broken", async () => {
   const caseId = "follow-up-unparseable";
   const corpusDir = extendableCorpusDir(caseId);
-  const row = seededRow(caseId, { files: { "thing.ts": GARBAGE_SOURCE } });
+  const row = earlierResultRow(caseId, { files: { "thing.ts": GARBAGE_SOURCE } });
 
   const judged = await judgeOne(corpusDir, row, [sourceRow(caseId)]);
 
   assert.equal(judged.judge.verdict, "broken");
 });
 
-test("judgeFollowUpRows_classifies_a_seeded_row_identical_to_the_source_files_as_untouched", async () => {
-  const caseId = "follow-up-untouched-seeded";
+test("judgeFollowUpRows_classifies_an_earlierResult_row_identical_to_the_source_files_as_untouched", async () => {
+  const caseId = "follow-up-untouched-earlier-result";
   const corpusDir = extendableCorpusDir(caseId);
   const source = sourceRow(caseId, { files: { "thing.ts": touchedButUnextendedSource() } });
-  const row = seededRow(caseId, { files: { "thing.ts": touchedButUnextendedSource() } });
+  const row = earlierResultRow(caseId, { files: { "thing.ts": touchedButUnextendedSource() } });
 
   const judged = await judgeOne(corpusDir, row, [source]);
 
@@ -262,7 +262,7 @@ test("judgeFollowUpRows_classifies_a_control_row_identical_to_the_pristine_case_
 test("judgeFollowUpRows_classifies_a_touched_row_that_fails_the_original_behaviorChecks_as_regressed", async () => {
   const caseId = "follow-up-regressed";
   const corpusDir = extendableCorpusDir(caseId);
-  const row = seededRow(caseId, { files: { "thing.ts": regressedSource() } });
+  const row = earlierResultRow(caseId, { files: { "thing.ts": regressedSource() } });
 
   const judged = await judgeOne(corpusDir, row, [sourceRow(caseId)]);
 
@@ -272,7 +272,7 @@ test("judgeFollowUpRows_classifies_a_touched_row_that_fails_the_original_behavio
 test("judgeFollowUpRows_prefers_regressed_over_extension_failed_when_both_behaviorCheck_sets_fail", async () => {
   const caseId = "follow-up-precedence";
   const corpusDir = extendableCorpusDir(caseId);
-  const row = seededRow(caseId, { files: { "thing.ts": regressedSource() } });
+  const row = earlierResultRow(caseId, { files: { "thing.ts": regressedSource() } });
 
   const judged = await judgeOne(corpusDir, row, [sourceRow(caseId)]);
 
@@ -282,7 +282,7 @@ test("judgeFollowUpRows_prefers_regressed_over_extension_failed_when_both_behavi
 test("judgeFollowUpRows_prefers_errored_over_broken_when_both_apply", async () => {
   const caseId = "follow-up-errored-and-broken";
   const corpusDir = extendableCorpusDir(caseId);
-  const row = seededRow(caseId, { agentError: "boom", files: { "thing.ts": GARBAGE_SOURCE } });
+  const row = earlierResultRow(caseId, { agentError: "boom", files: { "thing.ts": GARBAGE_SOURCE } });
 
   const judged = await judgeOne(corpusDir, row, [sourceRow(caseId)]);
 
@@ -292,7 +292,7 @@ test("judgeFollowUpRows_prefers_errored_over_broken_when_both_apply", async () =
 test("judgeFollowUpRows_classifies_original_behaviorChecks_green_and_extension_behaviorChecks_red_as_extension_failed", async () => {
   const caseId = "follow-up-extension-failed";
   const corpusDir = extendableCorpusDir(caseId);
-  const row = seededRow(caseId, { files: { "thing.ts": touchedButUnextendedSource() } });
+  const row = earlierResultRow(caseId, { files: { "thing.ts": touchedButUnextendedSource() } });
 
   const judged = await judgeOne(corpusDir, row, [sourceRow(caseId, { files: { "thing.ts": identitySource() } })]);
 
@@ -302,7 +302,7 @@ test("judgeFollowUpRows_classifies_original_behaviorChecks_green_and_extension_b
 test("judgeFollowUpRows_classifies_both_behaviorCheck_sets_green_as_extended", async () => {
   const caseId = "follow-up-extended";
   const corpusDir = extendableCorpusDir(caseId);
-  const row = seededRow(caseId, { files: { "thing.ts": extendedSource() } });
+  const row = earlierResultRow(caseId, { files: { "thing.ts": extendedSource() } });
 
   const judged = await judgeOne(corpusDir, row, [sourceRow(caseId)]);
 
@@ -312,7 +312,7 @@ test("judgeFollowUpRows_classifies_both_behaviorCheck_sets_green_as_extended", a
 test("judgeFollowUpRows_classifies_a_solution_that_widens_the_returned_shape_as_extended_not_regressed", async () => {
   const caseId = "follow-up-shape-widening";
   const corpusDir = extendableObjectCorpusDir(caseId);
-  const row = seededRow(caseId, { files: { "thing.ts": shapeWideningObjectSource() } });
+  const row = earlierResultRow(caseId, { files: { "thing.ts": shapeWideningObjectSource() } });
 
   const judged = await judgeOne(corpusDir, row, [sourceRow(caseId, { files: { "thing.ts": identityObjectSource() } })]);
 
@@ -322,16 +322,16 @@ test("judgeFollowUpRows_classifies_a_solution_that_widens_the_returned_shape_as_
 test("judgeFollowUpRows_throws_when_the_row_case_has_no_extension_spec", async () => {
   const caseId = "follow-up-no-extension";
   const corpusDir = noExtensionCorpusDir(caseId);
-  const row = seededRow(caseId, { files: { "thing.ts": extendedSource() } });
+  const row = earlierResultRow(caseId, { files: { "thing.ts": extendedSource() } });
 
   await assert.rejects(() => judgeFollowUpRows([row], [sourceRow(caseId)], corpusDir), /extension/);
 });
 
-test("judgeFollowUpRows_stratifies_a_seeded_row_by_its_source_rows_single_task_verdict", async () => {
+test("judgeFollowUpRows_stratifies_an_earlierResult_row_by_its_source_rows_single_task_verdict", async () => {
   const caseId = "follow-up-stratify-bar-missed";
   const corpusDir = extendableCorpusDir(caseId);
   const source = sourceRow(caseId, { files: { "thing.ts": touchedButUnextendedSource() } });
-  const row = seededRow(caseId, { files: { "thing.ts": extendedSource() } });
+  const row = earlierResultRow(caseId, { files: { "thing.ts": extendedSource() } });
 
   const judged = await judgeOne(corpusDir, row, [source]);
 
@@ -342,7 +342,7 @@ test("judgeFollowUpRows_stratifies_an_untouched_source_row_as_the_untouched_sing
   const caseId = "follow-up-stratify-untouched";
   const corpusDir = extendableCorpusDir(caseId);
   const source = sourceRow(caseId, { files: { "thing.ts": identitySource() } });
-  const row = seededRow(caseId, { files: { "thing.ts": extendedSource() } });
+  const row = earlierResultRow(caseId, { files: { "thing.ts": extendedSource() } });
 
   const judged = await judgeOne(corpusDir, row, [source]);
 
@@ -425,7 +425,7 @@ test("sourceDiffCounts_counts_a_new_py_source_file_for_a_python_case", () => {
   assert.deepEqual(counts, { linesAdded: 2, linesRemoved: 0 });
 });
 
-test("sourceDiffCounts_ignores_litter_present_in_the_seed_but_absent_from_final_files", () => {
+test("sourceDiffCounts_ignores_litter_present_in_the_earlier_files_but_absent_from_final_files", () => {
   const counts = sourceDiffCounts({ "a.ts": "one\n", "package-lock.json": "{\n  \"x\": 1\n}\n" }, { "a.ts": "one\n" }, "typescript");
 
   assert.deepEqual(counts, { linesAdded: 0, linesRemoved: 0 });
@@ -439,7 +439,7 @@ function judgedFollowUpRow(
   over: Partial<RawRow> = {},
   diffCounts: { linesAdded: number; linesRemoved: number } = { linesAdded: 0, linesRemoved: 0 },
 ): JudgedFollowUpRow {
-  return { row: seededRow(caseId, { treatmentId, ...over }), judge: { verdict, ...diffCounts }, stratum };
+  return { row: earlierResultRow(caseId, { treatmentId, ...over }), judge: { verdict, ...diffCounts }, stratum };
 }
 
 function rollupOf(summary: FollowUpSummaryRow[], treatmentId: string): FollowUpSummaryRow {
@@ -490,7 +490,7 @@ test("aggregateFollowUp_emits_a_row_per_treatment_and_source_verdict_stratum", (
   assertStratumTotals(summary, "rails-default", { "genuine-fix": 1, gamed: 1, control: 1 });
 });
 
-test("aggregateFollowUp_keeps_the_control_stratum_separate_from_seeded_strata", () => {
+test("aggregateFollowUp_keeps_the_control_stratum_separate_from_earlierResult_strata", () => {
   const judged = [
     judgedFollowUpRow("rails-default", "case-a", "extended", "genuine-fix"),
     judgedFollowUpRow("rails-default", "case-a", "untouched", "control"),
@@ -654,19 +654,19 @@ test("touchKindOf_reports_single_task_when_no_row_carries_followUp", () => {
 });
 
 test("touchKindOf_reports_follow_up_and_the_shared_source_run_when_every_row_carries_followUp", () => {
-  const kind = touchKindOf([seededRow("case-a"), controlRow("case-a")]);
+  const kind = touchKindOf([earlierResultRow("case-a"), controlRow("case-a")]);
 
   assert.deepEqual(kind, { kind: "second", sourceRun: "source-run" });
 });
 
 test("touchKindOf_errors_when_a_run_mixes_single_task_and_follow_up_rows", () => {
-  const kind = touchKindOf([sourceRow("case-a"), seededRow("case-a")]);
+  const kind = touchKindOf([sourceRow("case-a"), earlierResultRow("case-a")]);
 
   assert.ok("error" in kind);
 });
 
 test("touchKindOf_errors_when_follow_up_rows_reference_more_than_one_source_run", () => {
-  const kind = touchKindOf([seededRow("case-a", {}, { sourceRun: "run-x" }), seededRow("case-a", {}, { sourceRun: "run-y" })]);
+  const kind = touchKindOf([earlierResultRow("case-a", {}, { sourceRun: "run-x" }), earlierResultRow("case-a", {}, { sourceRun: "run-y" })]);
 
   assert.ok("error" in kind);
 });
@@ -702,7 +702,7 @@ test("routeScore_routes_a_follow_up_run_to_follow_up_scoring", async () => {
   writeSourceRun(runsRoot, "source-run", [sourceRow(caseId)]);
   const runDir = join(runsRoot, "target");
   mkdirSync(runDir, { recursive: true });
-  writeRawJsonl(runDir, [seededRow(caseId, { files: { "thing.ts": extendedSource() } })]);
+  writeRawJsonl(runDir, [earlierResultRow(caseId, { files: { "thing.ts": extendedSource() } })]);
 
   const result = await routeScore({ runDir, corpusDir, repoRoot: join(import.meta.dirname, "..", "..") }, runsRoot);
 
@@ -717,7 +717,7 @@ test("routeScore_fails_a_run_that_mixes_single_task_and_follow_up_rows", async (
   const corpusDir = extendableCorpusDir(caseId);
   const runDir = join(runsRoot, "target");
   mkdirSync(runDir, { recursive: true });
-  writeRawJsonl(runDir, [sourceRow(caseId), seededRow(caseId)]);
+  writeRawJsonl(runDir, [sourceRow(caseId), earlierResultRow(caseId)]);
 
   const result = await routeScore({ runDir, corpusDir, repoRoot: join(import.meta.dirname, "..", "..") }, runsRoot);
 
@@ -739,7 +739,7 @@ test("runFollowUpScore_writes_a_summary_jsonl_beside_the_follow_up_raw_jsonl", a
   const sourceRunDir = tempDir("eval-follow-up-score-source-");
   writeRawJsonl(sourceRunDir, [sourceRow(caseId)]);
   const runDir = tempDir("eval-follow-up-score-run-");
-  writeRawJsonl(runDir, [seededRow(caseId, { files: { "thing.ts": extendedSource() } }), controlRow(caseId, { files: { "thing.ts": identitySource() } })]);
+  writeRawJsonl(runDir, [earlierResultRow(caseId, { files: { "thing.ts": extendedSource() } }), controlRow(caseId, { files: { "thing.ts": identitySource() } })]);
 
   const result = await runFollowUpScore({ runDir, sourceRunDir, corpusDir });
 

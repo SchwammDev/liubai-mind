@@ -75,12 +75,12 @@ function changedLineCounts(before: string, after: string): DiffCounts {
   return { linesAdded: b.length - common, linesRemoved: a.length - common };
 }
 
-export function computeDiffCounts(seedFiles: Record<string, string>, finalFiles: Record<string, string>): DiffCounts {
-  const keys = new Set([...Object.keys(seedFiles), ...Object.keys(finalFiles)]);
+export function computeDiffCounts(earlierFiles: Record<string, string>, finalFiles: Record<string, string>): DiffCounts {
+  const keys = new Set([...Object.keys(earlierFiles), ...Object.keys(finalFiles)]);
   let linesAdded = 0;
   let linesRemoved = 0;
   for (const key of keys) {
-    const counts = changedLineCounts(seedFiles[key] ?? "", finalFiles[key] ?? "");
+    const counts = changedLineCounts(earlierFiles[key] ?? "", finalFiles[key] ?? "");
     linesAdded += counts.linesAdded;
     linesRemoved += counts.linesRemoved;
   }
@@ -98,8 +98,8 @@ function filterToSourceFiles(files: Record<string, string>, lang: CaseManifest["
   return Object.fromEntries(Object.entries(files).filter(([path]) => isSourcePath(path, lang)));
 }
 
-export function sourceDiffCounts(seedFiles: Record<string, string>, finalFiles: Record<string, string>, lang: CaseManifest["lang"]): DiffCounts {
-  return computeDiffCounts(filterToSourceFiles(seedFiles, lang), filterToSourceFiles(finalFiles, lang));
+export function sourceDiffCounts(earlierFiles: Record<string, string>, finalFiles: Record<string, string>, lang: CaseManifest["lang"]): DiffCounts {
+  return computeDiffCounts(filterToSourceFiles(earlierFiles, lang), filterToSourceFiles(finalFiles, lang));
 }
 
 function pristineFiles(corpusDir: string, kase: CaseManifest): Record<string, string> {
@@ -111,10 +111,10 @@ function pristineFiles(corpusDir: string, kase: CaseManifest): Record<string, st
   return files;
 }
 
-function filesAreIdentical(seed: Record<string, string>, final: Record<string, string>): boolean {
-  const seedKeys = Object.keys(seed);
-  if (seedKeys.length !== Object.keys(final).length) return false;
-  return seedKeys.every((key) => final[key] === seed[key]);
+function filesAreIdentical(earlier: Record<string, string>, final: Record<string, string>): boolean {
+  const earlierKeys = Object.keys(earlier);
+  if (earlierKeys.length !== Object.keys(final).length) return false;
+  return earlierKeys.every((key) => final[key] === earlier[key]);
 }
 
 function behaviorChecksPassFor(kase: CaseManifest, behaviorChecks: BehaviorCheck[], entrySource: string, files: Record<string, string>): boolean {
@@ -130,14 +130,14 @@ function behaviorChecksPassFor(kase: CaseManifest, behaviorChecks: BehaviorCheck
   return outcome.passed;
 }
 
-function classifyFollowUpVerdict(kase: CaseManifest, row: RawRow, seedFiles: Record<string, string>): FollowUpVerdict {
+function classifyFollowUpVerdict(kase: CaseManifest, row: RawRow, earlierFiles: Record<string, string>): FollowUpVerdict {
   if (row.timedOut === true) return "timed-out";
   if (row.agentError !== undefined) return "errored";
 
   const entrySource = row.files[kase.entry];
   if (entrySource === undefined || !sourceParses(entrySource, checkLang(kase.lang))) return "broken";
 
-  if (filesAreIdentical(seedFiles, row.files)) return "untouched";
+  if (filesAreIdentical(earlierFiles, row.files)) return "untouched";
 
   if (!behaviorChecksPassFor(kase, kase.behaviorChecks, entrySource, row.files)) return "regressed";
   if (!behaviorChecksPassFor(kase, kase.extension!.behaviorChecks, entrySource, row.files)) return "extension-failed";
@@ -158,7 +158,7 @@ function indexSourceRows(sourceRows: RawRow[]): Map<string, RawRow> {
 function findSourceRow(sourceRowsByKey: Map<string, RawRow>, row: RawRow): RawRow {
   const info = row.followUp;
   if (info === undefined || info.control || info.sourceRepetition === null) {
-    throw new Error(`follow-up-score: ${row.caseId}/${row.treatmentId}#${row.repetition} is not a seeded follow-up row`);
+    throw new Error(`follow-up-score: ${row.caseId}/${row.treatmentId}#${row.repetition} is not from an earlier result`);
   }
   const found = sourceRowsByKey.get(sourceRowKey(row.caseId, row.treatmentId, info.sourceRepetition));
   if (found === undefined) {
@@ -167,7 +167,7 @@ function findSourceRow(sourceRowsByKey: Map<string, RawRow>, row: RawRow): RawRo
   return found;
 }
 
-function seedFilesFor(row: RawRow, kase: CaseManifest, corpusDir: string, sourceRowsByKey: Map<string, RawRow>): Record<string, string> {
+function earlierFilesFor(row: RawRow, kase: CaseManifest, corpusDir: string, sourceRowsByKey: Map<string, RawRow>): Record<string, string> {
   if (row.followUp === undefined) {
     throw new Error(`follow-up-score: ${row.caseId}/${row.treatmentId}#${row.repetition} has no followUp info`);
   }
@@ -208,9 +208,9 @@ export async function judgeFollowUpRows(rows: RawRow[], sourceRows: RawRow[], co
   const judged: JudgedFollowUpRow[] = [];
   for (const row of rows) {
     const kase = caseFor(cases, row.caseId);
-    const seedFiles = seedFilesFor(row, kase, corpusDir, sourceRowsByKey);
-    const verdict = classifyFollowUpVerdict(kase, row, seedFiles);
-    const { linesAdded, linesRemoved } = sourceDiffCounts(seedFiles, row.files, kase.lang);
+    const earlierFiles = earlierFilesFor(row, kase, corpusDir, sourceRowsByKey);
+    const verdict = classifyFollowUpVerdict(kase, row, earlierFiles);
+    const { linesAdded, linesRemoved } = sourceDiffCounts(earlierFiles, row.files, kase.lang);
     const stratum = row.followUp?.control ? CONTROL_STRATUM : await sourceVerdictOf(row, corpusDir, sourceRowsByKey, sourceVerdictCache);
     judged.push({ row, judge: { verdict, linesAdded, linesRemoved }, stratum });
   }

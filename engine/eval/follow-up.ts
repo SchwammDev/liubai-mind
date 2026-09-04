@@ -113,7 +113,7 @@ function relevantSourceRows(inputs: LoadedInputs): RawRow[] {
   return inputs.sourceRows.filter((row) => inputs.casesWithExtension.has(row.caseId) && inputs.treatmentsById.has(row.treatmentId));
 }
 
-function seedEntryContentCache(corpusDir: string): (kase: CaseManifest) => string {
+function earlierEntryContentCache(corpusDir: string): (kase: CaseManifest) => string {
   const cache = new Map<string, string>();
   return (kase: CaseManifest) => {
     const cached = cache.get(kase.id);
@@ -124,18 +124,18 @@ function seedEntryContentCache(corpusDir: string): (kase: CaseManifest) => strin
   };
 }
 
-function isUntouchedRow(row: RawRow, kase: CaseManifest, seedEntryContent: (kase: CaseManifest) => string): boolean {
-  return row.files[kase.entry] === seedEntryContent(kase);
+function isUntouchedRow(row: RawRow, kase: CaseManifest, earlierEntryContent: (kase: CaseManifest) => string): boolean {
+  return row.files[kase.entry] === earlierEntryContent(kase);
 }
 
-function buildSeededItems(rows: RawRow[], inputs: LoadedInputs, seedEntryContent: (kase: CaseManifest) => string): FollowUpItem[] {
+function buildEarlierResultItems(rows: RawRow[], inputs: LoadedInputs, earlierEntryContent: (kase: CaseManifest) => string): FollowUpItem[] {
   const items: FollowUpItem[] = [];
   for (const row of rows) {
     if (row.agentError !== undefined) continue;
     if (row.timedOut) continue;
     const kase = inputs.casesWithExtension.get(row.caseId)!;
     if (row.files[kase.entry] === undefined) continue;
-    if (isUntouchedRow(row, kase, seedEntryContent)) continue;
+    if (isUntouchedRow(row, kase, earlierEntryContent)) continue;
 
     items.push({
       kase,
@@ -164,12 +164,12 @@ function buildControlItems(rows: RawRow[], inputs: LoadedInputs): FollowUpItem[]
 
 function buildFollowUpItems(inputs: LoadedInputs, corpusDir: string): FollowUpItem[] {
   const relevantRows = relevantSourceRows(inputs);
-  const seedEntryContent = seedEntryContentCache(corpusDir);
-  return [...buildSeededItems(relevantRows, inputs, seedEntryContent), ...buildControlItems(relevantRows, inputs)];
+  const earlierEntryContent = earlierEntryContentCache(corpusDir);
+  return [...buildEarlierResultItems(relevantRows, inputs, earlierEntryContent), ...buildControlItems(relevantRows, inputs)];
 }
 
 function keyParts(caseId: string, treatmentId: string, control: boolean, sourceRepetition: number | null): string {
-  return `${caseId}\0${treatmentId}\0${control ? "control" : `seed:${sourceRepetition}`}`;
+  return `${caseId}\0${treatmentId}\0${control ? "control" : `from-repetition:${sourceRepetition}`}`;
 }
 
 function followUpItemKey(item: FollowUpItem): string {
@@ -182,7 +182,7 @@ function followUpRowKey(row: RawRow): string {
 }
 
 function followUpTranscriptFilename(item: FollowUpItem): string {
-  const suffix = item.control ? "control" : `seed-${item.sourceRepetition}`;
+  const suffix = item.control ? "control" : `from-repetition-${item.sourceRepetition}`;
   return `${item.kase.id}.${item.treatment.id}.${suffix}.jsonl`;
 }
 
@@ -218,7 +218,7 @@ function buildFollowUpRow(
 
 function followUpFailureMessage(item: FollowUpItem, err: unknown): string {
   const reason = err instanceof Error ? err.message : String(err);
-  const label = item.control ? "control" : `seed:${item.sourceRepetition}`;
+  const label = item.control ? "control" : `from-repetition:${item.sourceRepetition}`;
   return `${item.kase.id}/${item.treatment.id}/${label}: ${reason}`;
 }
 

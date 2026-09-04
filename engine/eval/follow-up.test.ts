@@ -72,7 +72,7 @@ function readRawRows(runDir: string): RawRow[] {
 
 function rowIdentity(row: RawRow): string {
   const st = row.followUp;
-  return `${row.caseId}/${row.treatmentId}/${st?.control ? "control" : `seed:${st?.sourceRepetition}`}`;
+  return `${row.caseId}/${row.treatmentId}/${st?.control ? "control" : `from-repetition:${st?.sourceRepetition}`}`;
 }
 
 function recordingSpawner(): { spawner: PiSpawner; calls: RunSpec[] } {
@@ -109,10 +109,10 @@ test("runFollowUp_never_seeds_from_a_timed_out_source_row", async () => {
   await runFollowUp(opts);
 
   const identities = readRawRows(opts.runDir).map(rowIdentity).sort();
-  assert.deepEqual(identities, ["ts-flag-parser/rails-default/control", "ts-flag-parser/rails-default/seed:2"]);
+  assert.deepEqual(identities, ["ts-flag-parser/rails-default/control", "ts-flag-parser/rails-default/from-repetition:2"]);
 });
 
-test("runFollowUp_derives_one_seeded_item_per_touched_non_errored_source_row_and_one_control_item_per_arm", async () => {
+test("runFollowUp_derives_one_earlierResult_item_per_touched_non_errored_source_row_and_one_control_item_per_arm", async () => {
   const rows = [
     sourceRow({ treatmentId: "rails-default", repetition: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } }),
     sourceRow({ treatmentId: "rails-default", repetition: 2, agentError: "boom" }),
@@ -130,7 +130,7 @@ test("runFollowUp_derives_one_seeded_item_per_touched_non_errored_source_row_and
   assert.deepEqual(identities, [
     "ts-flag-parser/bare-metric-v1/control",
     "ts-flag-parser/rails-default/control",
-    "ts-flag-parser/rails-default/seed:1",
+    "ts-flag-parser/rails-default/from-repetition:1",
   ]);
 });
 
@@ -170,7 +170,7 @@ test("runFollowUp_materializes_extra_files_the_source_row_created_beside_the_dec
   assert.equal(capturingHelpers.capturedContents[0], helperContent);
 });
 
-test("runFollowUp_spawns_the_seeded_item_under_the_same_treatment_env_as_the_source_row", async () => {
+test("runFollowUp_spawns_the_earlierResult_item_under_the_same_treatment_env_as_the_source_row", async () => {
   const rows = [sourceRow({ treatmentId: "control", files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
   const sourceRunDir = writeSourceRun(rows);
   const { spawner, calls } = recordingSpawner();
@@ -193,7 +193,7 @@ test("runFollowUp_spawns_the_extension_task_rather_than_the_original_case_task",
   assert.equal(calls[0]?.task, extension.task);
 });
 
-test("runFollowUp_stamps_seeded_rows_with_their_source_run_and_source_repetition", async () => {
+test("runFollowUp_stamps_earlierResult_rows_with_their_source_run_and_source_repetition", async () => {
   const rows = [sourceRow({ treatmentId: "rails-default", repetition: 4, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
   const sourceRunDir = writeSourceRun(rows);
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
@@ -201,8 +201,8 @@ test("runFollowUp_stamps_seeded_rows_with_their_source_run_and_source_repetition
 
   await runFollowUp(opts);
 
-  const seeded = readRawRows(opts.runDir).find((r) => r.followUp?.control === false);
-  assert.deepEqual(seeded?.followUp, { sourceRun: SOURCE_RUN_NAME, sourceRepetition: 4, control: false });
+  const earlierResult = readRawRows(opts.runDir).find((r) => r.followUp?.control === false);
+  assert.deepEqual(earlierResult?.followUp, { sourceRun: SOURCE_RUN_NAME, sourceRepetition: 4, control: false });
 });
 
 test("runFollowUp_stamps_control_rows_with_a_null_source_repetition", async () => {
@@ -222,7 +222,7 @@ function writeExistingFollowUpRow(runDir: string, row: Partial<RawRow>): void {
   writeFileSync(join(runDir, "raw.jsonl"), `${JSON.stringify(row)}\n`);
 }
 
-test("runFollowUp_resumes_by_skipping_a_seeded_item_already_present_in_raw_jsonl", async () => {
+test("runFollowUp_resumes_by_skipping_an_earlierResult_item_already_present_in_raw_jsonl", async () => {
   const rows = [sourceRow({ treatmentId: "rails-default", repetition: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
   const sourceRunDir = writeSourceRun(rows);
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
@@ -240,7 +240,7 @@ test("runFollowUp_resumes_by_skipping_a_seeded_item_already_present_in_raw_jsonl
   assert.equal(result.rowsSkipped, 1);
 });
 
-test("runFollowUp_does_not_confuse_a_control_item_with_a_seeded_item_at_the_same_repetition_when_resuming", async () => {
+test("runFollowUp_does_not_confuse_a_control_item_with_an_earlierResult_item_at_the_same_repetition_when_resuming", async () => {
   const rows = [sourceRow({ treatmentId: "rails-default", repetition: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
   const sourceRunDir = writeSourceRun(rows);
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
