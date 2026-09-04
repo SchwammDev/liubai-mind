@@ -4,14 +4,14 @@ import { CC_DELTA_NUDGE as DEFAULT_CC_DELTA_NUDGE, CC_NUDGE as DEFAULT_CC_NUDGE,
 import { DEFAULT_POLICY } from "../policy.ts";
 import type { FixtureLang, ProbeFixture, ProbeReport } from "../delivery-probe.ts";
 import { PROBE_FIXTURES } from "../delivery-probe.ts";
-import type { ConditionManifest } from "./eval-contract.ts";
+import type { TreatmentManifest } from "./eval-contract.ts";
 import type { ValidPack } from "./phrasing.ts";
 import { validatePack } from "./phrasing.ts";
 
 export type { ProbeReport } from "../delivery-probe.ts";
 
 export interface EvaluateCanaryInput {
-  condition: ConditionManifest;
+  treatment: TreatmentManifest;
   packContent: string | undefined;
   exitCode: number;
   stdout: string;
@@ -72,21 +72,21 @@ export function parseProbeStdout(stdout: string): ProbeReport | { error: string 
   return parsed;
 }
 
-function failure(conditionId: string, mismatch: string): { ok: false; reason: string } {
-  return { ok: false, reason: `condition ${conditionId}: ${mismatch}` };
+function failure(treatmentId: string, mismatch: string): { ok: false; reason: string } {
+  return { ok: false, reason: `treatment ${treatmentId}: ${mismatch}` };
 }
 
-function resolvePack(condition: ConditionManifest, packContent: string | undefined): { value: ValidPack } | { error: string } {
-  if (condition.phrasingPack === undefined) return { value: {} };
-  if (packContent === undefined) return { error: "condition declares a phrasingPack but no pack content was supplied" };
+function resolvePack(treatment: TreatmentManifest, packContent: string | undefined): { value: ValidPack } | { error: string } {
+  if (treatment.phrasingPack === undefined) return { value: {} };
+  if (packContent === undefined) return { error: "treatment declares a phrasingPack but no pack content was supplied" };
 
   const validated = validatePack(packContent);
   if ("error" in validated) return { error: `invalid phrasing pack: ${validated.error}` };
   return { value: validated.pack };
 }
 
-function expectedPackHash(condition: ConditionManifest, packContent: string | undefined): string | null {
-  if (condition.phrasingPack === undefined) return null;
+function expectedPackHash(treatment: TreatmentManifest, packContent: string | undefined): string | null {
+  if (treatment.phrasingPack === undefined) return null;
   return packHash(packContent ?? null);
 }
 
@@ -149,21 +149,21 @@ function parseAndResolve(input: EvaluateCanaryInput): ParsedStage {
     return { error: `probe reported analyze errors: ${parsed.errors.map((e) => `${e.source}: ${e.msg}`).join("; ")}` };
   }
 
-  const pack = resolvePack(input.condition, input.packContent);
+  const pack = resolvePack(input.treatment, input.packContent);
   if ("error" in pack) return pack;
 
   return { report: parsed, pack: pack.value };
 }
 
 interface DeliveryCtx {
-  condition: ConditionManifest;
+  treatment: TreatmentManifest;
   packContent: string | undefined;
   report: ProbeReport;
   pack: ValidPack;
 }
 
 function checkPackHash(ctx: DeliveryCtx): string | undefined {
-  const expected = expectedPackHash(ctx.condition, ctx.packContent);
+  const expected = expectedPackHash(ctx.treatment, ctx.packContent);
   if (ctx.report.packHash === expected) return undefined;
   return `packHash mismatch — expected ${JSON.stringify(expected)}, got ${JSON.stringify(ctx.report.packHash)}`;
 }
@@ -173,7 +173,7 @@ function checkCcDelta(ctx: DeliveryCtx): string | undefined {
 }
 
 function checkCcNudge(ctx: DeliveryCtx): string | undefined {
-  const railsOff = Boolean(ctx.condition.env.LIUBAI_RAILS_OFF);
+  const railsOff = Boolean(ctx.treatment.env.LIUBAI_RAILS_OFF);
   return railsOff ? checkCcNudgeConstant(ctx.report, ctx.pack) : checkCcNudgeFiring(ctx.report, ctx.pack);
 }
 
@@ -189,10 +189,10 @@ function checkDelivery(ctx: DeliveryCtx): string | undefined {
 
 export function evaluateCanary(input: EvaluateCanaryInput): CanaryResult {
   const stage = parseAndResolve(input);
-  if ("error" in stage) return failure(input.condition.id, stage.error);
+  if ("error" in stage) return failure(input.treatment.id, stage.error);
 
-  const mismatch = checkDelivery({ condition: input.condition, packContent: input.packContent, report: stage.report, pack: stage.pack });
-  if (mismatch !== undefined) return failure(input.condition.id, mismatch);
+  const mismatch = checkDelivery({ treatment: input.treatment, packContent: input.packContent, report: stage.report, pack: stage.pack });
+  if (mismatch !== undefined) return failure(input.treatment.id, mismatch);
 
   return { ok: true, report: stage.report };
 }

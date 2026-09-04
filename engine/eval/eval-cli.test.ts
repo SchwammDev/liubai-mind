@@ -57,11 +57,11 @@ function throwingCollect(message: string): (opts: CollectOpts) => Promise<Collec
 }
 
 test("parseCliArgs_parses_a_full_collect_invocation", () => {
-  const argv = collectArgv("--reps", "3", "--timeout-ms", "60000", ...repeated("--case", ["ts-flag-parser", "ts-order-validator"]), "--condition", "control");
+  const argv = collectArgv("--reps", "3", "--timeout-ms", "60000", ...repeated("--case", ["ts-flag-parser", "ts-order-validator"]), "--treatment", "control");
 
   const parsed = parseCliArgs(argv);
 
-  assertParsedCollect(parsed, { reps: 3, timeoutMs: 60000, cases: ["ts-flag-parser", "ts-order-validator"], conditions: ["control"] });
+  assertParsedCollect(parsed, { reps: 3, timeoutMs: 60000, cases: ["ts-flag-parser", "ts-order-validator"], treatments: ["control"] });
 });
 
 test("parseCliArgs_reports_error_when_collect_is_missing_model", () => {
@@ -242,7 +242,7 @@ test("parseCliArgs_parses_a_full_second_touch_invocation", () => {
     "--timeout-ms",
     "60000",
     ...repeated("--case", ["ts-flag-parser", "ts-order-fulfillment"]),
-    "--condition",
+    "--treatment",
     "rails-default",
   );
 
@@ -252,7 +252,7 @@ test("parseCliArgs_parses_a_full_second_touch_invocation", () => {
     parallel: 3,
     timeoutMs: 60000,
     cases: ["ts-flag-parser", "ts-order-fulfillment"],
-    conditions: ["rails-default"],
+    treatments: ["rails-default"],
   });
 });
 

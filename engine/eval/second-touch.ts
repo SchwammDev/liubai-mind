@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
-import type { CaseManifest, ConditionManifest, RawRow } from "./eval-contract.ts";
-import { loadConditions } from "./conditions.ts";
+import type { CaseManifest, TreatmentManifest, RawRow } from "./eval-contract.ts";
+import { loadTreatments } from "./treatments.ts";
 import { loadCases } from "./corpus.ts";
 import type { PiSpawner, RunOutcome } from "./spawner.ts";
 import type { WorkDirSnapshot } from "./snapshot.ts";
@@ -31,11 +31,11 @@ export interface SecondTouchOpts {
   model: string;
   timeoutMs?: number;
   cases?: string[];
-  conditions?: string[];
+  treatments?: string[];
   spawner?: PiSpawner;
   workRoot?: string;
   now?: () => string;
-  conditionsDir?: string;
+  treatmentsDir?: string;
   corpusDir?: string;
   parallel?: number;
 }
@@ -53,7 +53,7 @@ interface SecondTouchContext extends CollectContext {
 
 interface SecondTouchItem {
   kase: CaseManifest;
-  condition: ConditionManifest;
+  treatment: TreatmentManifest;
   control: boolean;
   sourceRep: number | null;
   sourceFiles?: Record<string, string>;
@@ -61,7 +61,7 @@ interface SecondTouchItem {
 
 interface LoadedInputs {
   casesWithExtension: Map<string, CaseManifest>;
-  conditionsById: Map<string, ConditionManifest>;
+  treatmentsById: Map<string, TreatmentManifest>;
   sourceRows: RawRow[];
 }
 
@@ -87,20 +87,20 @@ function extensionCasesById(cases: CaseManifest[]): Map<string, CaseManifest> {
   return byId;
 }
 
-function loadInputs(opts: SecondTouchOpts, corpusDir: string, conditionsDir: string): LoadedInputs | { error: string } {
+function loadInputs(opts: SecondTouchOpts, corpusDir: string, treatmentsDir: string): LoadedInputs | { error: string } {
   const cases = loadCases(corpusDir, opts.cases);
   if ("error" in cases) return cases;
 
   const casesWithExtension = extensionCasesById(cases);
   if (casesWithExtension.size === 0) return { error: "no case in the filter has an extension.json" };
 
-  const conditionsResult = loadConditions(conditionsDir, opts.conditions);
-  if ("error" in conditionsResult) return conditionsResult;
+  const treatmentsResult = loadTreatments(treatmentsDir, opts.treatments);
+  if ("error" in treatmentsResult) return treatmentsResult;
 
   const sourceRows = readSourceRows(opts.sourceRunDir);
   if ("error" in sourceRows) return sourceRows;
 
-  return { casesWithExtension, conditionsById: new Map(conditionsResult.map((c) => [c.id, c])), sourceRows };
+  return { casesWithExtension, treatmentsById: new Map(treatmentsResult.map((c) => [c.id, c])), sourceRows };
 }
 
 function modelMismatchWarning(sourceRows: RawRow[], model: string): string | undefined {
@@ -110,7 +110,7 @@ function modelMismatchWarning(sourceRows: RawRow[], model: string): string | und
 }
 
 function relevantSourceRows(inputs: LoadedInputs): RawRow[] {
-  return inputs.sourceRows.filter((row) => inputs.casesWithExtension.has(row.caseId) && inputs.conditionsById.has(row.conditionId));
+  return inputs.sourceRows.filter((row) => inputs.casesWithExtension.has(row.caseId) && inputs.treatmentsById.has(row.treatmentId));
 }
 
 function seedEntryContentCache(corpusDir: string): (kase: CaseManifest) => string {
@@ -139,7 +139,7 @@ function buildSeededItems(rows: RawRow[], inputs: LoadedInputs, seedEntryContent
 
     items.push({
       kase,
-      condition: inputs.conditionsById.get(row.conditionId)!,
+      treatment: inputs.treatmentsById.get(row.treatmentId)!,
       control: false,
       sourceRep: row.rep,
       sourceFiles: row.files,
@@ -148,15 +148,15 @@ function buildSeededItems(rows: RawRow[], inputs: LoadedInputs, seedEntryContent
   return items;
 }
 
-function conditionIdsForCase(rows: RawRow[], caseId: string): Set<string> {
-  return new Set(rows.filter((r) => r.caseId === caseId).map((r) => r.conditionId));
+function treatmentIdsForCase(rows: RawRow[], caseId: string): Set<string> {
+  return new Set(rows.filter((r) => r.caseId === caseId).map((r) => r.treatmentId));
 }
 
 function buildControlItems(rows: RawRow[], inputs: LoadedInputs): SecondTouchItem[] {
   const items: SecondTouchItem[] = [];
   for (const kase of inputs.casesWithExtension.values()) {
-    for (const conditionId of conditionIdsForCase(rows, kase.id)) {
-      items.push({ kase, condition: inputs.conditionsById.get(conditionId)!, control: true, sourceRep: null });
+    for (const treatmentId of treatmentIdsForCase(rows, kase.id)) {
+      items.push({ kase, treatment: inputs.treatmentsById.get(treatmentId)!, control: true, sourceRep: null });
     }
   }
   return items;
@@ -168,22 +168,22 @@ function buildSecondTouchItems(inputs: LoadedInputs, corpusDir: string): SecondT
   return [...buildSeededItems(relevantRows, inputs, seedEntryContent), ...buildControlItems(relevantRows, inputs)];
 }
 
-function keyParts(caseId: string, conditionId: string, control: boolean, sourceRep: number | null): string {
-  return `${caseId}\0${conditionId}\0${control ? "control" : `seed:${sourceRep}`}`;
+function keyParts(caseId: string, treatmentId: string, control: boolean, sourceRep: number | null): string {
+  return `${caseId}\0${treatmentId}\0${control ? "control" : `seed:${sourceRep}`}`;
 }
 
 function secondTouchItemKey(item: SecondTouchItem): string {
-  return keyParts(item.kase.id, item.condition.id, item.control, item.sourceRep);
+  return keyParts(item.kase.id, item.treatment.id, item.control, item.sourceRep);
 }
 
 function secondTouchRowKey(row: RawRow): string {
   const st = row.secondTouch;
-  return keyParts(row.caseId, row.conditionId, st?.control ?? false, st?.sourceRep ?? null);
+  return keyParts(row.caseId, row.treatmentId, st?.control ?? false, st?.sourceRep ?? null);
 }
 
 function secondTouchTranscriptFilename(item: SecondTouchItem): string {
   const suffix = item.control ? "control" : `seed-${item.sourceRep}`;
-  return `${item.kase.id}.${item.condition.id}.${suffix}.jsonl`;
+  return `${item.kase.id}.${item.treatment.id}.${suffix}.jsonl`;
 }
 
 function materializeSourceFiles(workDir: string, files: Record<string, string>): { to: string }[] {
@@ -206,10 +206,10 @@ function buildSecondTouchRow(
   snapshot: WorkDirSnapshot,
   delivered: RawRow["delivered"],
 ): RawRow {
-  const core = buildRawRowCore(ctx, item.condition.id, packContent, outcome, durationMs, snapshot, undefined, delivered);
+  const core = buildRawRowCore(ctx, item.treatment.id, packContent, outcome, durationMs, snapshot, undefined, delivered);
   return {
     caseId: item.kase.id,
-    conditionId: item.condition.id,
+    treatmentId: item.treatment.id,
     rep: item.control ? 1 : item.sourceRep!,
     ...core,
     secondTouch: { sourceRun: ctx.sourceRun, sourceRep: item.control ? null : item.sourceRep, control: item.control },
@@ -219,7 +219,7 @@ function buildSecondTouchRow(
 function secondTouchFailureMessage(item: SecondTouchItem, err: unknown): string {
   const reason = err instanceof Error ? err.message : String(err);
   const label = item.control ? "control" : `seed:${item.sourceRep}`;
-  return `${item.kase.id}/${item.condition.id}/${label}: ${reason}`;
+  return `${item.kase.id}/${item.treatment.id}/${label}: ${reason}`;
 }
 
 function workDirPlanFor(ctx: SecondTouchContext, item: SecondTouchItem, workDir: string): { to: string }[] {
@@ -229,9 +229,9 @@ function workDirPlanFor(ctx: SecondTouchContext, item: SecondTouchItem, workDir:
 async function runSecondTouchItem(ctx: SecondTouchContext, item: SecondTouchItem): Promise<ItemResult> {
   const workDir = mkdtempSync(join(ctx.workRoot, "eval-work-"));
   const plan = workDirPlanFor(ctx, item, workDir);
-  const packPath = packAbsolutePath(ctx.conditionsDir, item.condition);
+  const packPath = packAbsolutePath(ctx.treatmentsDir, item.treatment);
   const packContent = readPackContent(packPath);
-  const env = buildEnv(item.condition, packContent);
+  const env = buildEnv(item.treatment, packContent);
 
   try {
     const { outcome, durationMs } = await spawnForItem(ctx, item.kase.extension!.task, workDir, env);
@@ -270,10 +270,10 @@ export async function runSecondTouch(opts: SecondTouchOpts): Promise<SecondTouch
     return loadError("second-touch must write into a new run, not the source run");
   }
 
-  const conditionsDir = opts.conditionsDir ?? join(import.meta.dirname, "conditions");
+  const treatmentsDir = opts.treatmentsDir ?? join(import.meta.dirname, "treatments");
   const corpusDir = opts.corpusDir ?? join(import.meta.dirname, "corpus");
 
-  const inputs = loadInputs(opts, corpusDir, conditionsDir);
+  const inputs = loadInputs(opts, corpusDir, treatmentsDir);
   if ("error" in inputs) return loadError(inputs.error);
 
   const mismatch = modelMismatchWarning(inputs.sourceRows, opts.model);
@@ -284,7 +284,7 @@ export async function runSecondTouch(opts: SecondTouchOpts): Promise<SecondTouch
   const existingKeys = loadExistingKeys(rawPath, secondTouchRowKey);
   mkdirSync(join(opts.runDir, "transcripts"), { recursive: true });
 
-  const ctx: SecondTouchContext = { ...buildContext(opts, corpusDir, conditionsDir), sourceRun: opts.sourceRun };
+  const ctx: SecondTouchContext = { ...buildContext(opts, corpusDir, treatmentsDir), sourceRun: opts.sourceRun };
   const counts = await runItemsConcurrently(ctx, opts.runDir, rawPath, items, existingKeys, SECOND_TOUCH_OPS);
 
   return toSecondTouchResult(counts, warnings);

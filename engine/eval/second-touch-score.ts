@@ -25,7 +25,7 @@ export interface JudgedSecondTouchRow {
 
 export interface SecondTouchSummaryRow {
   touch: "second";
-  conditionId: string;
+  treatmentId: string;
   caseId: string | null;
   stratum: string | null;
   counts: Record<SecondTouchVerdict, number>;
@@ -145,31 +145,31 @@ function classifySecondTouchVerdict(kase: CaseManifest, row: RawRow, seedFiles: 
   return "extended";
 }
 
-function sourceRowKey(caseId: string, conditionId: string, rep: number): string {
-  return `${caseId}\0${conditionId}\0${rep}`;
+function sourceRowKey(caseId: string, treatmentId: string, rep: number): string {
+  return `${caseId}\0${treatmentId}\0${rep}`;
 }
 
 function indexSourceRows(sourceRows: RawRow[]): Map<string, RawRow> {
   const map = new Map<string, RawRow>();
-  for (const row of sourceRows) map.set(sourceRowKey(row.caseId, row.conditionId, row.rep), row);
+  for (const row of sourceRows) map.set(sourceRowKey(row.caseId, row.treatmentId, row.rep), row);
   return map;
 }
 
 function findSourceRow(sourceRowsByKey: Map<string, RawRow>, row: RawRow): RawRow {
   const info = row.secondTouch;
   if (info === undefined || info.control || info.sourceRep === null) {
-    throw new Error(`second-touch-score: ${row.caseId}/${row.conditionId}#${row.rep} is not a seeded second-touch row`);
+    throw new Error(`second-touch-score: ${row.caseId}/${row.treatmentId}#${row.rep} is not a seeded second-touch row`);
   }
-  const found = sourceRowsByKey.get(sourceRowKey(row.caseId, row.conditionId, info.sourceRep));
+  const found = sourceRowsByKey.get(sourceRowKey(row.caseId, row.treatmentId, info.sourceRep));
   if (found === undefined) {
-    throw new Error(`second-touch-score: source row not found for ${row.caseId}/${row.conditionId}#${info.sourceRep}`);
+    throw new Error(`second-touch-score: source row not found for ${row.caseId}/${row.treatmentId}#${info.sourceRep}`);
   }
   return found;
 }
 
 function seedFilesFor(row: RawRow, kase: CaseManifest, corpusDir: string, sourceRowsByKey: Map<string, RawRow>): Record<string, string> {
   if (row.secondTouch === undefined) {
-    throw new Error(`second-touch-score: ${row.caseId}/${row.conditionId}#${row.rep} has no secondTouch info`);
+    throw new Error(`second-touch-score: ${row.caseId}/${row.treatmentId}#${row.rep} has no secondTouch info`);
   }
   return row.secondTouch.control ? pristineFiles(corpusDir, kase) : findSourceRow(sourceRowsByKey, row).files;
 }
@@ -181,7 +181,7 @@ async function sourceVerdictOf(
   cache: Map<string, Verdict>,
 ): Promise<Verdict> {
   const sourceRow = findSourceRow(sourceRowsByKey, row);
-  const key = sourceRowKey(sourceRow.caseId, sourceRow.conditionId, sourceRow.rep);
+  const key = sourceRowKey(sourceRow.caseId, sourceRow.treatmentId, sourceRow.rep);
   const cached = cache.get(key);
   if (cached !== undefined) return cached;
 
@@ -263,10 +263,10 @@ function extensionSuccessRateOf(counts: Record<SecondTouchVerdict, number>, tota
   return denominator === 0 ? null : (counts.extended / denominator) * 100;
 }
 
-function finalizeRow(conditionId: string, caseId: string | null, stratum: string | null, acc: SecondTouchAccumulator): SecondTouchSummaryRow {
+function finalizeRow(treatmentId: string, caseId: string | null, stratum: string | null, acc: SecondTouchAccumulator): SecondTouchSummaryRow {
   return {
     touch: "second",
-    conditionId,
+    treatmentId,
     caseId,
     stratum,
     counts: acc.counts,
@@ -292,31 +292,31 @@ export function aggregateSecondTouch(judged: JudgedSecondTouchRow[]): SecondTouc
   const overall = new Map<string, SecondTouchAccumulator>();
   const stratumBuckets = new Map<string, SecondTouchAccumulator>();
   const detail = new Map<string, SecondTouchAccumulator>();
-  const stratumMeta = new Map<string, { conditionId: string; stratum: string }>();
-  const detailMeta = new Map<string, { conditionId: string; caseId: string }>();
+  const stratumMeta = new Map<string, { treatmentId: string; stratum: string }>();
+  const detailMeta = new Map<string, { treatmentId: string; caseId: string }>();
 
   for (const j of judged) {
-    const { conditionId, caseId } = j.row;
+    const { treatmentId, caseId } = j.row;
 
-    addRow(getOrInit(overall, conditionId), j);
+    addRow(getOrInit(overall, treatmentId), j);
 
-    const stratumKey = `${conditionId}\0${j.stratum}`;
-    stratumMeta.set(stratumKey, { conditionId, stratum: j.stratum });
+    const stratumKey = `${treatmentId}\0${j.stratum}`;
+    stratumMeta.set(stratumKey, { treatmentId, stratum: j.stratum });
     addRow(getOrInit(stratumBuckets, stratumKey), j);
 
-    const detailKey = `${conditionId}\0${caseId}`;
-    detailMeta.set(detailKey, { conditionId, caseId });
+    const detailKey = `${treatmentId}\0${caseId}`;
+    detailMeta.set(detailKey, { treatmentId, caseId });
     addRow(getOrInit(detail, detailKey), j);
   }
 
-  const overallRows = [...overall.entries()].map(([conditionId, acc]) => finalizeRow(conditionId, null, null, acc));
+  const overallRows = [...overall.entries()].map(([treatmentId, acc]) => finalizeRow(treatmentId, null, null, acc));
   const stratumRows = [...stratumBuckets.entries()].map(([key, acc]) => {
     const meta = stratumMeta.get(key)!;
-    return finalizeRow(meta.conditionId, null, meta.stratum, acc);
+    return finalizeRow(meta.treatmentId, null, meta.stratum, acc);
   });
   const detailRows = [...detail.entries()].map(([key, acc]) => {
     const meta = detailMeta.get(key)!;
-    return finalizeRow(meta.conditionId, meta.caseId, null, acc);
+    return finalizeRow(meta.treatmentId, meta.caseId, null, acc);
   });
 
   return [...overallRows, ...stratumRows, ...detailRows];
@@ -330,19 +330,19 @@ function formatMean(value: number | null): string {
   return value === null ? "-" : value.toFixed(1);
 }
 
-function conditionCell(row: SecondTouchSummaryRow): string {
-  return row.stratum === null ? row.conditionId : `${row.conditionId} [${row.stratum}]`;
+function treatmentCell(row: SecondTouchSummaryRow): string {
+  return row.stratum === null ? row.treatmentId : `${row.treatmentId} [${row.stratum}]`;
 }
 
 function markdownRow(row: SecondTouchSummaryRow): string {
   const c = row.counts;
-  return `| ${conditionCell(row)} | ${row.total} | ${c.extended} | ${c["extension-failed"]} | ${c.regressed} | ${c.broken} | ${c.untouched} | ${c.errored} | ${c["timed-out"]} | ${formatPercent(row.extensionSuccessRate)} | ${formatMean(row.meanLinesAdded)} | ${formatMean(row.meanLinesRemoved)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanRailFiringsTotal)} |`;
+  return `| ${treatmentCell(row)} | ${row.total} | ${c.extended} | ${c["extension-failed"]} | ${c.regressed} | ${c.broken} | ${c.untouched} | ${c.errored} | ${c["timed-out"]} | ${formatPercent(row.extensionSuccessRate)} | ${formatMean(row.meanLinesAdded)} | ${formatMean(row.meanLinesRemoved)} | ${formatMean(row.meanTurns)} | ${formatMean(row.meanRailFiringsTotal)} |`;
 }
 
 export function formatSecondTouchMarkdown(summary: SecondTouchSummaryRow[]): string {
   const rollups = summary.filter((r) => r.caseId === null);
   const header =
-    "| condition | n | extended | extension-failed | regressed | broken | untouched | errored | timed-out | extension % | mean added | mean removed | mean turns | mean rails |";
+    "| treatment | n | extended | extension-failed | regressed | broken | untouched | errored | timed-out | extension % | mean added | mean removed | mean turns | mean rails |";
   const divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
   return [header, divider, ...rollups.map(markdownRow)].join("\n");
 }

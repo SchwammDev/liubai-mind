@@ -2,12 +2,12 @@ import { mkdirSync, mkdtempSync, existsSync, readFileSync, appendFileSync, write
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 
-import type { CaseManifest, ConditionManifest, RawRow, Tier } from "./eval-contract.ts";
+import type { CaseManifest, TreatmentManifest, RawRow, Tier } from "./eval-contract.ts";
 import { RULE, EVAL_ABORT_EXIT_CODE } from "../contract.ts";
 import type { RuleName } from "../contract.ts";
 import { evaluateCanary } from "./canary.ts";
 import type { ProbeReport } from "./canary.ts";
-import { loadConditions } from "./conditions.ts";
+import { loadTreatments } from "./treatments.ts";
 import { loadCases, copyPlan } from "./corpus.ts";
 import { promptCarriedArmMessage } from "./prompt-carried-message.ts";
 import { buildProvenance } from "./provenance.ts";
@@ -23,13 +23,13 @@ export interface CollectOpts {
   model: string;
   timeoutMs?: number;
   cases?: string[];
-  conditions?: string[];
+  treatments?: string[];
   tier?: Tier;
   spawner?: PiSpawner;
   probeSpawner?: ProbeSpawner;
   workRoot?: string;
   now?: () => string;
-  conditionsDir?: string;
+  treatmentsDir?: string;
   corpusDir?: string;
   parallel?: number;
 }
@@ -43,14 +43,14 @@ export interface CollectResult {
 
 interface WorkItem {
   kase: CaseManifest;
-  condition: ConditionManifest;
+  treatment: TreatmentManifest;
   rep: number;
 }
 
 export interface CollectContext {
   repoRoot: string;
   corpusDir: string;
-  conditionsDir: string;
+  treatmentsDir: string;
   model: string;
   timeoutMs: number;
   spawner: PiSpawner;
@@ -271,20 +271,20 @@ export function detectAgentError(stdoutJsonl: string, exitCode = 0): string | un
   return partialRunExitError(exitCode);
 }
 
-function rowKey(row: { caseId: string; conditionId: string; rep: number }): string {
-  return `${row.caseId}\0${row.conditionId}\0${row.rep}`;
+function rowKey(row: { caseId: string; treatmentId: string; rep: number }): string {
+  return `${row.caseId}\0${row.treatmentId}\0${row.rep}`;
 }
 
 function itemKey(item: WorkItem): string {
-  return rowKey({ caseId: item.kase.id, conditionId: item.condition.id, rep: item.rep });
+  return rowKey({ caseId: item.kase.id, treatmentId: item.treatment.id, rep: item.rep });
 }
 
-function buildWorkItems(cases: CaseManifest[], conditions: ConditionManifest[], reps: number): WorkItem[] {
+function buildWorkItems(cases: CaseManifest[], treatments: TreatmentManifest[], reps: number): WorkItem[] {
   const items: WorkItem[] = [];
   for (const kase of cases) {
-    for (const condition of conditions) {
+    for (const treatment of treatments) {
       for (let rep = 1; rep <= reps; rep += 1) {
-        items.push({ kase, condition, rep });
+        items.push({ kase, treatment, rep });
       }
     }
   }
@@ -298,29 +298,29 @@ export function loadExistingKeys(rawPath: string, keyOfRow: (row: RawRow) => str
   return new Set(lines.map((line) => keyOfRow(JSON.parse(line) as RawRow)));
 }
 
-export function packAbsolutePath(conditionsDir: string, condition: ConditionManifest): string | undefined {
-  return condition.phrasingPack === undefined ? undefined : join(conditionsDir, condition.phrasingPack);
+export function packAbsolutePath(treatmentsDir: string, treatment: TreatmentManifest): string | undefined {
+  return treatment.phrasingPack === undefined ? undefined : join(treatmentsDir, treatment.phrasingPack);
 }
 
 export function readPackContent(packPath: string | undefined): string | undefined {
   return packPath === undefined ? undefined : readFileSync(packPath, "utf8");
 }
 
-export function buildEnv(condition: ConditionManifest, packContent: string | undefined): Record<string, string> {
-  const base = { ...condition.env, LIUBAI_EVAL: "1" };
+export function buildEnv(treatment: TreatmentManifest, packContent: string | undefined): Record<string, string> {
+  const base = { ...treatment.env, LIUBAI_EVAL: "1" };
   return packContent === undefined ? base : { ...base, LIUBAI_PHRASING_PACK: packContent };
 }
 
-function requirePromptPackContent(packContent: string | undefined, condition: ConditionManifest): string {
+function requirePromptPackContent(packContent: string | undefined, treatment: TreatmentManifest): string {
   if (packContent === undefined) {
-    throw new Error(`condition ${condition.id}: delivery "prompt" carries no phrasing pack — conditions.ts validation should have rejected this at load time`);
+    throw new Error(`treatment ${treatment.id}: delivery "prompt" carries no phrasing pack — treatments.ts validation should have rejected this at load time`);
   }
   return packContent;
 }
 
-export function buildTask(kase: CaseManifest, condition: ConditionManifest, packContent: string | undefined): string {
-  if (condition.delivery !== "prompt") return kase.task;
-  return `${kase.task}\n\n${promptCarriedArmMessage(kase, requirePromptPackContent(packContent, condition))}`;
+export function buildTask(kase: CaseManifest, treatment: TreatmentManifest, packContent: string | undefined): string {
+  if (treatment.delivery !== "prompt") return kase.task;
+  return `${kase.task}\n\n${promptCarriedArmMessage(kase, requirePromptPackContent(packContent, treatment))}`;
 }
 
 export function copyCaseFiles(corpusDir: string, kase: CaseManifest, workDir: string): { from: string; to: string }[] {
@@ -350,7 +350,7 @@ export function snapshotWorkDir(workDir: string, plan: { to: string }[]): WorkDi
 
 function failureMessage(item: WorkItem, err: unknown): string {
   const reason = err instanceof Error ? err.message : String(err);
-  return `${item.kase.id}/${item.condition.id}/${item.rep}: ${reason}`;
+  return `${item.kase.id}/${item.treatment.id}/${item.rep}: ${reason}`;
 }
 
 export async function spawnForItem(
@@ -388,7 +388,7 @@ export function readDelivered(workDir: string): RawRow["delivered"] {
 
 export function buildRawRowCore(
   ctx: CollectContext,
-  conditionId: string,
+  treatmentId: string,
   packContent: string | undefined,
   outcome: RunOutcome,
   durationMs: number,
@@ -396,10 +396,10 @@ export function buildRawRowCore(
   shadowFirings?: Record<RuleName, number>,
   delivered?: RawRow["delivered"],
   sentTask?: string,
-): Omit<RawRow, "caseId" | "conditionId" | "rep"> {
+): Omit<RawRow, "caseId" | "treatmentId" | "rep"> {
   const packBytes = packContent === undefined ? null : packContent;
   const provenance = buildProvenance({
-    conditionId,
+    treatmentId,
     packBytes,
     repoRoot: ctx.repoRoot,
     model: ctx.model,
@@ -449,26 +449,26 @@ function buildRawRow(
 ): RawRow {
   return {
     caseId: item.kase.id,
-    conditionId: item.condition.id,
+    treatmentId: item.treatment.id,
     rep: item.rep,
-    ...buildRawRowCore(ctx, item.condition.id, packContent, outcome, durationMs, snapshot, shadowFirings, delivered, sentTask),
+    ...buildRawRowCore(ctx, item.treatment.id, packContent, outcome, durationMs, snapshot, shadowFirings, delivered, sentTask),
   };
 }
 
 async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult> {
   const workDir = mkdtempSync(join(ctx.workRoot, "eval-work-"));
   const plan = copyCaseFiles(ctx.corpusDir, item.kase, workDir);
-  const packPath = packAbsolutePath(ctx.conditionsDir, item.condition);
+  const packPath = packAbsolutePath(ctx.treatmentsDir, item.treatment);
   const packContent = readPackContent(packPath);
-  const env = buildEnv(item.condition, packContent);
-  const task = buildTask(item.kase, item.condition, packContent);
+  const env = buildEnv(item.treatment, packContent);
+  const task = buildTask(item.kase, item.treatment, packContent);
 
   try {
     const { outcome, durationMs } = await spawnForItem(ctx, task, workDir, env);
     const snapshot = snapshotWorkDir(workDir, plan);
     const shadowFirings = readShadowFirings(workDir);
     const delivered = readDelivered(workDir);
-    const sentTask = item.condition.delivery === "prompt" ? task : undefined;
+    const sentTask = item.treatment.delivery === "prompt" ? task : undefined;
     const row = buildRawRow(ctx, item, packContent, outcome, durationMs, snapshot, shadowFirings, delivered, sentTask);
     return { row, stdoutJsonl: outcome.stdoutJsonl };
   } catch (err) {
@@ -477,7 +477,7 @@ async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult>
 }
 
 function workItemTranscriptFilename(item: WorkItem): string {
-  return `${item.kase.id}.${item.condition.id}.${item.rep}.jsonl`;
+  return `${item.kase.id}.${item.treatment.id}.${item.rep}.jsonl`;
 }
 
 export function loadError(message: string): CollectResult {
@@ -507,11 +507,11 @@ export interface EngineOptsBase {
   parallel?: number;
 }
 
-export function buildContext(opts: EngineOptsBase, corpusDir: string, conditionsDir: string): CollectContext {
+export function buildContext(opts: EngineOptsBase, corpusDir: string, treatmentsDir: string): CollectContext {
   return {
     repoRoot: opts.repoRoot,
     corpusDir,
-    conditionsDir,
+    treatmentsDir,
     model: opts.model,
     timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     spawner: opts.spawner ?? defaultPiSpawner(opts.repoRoot),
@@ -633,18 +633,18 @@ export function toCollectResult(counts: CollectCounts): CollectResult {
 
 type CanaryOutcome = { ok: true; results: Record<string, ProbeReport> } | { ok: false; message: string };
 
-async function runCanaryChecks(ctx: CollectContext, conditions: ConditionManifest[]): Promise<CanaryOutcome> {
+async function runCanaryChecks(ctx: CollectContext, treatments: TreatmentManifest[]): Promise<CanaryOutcome> {
   const results: Record<string, ProbeReport> = {};
 
-  for (const condition of conditions) {
+  for (const treatment of treatments) {
     const workDir = mkdtempSync(join(ctx.workRoot, "eval-canary-"));
-    const packPath = packAbsolutePath(ctx.conditionsDir, condition);
+    const packPath = packAbsolutePath(ctx.treatmentsDir, treatment);
     const packContent = readPackContent(packPath);
-    const env = buildEnv(condition, packContent);
+    const env = buildEnv(treatment, packContent);
 
     const outcome = await ctx.probeSpawner({ cwd: workDir, env });
     const verdict = evaluateCanary({
-      condition,
+      treatment,
       packContent,
       exitCode: outcome.exitCode,
       stdout: outcome.stdout,
@@ -652,7 +652,7 @@ async function runCanaryChecks(ctx: CollectContext, conditions: ConditionManifes
     });
     if (!verdict.ok) return { ok: false, message: verdict.reason };
 
-    results[condition.id] = verdict.report;
+    results[treatment.id] = verdict.report;
   }
 
   return { ok: true, results };
@@ -662,11 +662,11 @@ export async function runCollect(opts: CollectOpts): Promise<CollectResult> {
   const parallelError = validateParallel(opts.parallel);
   if (parallelError !== undefined) return parallelError;
 
-  const conditionsDir = opts.conditionsDir ?? join(import.meta.dirname, "conditions");
+  const treatmentsDir = opts.treatmentsDir ?? join(import.meta.dirname, "treatments");
   const corpusDir = opts.corpusDir ?? join(import.meta.dirname, "corpus");
 
-  const conditions = loadConditions(conditionsDir, opts.conditions);
-  if ("error" in conditions) return loadError(conditions.error);
+  const treatments = loadTreatments(treatmentsDir, opts.treatments);
+  if ("error" in treatments) return loadError(treatments.error);
 
   const cases = loadCases(corpusDir, opts.cases);
   if ("error" in cases) return loadError(cases.error);
@@ -674,9 +674,9 @@ export async function runCollect(opts: CollectOpts): Promise<CollectResult> {
   const tieredCases = filterByTier(cases, opts.tier);
   if ("error" in tieredCases) return loadError(tieredCases.error);
 
-  const ctx = buildContext(opts, corpusDir, conditionsDir);
+  const ctx = buildContext(opts, corpusDir, treatmentsDir);
 
-  const canary = await runCanaryChecks(ctx, conditions);
+  const canary = await runCanaryChecks(ctx, treatments);
   if (!canary.ok) return loadError(canary.message);
 
   const rawPath = join(opts.runDir, "raw.jsonl");
@@ -684,7 +684,7 @@ export async function runCollect(opts: CollectOpts): Promise<CollectResult> {
   mkdirSync(join(opts.runDir, "transcripts"), { recursive: true });
   writeFileSync(join(opts.runDir, "canary.json"), `${JSON.stringify(canary.results, null, 2)}\n`);
 
-  const items = buildWorkItems(tieredCases, conditions, opts.reps);
+  const items = buildWorkItems(tieredCases, treatments, opts.reps);
   const counts = await runWorkItems(ctx, opts.runDir, rawPath, items, existingKeys);
 
   return toCollectResult(counts);

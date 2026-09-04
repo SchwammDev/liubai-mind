@@ -917,7 +917,7 @@ test(
 
 function minimalReferenceProvenance(): Provenance {
   return {
-    conditionId: "reference",
+    treatmentId: "reference",
     phrasingPackHash: null,
     liubaiSha: "0000000",
     model: "reference-fix",
@@ -928,7 +928,7 @@ function minimalReferenceProvenance(): Provenance {
 function referenceRawRow(kase: CaseManifest): RawRow {
   return {
     caseId: kase.id,
-    conditionId: "reference",
+    treatmentId: "reference",
     rep: 1,
     provenance: minimalReferenceProvenance(),
     files: kase.reference ?? {},

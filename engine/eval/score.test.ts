@@ -212,8 +212,8 @@ function tierMap(entries: [string, Tier][]): Map<string, Tier> {
   return new Map(entries);
 }
 
-function assertTierRollupTotal(summary: SummaryRow[], conditionId: string, tier: Tier, expectedTotal: number): void {
-  const rollup = summary.find((row) => row.conditionId === conditionId && row.caseId === null && row.tier === tier)!;
+function assertTierRollupTotal(summary: SummaryRow[], treatmentId: string, tier: Tier, expectedTotal: number): void {
+  const rollup = summary.find((row) => row.treatmentId === treatmentId && row.caseId === null && row.tier === tier)!;
   assert.equal(rollup.total, expectedTotal);
 }
 
@@ -237,7 +237,7 @@ function assistantBashToolCallLine(command: string): string {
 function writeTranscript(runDir: string, row: RawRow, jsonl: string): void {
   const dir = join(runDir, "transcripts");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, `${row.caseId}.${row.conditionId}.${row.rep}.jsonl`), jsonl);
+  writeFileSync(join(dir, `${row.caseId}.${row.treatmentId}.${row.rep}.jsonl`), jsonl);
 }
 
 function metrics(over: Partial<Metrics> = {}): Metrics {
@@ -246,7 +246,7 @@ function metrics(over: Partial<Metrics> = {}): Metrics {
 
 function provenance(over: Partial<Provenance> = {}): Provenance {
   return {
-    conditionId: "rails-default",
+    treatmentId: "rails-default",
     phrasingPackHash: "a".repeat(64),
     liubaiSha: "abc1234",
     model: "claude-x",
@@ -261,20 +261,20 @@ function deliveredStamp(over: Partial<Delivered> = {}): Delivered {
   return { packHash: "a".repeat(64), liveRules: [], shadowRules: [], ...over };
 }
 
-function writeConditionsDir(conditions: Record<string, Partial<{ expectedZeroFirings: boolean }>>): string {
-  const dir = mkdtempSync(join(tmpdir(), "eval-score-conditions-"));
-  for (const [id, extra] of Object.entries(conditions)) {
+function writeTreatmentsDir(treatments: Record<string, Partial<{ expectedZeroFirings: boolean }>>): string {
+  const dir = mkdtempSync(join(tmpdir(), "eval-score-treatments-"));
+  for (const [id, extra] of Object.entries(treatments)) {
     writeFileSync(join(dir, `${id}.json`), JSON.stringify({ id, env: {}, ...extra }));
   }
   return dir;
 }
 
-function rawRow(conditionId: string, caseId: string, over: Partial<RawRow> = {}): RawRow {
+function rawRow(treatmentId: string, caseId: string, over: Partial<RawRow> = {}): RawRow {
   return {
     caseId,
-    conditionId,
+    treatmentId,
     rep: 1,
-    provenance: provenance({ conditionId }),
+    provenance: provenance({ treatmentId }),
     files: {},
     exitCode: 0,
     timedOut: false,
@@ -284,7 +284,7 @@ function rawRow(conditionId: string, caseId: string, over: Partial<RawRow> = {})
 }
 
 function judgedRow(
-  conditionId: string,
+  treatmentId: string,
   caseId: string,
   verdict: Verdict,
   gamedReason?: GamedReason,
@@ -301,7 +301,7 @@ function judgedRow(
     referencedFiles: [],
     ...(gamedReason !== undefined ? { gamedReason } : {}),
   };
-  return { row: rawRow(conditionId, caseId), judge, contaminated, consultedRail };
+  return { row: rawRow(treatmentId, caseId), judge, contaminated, consultedRail };
 }
 
 function fullyPopulatedJudgedRow(): JudgedRow {
@@ -336,7 +336,7 @@ test("toJudgedJsonlRow_maps_verdict_dp_and_cost_fields_from_a_fully_populated_ju
 
   assert.deepEqual(row, {
     caseId: "case-a",
-    conditionId: "rails-default",
+    treatmentId: "rails-default",
     rep: 2,
     verdict: "gamed",
     gamedReason: "helper-split",
@@ -361,7 +361,7 @@ test("toJudgedJsonlRow_omits_optional_fields_absent_from_the_judged_row", () => 
 
   assert.deepEqual(row, {
     caseId: "case-a",
-    conditionId: "rails-default",
+    treatmentId: "rails-default",
     rep: 1,
     verdict: "untouched",
     contaminated: false,
@@ -386,8 +386,8 @@ function emptyVerdictCounts(): Record<Verdict, number> {
   return { "genuine-fix": 0, gamed: 0, "bar-missed": 0, untouched: 0, broken: 0, "behavior-broken": 0, errored: 0, "timed-out": 0 };
 }
 
-function erroredRawRow(conditionId: string, caseId: string, agentError: string, rep: number): RawRow {
-  return rawRow(conditionId, caseId, { agentError, files: {}, exitCode: 1, rep });
+function erroredRawRow(treatmentId: string, caseId: string, agentError: string, rep: number): RawRow {
+  return rawRow(treatmentId, caseId, { agentError, files: {}, exitCode: 1, rep });
 }
 
 function tsFlagParserEntrySource(): string {
@@ -441,9 +441,9 @@ function importingPyRowFiles(): Record<string, string> {
   };
 }
 
-function findJudgedRow(judged: JudgedRow[], conditionId: string, caseId: string, rep: number): JudgedRow {
-  const found = judged.find((j) => j.row.conditionId === conditionId && j.row.caseId === caseId && j.row.rep === rep);
-  if (found === undefined) throw new Error(`fixture row not found: ${conditionId}/${caseId}#${rep}`);
+function findJudgedRow(judged: JudgedRow[], treatmentId: string, caseId: string, rep: number): JudgedRow {
+  const found = judged.find((j) => j.row.treatmentId === treatmentId && j.row.caseId === caseId && j.row.rep === rep);
+  if (found === undefined) throw new Error(`fixture row not found: ${treatmentId}/${caseId}#${rep}`);
   return found;
 }
 
@@ -459,7 +459,7 @@ function judgeEnv(over: Partial<JudgeEnv> = {}): JudgeEnv {
 }
 
 function summaryRow(
-  conditionId: string,
+  treatmentId: string,
   caseId: string | null,
   counts: Partial<Record<Verdict, number>>,
   total: number,
@@ -467,7 +467,7 @@ function summaryRow(
   railConsults = 0,
 ): SummaryRow {
   return {
-    conditionId,
+    treatmentId,
     caseId,
     tier: null,
     counts: { ...emptyVerdictCounts(), ...counts },
@@ -487,26 +487,26 @@ function summaryRow(
   };
 }
 
-function assertRollupCounts(summary: SummaryRow[], conditionId: string, expected: { total: number; genuineFix: number; gamed: number; helperSplit: number }): void {
-  const rollup = summary.find((r) => r.conditionId === conditionId && r.caseId === null)!;
+function assertRollupCounts(summary: SummaryRow[], treatmentId: string, expected: { total: number; genuineFix: number; gamed: number; helperSplit: number }): void {
+  const rollup = summary.find((r) => r.treatmentId === treatmentId && r.caseId === null)!;
   assert.equal(rollup.total, expected.total);
   assert.equal(rollup.counts["genuine-fix"], expected.genuineFix);
   assert.equal(rollup.counts.gamed, expected.gamed);
   assert.equal(rollup.gamedReasons["helper-split"], expected.helperSplit);
 }
 
-function assertWithCreatedFilesCount(summary: SummaryRow[], conditionId: string, expected: number): void {
-  const rollup = summary.find((r) => r.conditionId === conditionId && r.caseId === null)!;
+function assertWithCreatedFilesCount(summary: SummaryRow[], treatmentId: string, expected: number): void {
+  const rollup = summary.find((r) => r.treatmentId === treatmentId && r.caseId === null)!;
   assert.equal(rollup.withCreatedFiles, expected);
 }
 
-function assertRollupContaminated(summary: SummaryRow[], conditionId: string, expected: number): void {
-  const rollup = summary.find((r) => r.conditionId === conditionId && r.caseId === null)!;
+function assertRollupContaminated(summary: SummaryRow[], treatmentId: string, expected: number): void {
+  const rollup = summary.find((r) => r.treatmentId === treatmentId && r.caseId === null)!;
   assert.equal(rollup.contaminated, expected);
 }
 
-function assertRollupRailConsults(summary: SummaryRow[], conditionId: string, expected: number): void {
-  const rollup = summary.find((r) => r.conditionId === conditionId && r.caseId === null)!;
+function assertRollupRailConsults(summary: SummaryRow[], treatmentId: string, expected: number): void {
+  const rollup = summary.find((r) => r.treatmentId === treatmentId && r.caseId === null)!;
   assert.equal(rollup.railConsults, expected);
 }
 
@@ -515,11 +515,11 @@ function assertDetailTotals(summary: SummaryRow[], expected: [string, number][])
   assert.deepEqual(detailRows.map((r) => [r.caseId, r.total]).sort(), expected);
 }
 
-function assertConditionLine(table: string, conditionId: string, columns: string): void {
-  assert.match(table, new RegExp(`\\| ${conditionId} \\| ${columns} \\|`));
+function assertTreatmentLine(table: string, treatmentId: string, columns: string): void {
+  assert.match(table, new RegExp(`\\| ${treatmentId} \\| ${columns} \\|`));
 }
 
-test("aggregate_rolls_up_verdict_counts_per_condition", () => {
+test("aggregate_rolls_up_verdict_counts_per_treatment", () => {
   const judged = [
     judgedRow("rails-default", "case-a", "genuine-fix"),
     judgedRow("rails-default", "case-b", "gamed", "helper-split"),
@@ -531,11 +531,11 @@ test("aggregate_rolls_up_verdict_counts_per_condition", () => {
   assertRollupCounts(summary, "rails-default", { total: 2, genuineFix: 1, gamed: 1, helperSplit: 1 });
 });
 
-function contaminatedRow(conditionId: string, caseId: string, verdict: Verdict): JudgedRow {
-  return { ...judgedRow(conditionId, caseId, verdict), contaminated: true };
+function contaminatedRow(treatmentId: string, caseId: string, verdict: Verdict): JudgedRow {
+  return { ...judgedRow(treatmentId, caseId, verdict), contaminated: true };
 }
 
-test("aggregate_counts_contaminated_rows_per_condition", () => {
+test("aggregate_counts_contaminated_rows_per_treatment", () => {
   const judged = [
     contaminatedRow("rails-default", "case-a", "genuine-fix"),
     judgedRow("rails-default", "case-b", "gamed", "helper-split"),
@@ -547,11 +547,11 @@ test("aggregate_counts_contaminated_rows_per_condition", () => {
   assertRollupContaminated(summary, "rails-default", 1);
 });
 
-function railConsultRow(conditionId: string, caseId: string, verdict: Verdict): JudgedRow {
-  return { ...judgedRow(conditionId, caseId, verdict), consultedRail: true };
+function railConsultRow(treatmentId: string, caseId: string, verdict: Verdict): JudgedRow {
+  return { ...judgedRow(treatmentId, caseId, verdict), consultedRail: true };
 }
 
-test("aggregate_counts_rail_consult_rows_per_condition", () => {
+test("aggregate_counts_rail_consult_rows_per_treatment", () => {
   const judged = [
     railConsultRow("rails-default", "case-a", "genuine-fix"),
     judgedRow("rails-default", "case-b", "gamed", "helper-split"),
@@ -563,7 +563,7 @@ test("aggregate_counts_rail_consult_rows_per_condition", () => {
   assertRollupRailConsults(summary, "rails-default", 1);
 });
 
-test("aggregate_emits_a_row_per_condition_and_case_pair", () => {
+test("aggregate_emits_a_row_per_treatment_and_case_pair", () => {
   const judged = [
     judgedRow("rails-default", "case-a", "genuine-fix"),
     judgedRow("rails-default", "case-a", "genuine-fix"),
@@ -580,7 +580,7 @@ test("aggregate_counts_a_behavior_broken_verdict", () => {
 
   const summary = aggregate(judged, judgeEnv());
 
-  const rollup = summary.find((r) => r.conditionId === "rails-default" && r.caseId === null)!;
+  const rollup = summary.find((r) => r.treatmentId === "rails-default" && r.caseId === null)!;
   assert.equal(rollup.counts["behavior-broken"], 1);
 });
 
@@ -589,12 +589,12 @@ test("aggregate_counts_a_timed_out_verdict", () => {
 
   const summary = aggregate(judged, judgeEnv());
 
-  const rollup = summary.find((r) => r.conditionId === "rails-default" && r.caseId === null)!;
+  const rollup = summary.find((r) => r.treatmentId === "rails-default" && r.caseId === null)!;
   assert.equal(rollup.counts["timed-out"], 1);
 });
 
-function meanDpReductionOf(summary: SummaryRow[], conditionId: string, caseId: string | null): number | null {
-  return summary.find((r) => r.conditionId === conditionId && r.caseId === caseId)!.meanDpReduction;
+function meanDpReductionOf(summary: SummaryRow[], treatmentId: string, caseId: string | null): number | null {
+  return summary.find((r) => r.treatmentId === treatmentId && r.caseId === caseId)!.meanDpReduction;
 }
 
 function dpJudgedRow(caseId: string, verdict: Verdict, before: number, after: number): JudgedRow {
@@ -642,7 +642,7 @@ test("aggregate_computes_mean_dp_reduction_independently_per_case_detail_row", (
   assert.equal(meanDpReductionOf(summary, "rails-default", "case-b"), 3);
 });
 
-test("aggregate_emits_a_tier_rollup_per_condition_and_tier_present_in_the_data", () => {
+test("aggregate_emits_a_tier_rollup_per_treatment_and_tier_present_in_the_data", () => {
   const judged = [judgedRow("rails-default", "case-a", "genuine-fix"), judgedRow("rails-default", "case-b", "gamed", "helper-split")];
   const tiers = tierMap([["case-a", "easy"], ["case-b", "hard"]]);
 
@@ -687,14 +687,14 @@ function railFirings(over: Partial<Record<RuleName, number>> = {}): Record<RuleN
   return { ...base, ...over };
 }
 
-function costJudgedRow(conditionId: string, caseId: string, over: Partial<RawRow> = {}): JudgedRow {
+function costJudgedRow(treatmentId: string, caseId: string, over: Partial<RawRow> = {}): JudgedRow {
   const judge: JudgeResult = { verdict: "untouched", before: metrics(), after: metrics(), createdFiles: [], referencedFiles: [] };
-  return { row: rawRow(conditionId, caseId, over), judge, contaminated: false, consultedRail: false };
+  return { row: rawRow(treatmentId, caseId, over), judge, contaminated: false, consultedRail: false };
 }
 
-function costOf(summary: SummaryRow[], conditionId: string, caseId: string | null): SummaryRow {
-  const found = summary.find((r) => r.conditionId === conditionId && r.caseId === caseId);
-  if (found === undefined) throw new Error(`summary row not found: ${conditionId}/${caseId}`);
+function costOf(summary: SummaryRow[], treatmentId: string, caseId: string | null): SummaryRow {
+  const found = summary.find((r) => r.treatmentId === treatmentId && r.caseId === caseId);
+  if (found === undefined) throw new Error(`summary row not found: ${treatmentId}/${caseId}`);
   return found;
 }
 
@@ -750,7 +750,7 @@ test("aggregate_means_rail_firings_per_rule_over_rows_that_report_them", () => {
   assert.equal(rollup.meanRailFirings?.["discourage-comments"], 0.5);
 });
 
-test("formatMarkdown_renders_one_line_per_condition_with_counts_and_genuine_rate", () => {
+test("formatMarkdown_renders_one_line_per_treatment_with_counts_and_genuine_rate", () => {
   const summary: SummaryRow[] = [
     summaryRow("rails-default", null, { "genuine-fix": 3, gamed: 1 }, 4),
     summaryRow("control", null, { "bar-missed": 2 }, 2),
@@ -759,8 +759,8 @@ test("formatMarkdown_renders_one_line_per_condition_with_counts_and_genuine_rate
 
   const table = formatMarkdown(summary);
 
-  assertConditionLine(table, "rails-default", "4 \\| 3 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 75\\.0%");
-  assertConditionLine(table, "control", "2 \\| 0 \\| 0 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0\\.0%");
+  assertTreatmentLine(table, "rails-default", "4 \\| 3 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 75\\.0%");
+  assertTreatmentLine(table, "control", "2 \\| 0 \\| 0 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0\\.0%");
   assert.equal(table.split("\n").length, 4);
 });
 
@@ -770,7 +770,7 @@ test("formatMarkdown_renders_the_behavior_broken_column_between_broken_and_error
   const table = formatMarkdown(summary);
 
   assert.match(table, /\| broken \| behavior-broken \| errored \|/);
-  assertConditionLine(table, "rails-default", "6 \\| 0 \\| 0 \\| 0 \\| 0 \\| 1 \\| 3 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0\\.0%");
+  assertTreatmentLine(table, "rails-default", "6 \\| 0 \\| 0 \\| 0 \\| 0 \\| 1 \\| 3 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0\\.0%");
 });
 
 test("formatMarkdown_renders_the_timed_out_column_between_errored_and_created_files", () => {
@@ -779,7 +779,7 @@ test("formatMarkdown_renders_the_timed_out_column_between_errored_and_created_fi
   const table = formatMarkdown(summary);
 
   assert.match(table, /\| errored \| timed-out \| created-files \|/);
-  assertConditionLine(table, "rails-default", "5 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 2 \\| 3 \\| 0 \\| 0 \\| 0 \\| 0\\.0%");
+  assertTreatmentLine(table, "rails-default", "5 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 2 \\| 3 \\| 0 \\| 0 \\| 0 \\| 0\\.0%");
 });
 
 test("formatMarkdown_renders_the_created_files_column_between_errored_and_contaminated", () => {
@@ -788,7 +788,7 @@ test("formatMarkdown_renders_the_created_files_column_between_errored_and_contam
   const table = formatMarkdown(summary);
 
   assert.match(table, /\| errored \| timed-out \| created-files \| contaminated \|/);
-  assertConditionLine(table, "rails-default", "3 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 2 \\| 0 \\| 0 \\| 66\\.7%");
+  assertTreatmentLine(table, "rails-default", "3 \\| 2 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 2 \\| 0 \\| 0 \\| 66\\.7%");
 });
 
 test("formatMarkdown_renders_the_contaminated_column_between_created_files_and_rail_consults", () => {
@@ -797,7 +797,7 @@ test("formatMarkdown_renders_the_contaminated_column_between_created_files_and_r
   const table = formatMarkdown(summary);
 
   assert.match(table, /\| created-files \| contaminated \| rail-consults \| genuine % \|/);
-  assertConditionLine(table, "rails-default", "3 \\| 0 \\| 0 \\| 0 \\| 0 \\| 1 \\| 0 \\| 2 \\| 0 \\| 0 \\| 2 \\| 0 \\| 0\\.0%");
+  assertTreatmentLine(table, "rails-default", "3 \\| 0 \\| 0 \\| 0 \\| 0 \\| 1 \\| 0 \\| 2 \\| 0 \\| 0 \\| 2 \\| 0 \\| 0\\.0%");
 });
 
 test("formatMarkdown_renders_the_rail_consults_column_between_contaminated_and_genuine_percent", () => {
@@ -805,7 +805,7 @@ test("formatMarkdown_renders_the_rail_consults_column_between_contaminated_and_g
 
   const table = formatMarkdown(summary);
 
-  assertConditionLine(table, "rails-default", "3 \\| 0 \\| 0 \\| 0 \\| 0 \\| 1 \\| 0 \\| 2 \\| 0 \\| 0 \\| 0 \\| 2 \\| 0\\.0%");
+  assertTreatmentLine(table, "rails-default", "3 \\| 0 \\| 0 \\| 0 \\| 0 \\| 1 \\| 0 \\| 2 \\| 0 \\| 0 \\| 0 \\| 2 \\| 0\\.0%");
 });
 
 test("formatMarkdown_renders_the_mean_dp_cut_column_after_genuine_percent", () => {
@@ -814,7 +814,7 @@ test("formatMarkdown_renders_the_mean_dp_cut_column_after_genuine_percent", () =
   const table = formatMarkdown(summary);
 
   assert.match(table, /\| genuine % \| mean dp cut \|/);
-  assertConditionLine(table, "rails-default", "1 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 100\\.0% \\| 2\\.5");
+  assertTreatmentLine(table, "rails-default", "1 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 100\\.0% \\| 2\\.5");
 });
 
 test("formatMarkdown_renders_a_dash_for_a_null_mean_dp_cut", () => {
@@ -822,7 +822,7 @@ test("formatMarkdown_renders_a_dash_for_a_null_mean_dp_cut", () => {
 
   const table = formatMarkdown(summary);
 
-  assertConditionLine(table, "rails-default", "0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0\\.0% \\| -");
+  assertTreatmentLine(table, "rails-default", "0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0\\.0% \\| -");
 });
 
 test("formatMarkdown_renders_the_cost_columns_after_mean_dp_cut", () => {
@@ -840,7 +840,7 @@ test("formatMarkdown_renders_the_cost_columns_after_mean_dp_cut", () => {
   const table = formatMarkdown(summary);
 
   assert.match(table, /\| mean dp cut \| mean ms \| mean turns \| tokens in \| tokens out \| nudges\/rep \|/);
-  assertConditionLine(
+  assertTreatmentLine(
     table,
     "rails-default",
     "1 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 100\\.0% \\| - \\| 42000 \\| 5\\.0 \\| 8000\\.0 \\| 1200\\.0 \\| 2\\.0",
@@ -852,10 +852,10 @@ test("formatMarkdown_renders_dashes_for_cost_columns_when_the_bucket_has_no_cost
 
   const table = formatMarkdown(summary);
 
-  assertConditionLine(table, "rails-default", "1 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 100\\.0% \\| - \\| - \\| - \\| - \\| - \\| -");
+  assertTreatmentLine(table, "rails-default", "1 \\| 1 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 0 \\| 100\\.0% \\| - \\| - \\| - \\| - \\| - \\| -");
 });
 
-test("formatMarkdown_suffixes_the_condition_cell_with_the_tier_for_a_tier_rollup", () => {
+test("formatMarkdown_suffixes_the_treatment_cell_with_the_tier_for_a_tier_rollup", () => {
   const summary: SummaryRow[] = [{ ...summaryRow("rails-default", null, { "genuine-fix": 1 }, 1), tier: "easy" }];
 
   const table = formatMarkdown(summary);
@@ -891,8 +891,8 @@ test("judgeRows_classifies_a_row_with_agentError_as_errored_without_running_the_
   assert.equal(judged[0]!.judge.after.parsed, false);
 });
 
-function timedOutRawRow(conditionId: string, caseId: string, rep: number, over: Partial<RawRow> = {}): RawRow {
-  return rawRow(conditionId, caseId, { timedOut: true, files: {}, rep, ...over });
+function timedOutRawRow(treatmentId: string, caseId: string, rep: number, over: Partial<RawRow> = {}): RawRow {
+  return rawRow(treatmentId, caseId, { timedOut: true, files: {}, rep, ...over });
 }
 
 test("judgeRows_classifies_a_timed_out_row_as_timed_out_without_running_the_judge", async () => {
@@ -1123,7 +1123,7 @@ test("runScore_writes_summary_jsonl_beside_raw_jsonl", async () => {
   await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
 
   const parsed = readSummary(runDir);
-  assert.ok(parsed.some((r) => r.conditionId === "rails-default" && r.caseId === null));
+  assert.ok(parsed.some((r) => r.treatmentId === "rails-default" && r.caseId === null));
 });
 
 test("runScore_writes_judged_jsonl_with_one_row_per_raw_row_in_raw_jsonl_order", async () => {
@@ -1245,7 +1245,7 @@ test("runScore_with_compareRunDir_prints_provenance_diff_before_the_tables", asy
   assert.equal(result.status, 0);
   assert.match(result.stdout, /model differs: claude-rails-default vs claude-control/);
   const diffIndex = result.stdout.indexOf("model differs");
-  const tableIndex = result.stdout.indexOf("| condition |");
+  const tableIndex = result.stdout.indexOf("| treatment |");
   assert.ok(diffIndex >= 0 && tableIndex > diffIndex);
 });
 
@@ -1292,7 +1292,7 @@ test("runScore_stamps_withCreatedFiles_into_summary_rows", async () => {
   await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
 
   const parsed = readSummaryRows(runDir);
-  const rollup = parsed.find((r) => r.conditionId === "rails-default" && r.caseId === null)!;
+  const rollup = parsed.find((r) => r.treatmentId === "rails-default" && r.caseId === null)!;
   assert.equal(rollup.withCreatedFiles, 1);
 });
 
@@ -1354,33 +1354,33 @@ test("runScore_fails_the_run_with_an_actionable_message_when_the_py_cc_backend_p
 });
 
 test("runScore_refuses_a_row_whose_delivered_pack_hash_does_not_match_the_claimed_pack_hash", async () => {
-  const conditionId = "delivery-mismatch";
-  const conditionsDir = writeConditionsDir({ [conditionId]: {} });
-  const row = rawRow(conditionId, "any-case", { delivered: deliveredStamp({ packHash: "b".repeat(64) }) });
+  const treatmentId = "delivery-mismatch";
+  const treatmentsDir = writeTreatmentsDir({ [treatmentId]: {} });
+  const row = rawRow(treatmentId, "any-case", { delivered: deliveredStamp({ packHash: "b".repeat(64) }) });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 1);
   assert.match(result.stdout, /\[not-delivered\]/);
-  assert.match(result.stdout, new RegExp(`${conditionId}/any-case#1`));
+  assert.match(result.stdout, new RegExp(`${treatmentId}/any-case#1`));
   assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
 });
 
 test("runScore_refuses_a_run_where_some_rows_carry_a_delivery_stamp_and_others_dont", async () => {
-  const conditionId = "mixed-stamp";
-  const conditionsDir = writeConditionsDir({ [conditionId]: {} });
-  const stamped = rawRow(conditionId, "case-a", { rep: 1, delivered: deliveredStamp() });
-  const unstamped = rawRow(conditionId, "case-b", { rep: 2 });
+  const treatmentId = "mixed-stamp";
+  const treatmentsDir = writeTreatmentsDir({ [treatmentId]: {} });
+  const stamped = rawRow(treatmentId, "case-a", { rep: 1, delivered: deliveredStamp() });
+  const unstamped = rawRow(treatmentId, "case-b", { rep: 2 });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [stamped, unstamped]);
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 1);
   assert.match(result.stdout, /\[missing-stamp\]/);
-  assert.match(result.stdout, new RegExp(`${conditionId}/case-b#2`));
+  assert.match(result.stdout, new RegExp(`${treatmentId}/case-b#2`));
   assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
 });
 
@@ -1397,29 +1397,29 @@ test("runScore_warns_and_scores_normally_when_no_row_in_the_run_carries_a_delive
 });
 
 test("runScore_refuses_an_arm_whose_delivered_live_rules_never_fired", async () => {
-  const conditionId = "live-silent";
-  const conditionsDir = writeConditionsDir({ [conditionId]: {} });
-  const row = rawRow(conditionId, "case-a", { delivered: deliveredStamp({ liveRules: ["cc"] }), railFirings: railFirings() });
+  const treatmentId = "live-silent";
+  const treatmentsDir = writeTreatmentsDir({ [treatmentId]: {} });
+  const row = rawRow(treatmentId, "case-a", { delivered: deliveredStamp({ liveRules: ["cc"] }), railFirings: railFirings() });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 1);
   assert.match(result.stdout, /\[live-rules-silent\]/);
-  assert.match(result.stdout, new RegExp(conditionId));
+  assert.match(result.stdout, new RegExp(treatmentId));
   assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
 });
 
-test("runScore_treats_a_silent_arm_as_valid_when_its_condition_declares_expectedZeroFirings", async () => {
-  const conditionId = "rails-off-expected";
-  const conditionsDir = writeConditionsDir({ [conditionId]: { expectedZeroFirings: true } });
+test("runScore_treats_a_silent_arm_as_valid_when_its_treatment_declares_expectedZeroFirings", async () => {
+  const treatmentId = "rails-off-expected";
+  const treatmentsDir = writeTreatmentsDir({ [treatmentId]: { expectedZeroFirings: true } });
   const packHash = "a".repeat(64);
   const row = tsFlagParserRow(
     {},
     {
-      conditionId,
-      provenance: provenance({ conditionId, phrasingPackHash: packHash }),
+      treatmentId,
+      provenance: provenance({ treatmentId, phrasingPackHash: packHash }),
       delivered: deliveredStamp({ packHash, liveRules: ["cc"] }),
       railFirings: railFirings(),
     },
@@ -1427,36 +1427,36 @@ test("runScore_treats_a_silent_arm_as_valid_when_its_condition_declares_expected
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 0);
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });
 
 test("runScore_refuses_an_arm_whose_delivered_shadow_rules_never_fired", async () => {
-  const conditionId = "shadow-silent";
-  const conditionsDir = writeConditionsDir({ [conditionId]: {} });
-  const row = rawRow(conditionId, "case-a", { delivered: deliveredStamp({ shadowRules: ["cc"] }), shadowFirings: railFirings() });
+  const treatmentId = "shadow-silent";
+  const treatmentsDir = writeTreatmentsDir({ [treatmentId]: {} });
+  const row = rawRow(treatmentId, "case-a", { delivered: deliveredStamp({ shadowRules: ["cc"] }), shadowFirings: railFirings() });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 1);
   assert.match(result.stdout, /\[shadow-rules-silent\]/);
-  assert.match(result.stdout, new RegExp(conditionId));
+  assert.match(result.stdout, new RegExp(treatmentId));
   assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
 });
 
 test("runScore_writes_a_summary_and_prints_a_validity_block_for_a_fully_delivered_run", async () => {
-  const conditionId = "rails-verified";
-  const conditionsDir = writeConditionsDir({ [conditionId]: {} });
+  const treatmentId = "rails-verified";
+  const treatmentsDir = writeTreatmentsDir({ [treatmentId]: {} });
   const packHash = "a".repeat(64);
   const row = tsFlagParserRow(
     {},
     {
-      conditionId,
-      provenance: provenance({ conditionId, phrasingPackHash: packHash }),
+      treatmentId,
+      provenance: provenance({ treatmentId, phrasingPackHash: packHash }),
       delivered: deliveredStamp({ packHash, liveRules: ["cc"] }),
       railFirings: railFirings({ cc: 2 }),
     },
@@ -1464,28 +1464,28 @@ test("runScore_writes_a_summary_and_prints_a_validity_block_for_a_fully_delivere
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, new RegExp(`${conditionId}: reps=1 liveFirings=2 shadowFirings=0 delivered=ok`));
+  assert.match(result.stdout, new RegExp(`${treatmentId}: reps=1 liveFirings=2 shadowFirings=0 delivered=ok`));
   const blockIndex = result.stdout.indexOf("delivery validity");
-  const tableIndex = result.stdout.indexOf("| condition |");
+  const tableIndex = result.stdout.indexOf("| treatment |");
   assert.ok(blockIndex >= 0 && tableIndex > blockIndex);
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });
 
 const PROMPT_ARM_MESSAGE = "collapse the tangle back into a dispatch a reader can see in one place.";
 
-function writePromptConditionsDir(promptConditionId: string, railConditionIds: string[] = []): string {
-  const dir = mkdtempSync(join(tmpdir(), "eval-score-conditions-"));
+function writePromptTreatmentsDir(promptTreatmentId: string, railTreatmentIds: string[] = []): string {
+  const dir = mkdtempSync(join(tmpdir(), "eval-score-treatments-"));
   mkdirSync(join(dir, "packs"), { recursive: true });
   writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_ARM_MESSAGE }));
   writeFileSync(
-    join(dir, `${promptConditionId}.json`),
-    JSON.stringify({ id: promptConditionId, env: { LIUBAI_RAILS_OFF: "1" }, delivery: "prompt", phrasingPack: "packs/pack.json" }),
+    join(dir, `${promptTreatmentId}.json`),
+    JSON.stringify({ id: promptTreatmentId, env: { LIUBAI_RAILS_OFF: "1" }, delivery: "prompt", phrasingPack: "packs/pack.json" }),
   );
-  for (const railConditionId of railConditionIds) {
-    writeFileSync(join(dir, `${railConditionId}.json`), JSON.stringify({ id: railConditionId, env: {} }));
+  for (const railTreatmentId of railTreatmentIds) {
+    writeFileSync(join(dir, `${railTreatmentId}.json`), JSON.stringify({ id: railTreatmentId, env: {} }));
   }
   return dir;
 }
@@ -1495,43 +1495,43 @@ function promptCarriedTask(): string {
 }
 
 test("runScore_scores_a_prompt_carried_arm_as_verified_with_no_stamp_or_firing_checks", async () => {
-  const conditionId = "cc-delta-prompt";
-  const conditionsDir = writePromptConditionsDir(conditionId);
-  const row = tsFlagParserRow({}, { conditionId, task: promptCarriedTask() });
+  const treatmentId = "cc-delta-prompt";
+  const treatmentsDir = writePromptTreatmentsDir(treatmentId);
+  const row = tsFlagParserRow({}, { treatmentId, task: promptCarriedTask() });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, new RegExp(`${conditionId}: reps=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
+  assert.match(result.stdout, new RegExp(`${treatmentId}: reps=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
   assert.doesNotMatch(result.stdout, /unverifiable/);
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });
 
 test("runScore_refuses_a_prompt_carried_row_whose_recorded_task_does_not_carry_the_arm_message", async () => {
-  const conditionId = "cc-delta-prompt";
-  const conditionsDir = writePromptConditionsDir(conditionId);
-  const row = tsFlagParserRow({}, { conditionId, task: "Improve parse_flags.ts. Keep the public function signature and behavior unchanged." });
+  const treatmentId = "cc-delta-prompt";
+  const treatmentsDir = writePromptTreatmentsDir(treatmentId);
+  const row = tsFlagParserRow({}, { treatmentId, task: "Improve parse_flags.ts. Keep the public function signature and behavior unchanged." });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 1);
   assert.match(result.stdout, /\[prompt-not-carried\]/);
-  assert.match(result.stdout, new RegExp(`${conditionId}/ts-flag-parser#1`));
+  assert.match(result.stdout, new RegExp(`${treatmentId}/ts-flag-parser#1`));
   assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
 });
 
 test("runScore_refuses_a_prompt_carried_row_with_no_recorded_task", async () => {
-  const conditionId = "cc-delta-prompt";
-  const conditionsDir = writePromptConditionsDir(conditionId);
-  const row = tsFlagParserRow({}, { conditionId });
+  const treatmentId = "cc-delta-prompt";
+  const treatmentsDir = writePromptTreatmentsDir(treatmentId);
+  const row = tsFlagParserRow({}, { treatmentId });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 1);
   assert.match(result.stdout, /\[prompt-not-carried\]/);
@@ -1539,16 +1539,16 @@ test("runScore_refuses_a_prompt_carried_row_with_no_recorded_task", async () => 
 });
 
 test("runScore_scores_a_mixed_run_applying_each_arms_own_delivery_checks", async () => {
-  const promptConditionId = "cc-delta-prompt";
-  const railConditionId = "rails-verified-mixed";
-  const conditionsDir = writePromptConditionsDir(promptConditionId, [railConditionId]);
+  const promptTreatmentId = "cc-delta-prompt";
+  const railTreatmentId = "rails-verified-mixed";
+  const treatmentsDir = writePromptTreatmentsDir(promptTreatmentId, [railTreatmentId]);
   const packHash = "a".repeat(64);
-  const promptRow = tsFlagParserRow({}, { conditionId: promptConditionId, task: promptCarriedTask() });
+  const promptRow = tsFlagParserRow({}, { treatmentId: promptTreatmentId, task: promptCarriedTask() });
   const railRow = tsFlagParserRow(
     {},
     {
-      conditionId: railConditionId,
-      provenance: provenance({ conditionId: railConditionId, phrasingPackHash: packHash }),
+      treatmentId: railTreatmentId,
+      provenance: provenance({ treatmentId: railTreatmentId, phrasingPackHash: packHash }),
       delivered: deliveredStamp({ packHash, liveRules: ["cc"] }),
       railFirings: railFirings({ cc: 2 }),
     },
@@ -1556,26 +1556,26 @@ test("runScore_scores_a_mixed_run_applying_each_arms_own_delivery_checks", async
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [promptRow, railRow]);
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, new RegExp(`${promptConditionId}: reps=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
-  assert.match(result.stdout, new RegExp(`${railConditionId}: reps=1 liveFirings=2 shadowFirings=0 delivered=ok`));
+  assert.match(result.stdout, new RegExp(`${promptTreatmentId}: reps=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
+  assert.match(result.stdout, new RegExp(`${railTreatmentId}: reps=1 liveFirings=2 shadowFirings=0 delivered=ok`));
   assert.doesNotMatch(result.stdout, /unverifiable/);
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });
 
 test("runScore_exempts_a_prompt_carried_arm_from_the_live_rules_firing_floor", async () => {
-  const conditionId = "cc-delta-prompt";
-  const conditionsDir = writePromptConditionsDir(conditionId);
+  const treatmentId = "cc-delta-prompt";
+  const treatmentsDir = writePromptTreatmentsDir(treatmentId);
   const row = tsFlagParserRow(
     {},
-    { conditionId, task: promptCarriedTask(), delivered: deliveredStamp({ liveRules: ["cc"] }), railFirings: railFirings() },
+    { treatmentId, task: promptCarriedTask(), delivered: deliveredStamp({ liveRules: ["cc"] }), railFirings: railFirings() },
   );
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 0);
   assert.doesNotMatch(result.stdout, /live-rules-silent/);
@@ -1585,53 +1585,53 @@ test("runScore_exempts_a_prompt_carried_arm_from_the_live_rules_firing_floor", a
 const PROMPT_ARM_TEMPLATE_WITH_PLACEHOLDERS = "{name} still carries {dpBefore} decision points, unchanged from {dpAfter}.";
 const PROMPT_ARM_FORMATTED_MESSAGE = "parseFlags still carries 24 decision points, unchanged from 24.";
 
-function writePlaceholderPromptConditionsDir(promptConditionId: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "eval-score-conditions-"));
+function writePlaceholderPromptTreatmentsDir(promptTreatmentId: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "eval-score-treatments-"));
   mkdirSync(join(dir, "packs"), { recursive: true });
   writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_ARM_TEMPLATE_WITH_PLACEHOLDERS }));
   writeFileSync(
-    join(dir, `${promptConditionId}.json`),
-    JSON.stringify({ id: promptConditionId, env: { LIUBAI_RAILS_OFF: "1" }, delivery: "prompt", phrasingPack: "packs/pack.json" }),
+    join(dir, `${promptTreatmentId}.json`),
+    JSON.stringify({ id: promptTreatmentId, env: { LIUBAI_RAILS_OFF: "1" }, delivery: "prompt", phrasingPack: "packs/pack.json" }),
   );
   return dir;
 }
 
 test("runScore_verifies_a_prompt_carried_row_whose_task_carries_the_placeholders_filled_with_the_cases_own_facts", async () => {
-  const conditionId = "cc-delta-prompt-placeholders";
-  const conditionsDir = writePlaceholderPromptConditionsDir(conditionId);
+  const treatmentId = "cc-delta-prompt-placeholders";
+  const treatmentsDir = writePlaceholderPromptTreatmentsDir(treatmentId);
   const task = `Improve parse_flags.ts. Keep the public function signature and behavior unchanged.\n\n${PROMPT_ARM_FORMATTED_MESSAGE}`;
-  const row = tsFlagParserRow({}, { conditionId, task });
+  const row = tsFlagParserRow({}, { treatmentId, task });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, new RegExp(`${conditionId}: reps=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
+  assert.match(result.stdout, new RegExp(`${treatmentId}: reps=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
 });
 
 test("runScore_refuses_a_prompt_carried_row_whose_task_still_carries_the_unfilled_placeholder_template", async () => {
-  const conditionId = "cc-delta-prompt-placeholders";
-  const conditionsDir = writePlaceholderPromptConditionsDir(conditionId);
+  const treatmentId = "cc-delta-prompt-placeholders";
+  const treatmentsDir = writePlaceholderPromptTreatmentsDir(treatmentId);
   const task = `Improve parse_flags.ts. Keep the public function signature and behavior unchanged.\n\n${PROMPT_ARM_TEMPLATE_WITH_PLACEHOLDERS}`;
-  const row = tsFlagParserRow({}, { conditionId, task });
+  const row = tsFlagParserRow({}, { treatmentId, task });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 1);
   assert.match(result.stdout, /\[prompt-not-carried\]/);
 });
 
 test("runScore_refuses_a_prompt_carried_row_whose_case_has_no_manifest_in_the_corpus_instead_of_crashing", async () => {
-  const conditionId = "cc-delta-prompt";
-  const conditionsDir = writePromptConditionsDir(conditionId);
-  const row = tsFlagParserRow({}, { conditionId, caseId: "no-such-case", task: promptCarriedTask() });
+  const treatmentId = "cc-delta-prompt";
+  const treatmentsDir = writePromptTreatmentsDir(treatmentId);
+  const row = tsFlagParserRow({}, { treatmentId, caseId: "no-such-case", task: promptCarriedTask() });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
 
-  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, conditionsDir });
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 1);
   assert.match(result.stdout, /\[prompt-not-carried\]/);
@@ -1639,7 +1639,7 @@ test("runScore_refuses_a_prompt_carried_row_whose_case_has_no_manifest_in_the_co
 
 test("runScore_classifies_a_rail_abort_row_as_errored_verdict", async () => {
   const erroredRow = erroredRawRow("rails-default", "ts-flag-parser", "rail aborted the rep under eval (exit 17)", 1);
-  const normalRow = tsFlagParserRow({}, { conditionId: "control" });
+  const normalRow = tsFlagParserRow({}, { treatmentId: "control" });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [erroredRow, normalRow]);
 
@@ -1647,7 +1647,7 @@ test("runScore_classifies_a_rail_abort_row_as_errored_verdict", async () => {
 
   assert.equal(result.status, 0);
   const summaries = readSummary(runDir);
-  const railsSummary = summaries.find((s) => s.conditionId === "rails-default");
+  const railsSummary = summaries.find((s) => s.treatmentId === "rails-default");
   assert.ok(railsSummary);
   assert.equal(railsSummary.counts.errored, 1);
 });

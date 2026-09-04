@@ -69,7 +69,7 @@ test("buildProvenance_stamps_a_null_pack_hash_when_no_pack_bytes_are_given", () 
   const repo = tempGitRepo();
 
   const provenance = buildProvenance({
-    conditionId: "control",
+    treatmentId: "control",
     packBytes: null,
     repoRoot: repo,
     model: "claude-test",
@@ -84,7 +84,7 @@ test("buildProvenance_stamps_a_sha256_pack_hash_when_pack_bytes_are_given", () =
   const bytes = '{"CC_NUDGE":{"python":{"first":"f","rest":"r"}}}';
 
   const provenance = buildProvenance({
-    conditionId: "rails-default",
+    treatmentId: "rails-default",
     packBytes: bytes,
     repoRoot: repo,
     model: "claude-test",
@@ -94,18 +94,18 @@ test("buildProvenance_stamps_a_sha256_pack_hash_when_pack_bytes_are_given", () =
   assert.equal(provenance.phrasingPackHash, packHash(bytes));
 });
 
-test("buildProvenance_passes_model_condition_and_timestamp_through_unchanged", () => {
+test("buildProvenance_passes_model_treatment_and_timestamp_through_unchanged", () => {
   const repo = tempGitRepo();
 
   const provenance = buildProvenance({
-    conditionId: "rails-default",
+    treatmentId: "rails-default",
     packBytes: null,
     repoRoot: repo,
     model: "claude-test",
     now: "2026-08-24T00:00:00.000Z",
   });
 
-  assert.equal(provenance.conditionId, "rails-default");
+  assert.equal(provenance.treatmentId, "rails-default");
   assert.equal(provenance.model, "claude-test");
   assert.equal(provenance.collectedAt, "2026-08-24T00:00:00.000Z");
 });
