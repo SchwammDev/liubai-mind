@@ -237,7 +237,7 @@ function assistantBashToolCallLine(command: string): string {
 function writeTranscript(runDir: string, row: RawRow, jsonl: string): void {
   const dir = join(runDir, "transcripts");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, `${row.caseId}.${row.treatmentId}.${row.rep}.jsonl`), jsonl);
+  writeFileSync(join(dir, `${row.caseId}.${row.treatmentId}.${row.repetition}.jsonl`), jsonl);
 }
 
 function metrics(over: Partial<Metrics> = {}): Metrics {
@@ -273,7 +273,7 @@ function rawRow(treatmentId: string, caseId: string, over: Partial<RawRow> = {})
   return {
     caseId,
     treatmentId,
-    rep: 1,
+    repetition: 1,
     provenance: provenance({ treatmentId }),
     files: {},
     exitCode: 0,
@@ -307,7 +307,7 @@ function judgedRow(
 function fullyPopulatedJudgedRow(): JudgedRow {
   return {
     row: rawRow("rails-default", "case-a", {
-      rep: 2,
+      repetition: 2,
       turns: 4,
       tokensIn: 100,
       tokensOut: 50,
@@ -337,7 +337,7 @@ test("toJudgedJsonlRow_maps_verdict_dp_and_cost_fields_from_a_fully_populated_ju
   assert.deepEqual(row, {
     caseId: "case-a",
     treatmentId: "rails-default",
-    rep: 2,
+    repetition: 2,
     verdict: "gamed",
     gamedReason: "helper-split",
     contaminated: true,
@@ -362,7 +362,7 @@ test("toJudgedJsonlRow_omits_optional_fields_absent_from_the_judged_row", () => 
   assert.deepEqual(row, {
     caseId: "case-a",
     treatmentId: "rails-default",
-    rep: 1,
+    repetition: 1,
     verdict: "untouched",
     contaminated: false,
     consultedRail: false,
@@ -386,8 +386,8 @@ function emptyVerdictCounts(): Record<Verdict, number> {
   return { "genuine-fix": 0, gamed: 0, "bar-missed": 0, untouched: 0, broken: 0, "behavior-broken": 0, errored: 0, "timed-out": 0 };
 }
 
-function erroredRawRow(treatmentId: string, caseId: string, agentError: string, rep: number): RawRow {
-  return rawRow(treatmentId, caseId, { agentError, files: {}, exitCode: 1, rep });
+function erroredRawRow(treatmentId: string, caseId: string, agentError: string, repetition: number): RawRow {
+  return rawRow(treatmentId, caseId, { agentError, files: {}, exitCode: 1, repetition });
 }
 
 function tsFlagParserEntrySource(): string {
@@ -441,9 +441,9 @@ function importingPyRowFiles(): Record<string, string> {
   };
 }
 
-function findJudgedRow(judged: JudgedRow[], treatmentId: string, caseId: string, rep: number): JudgedRow {
-  const found = judged.find((j) => j.row.treatmentId === treatmentId && j.row.caseId === caseId && j.row.rep === rep);
-  if (found === undefined) throw new Error(`fixture row not found: ${treatmentId}/${caseId}#${rep}`);
+function findJudgedRow(judged: JudgedRow[], treatmentId: string, caseId: string, repetition: number): JudgedRow {
+  const found = judged.find((j) => j.row.treatmentId === treatmentId && j.row.caseId === caseId && j.row.repetition === repetition);
+  if (found === undefined) throw new Error(`fixture row not found: ${treatmentId}/${caseId}#${repetition}`);
   return found;
 }
 
@@ -839,7 +839,7 @@ test("formatMarkdown_renders_the_cost_columns_after_mean_dp_cut", () => {
 
   const table = formatMarkdown(summary);
 
-  assert.match(table, /\| mean dp cut \| mean ms \| mean turns \| tokens in \| tokens out \| nudges\/rep \|/);
+  assert.match(table, /\| mean dp cut \| mean ms \| mean turns \| tokens in \| tokens out \| nudges\/repetition \|/);
   assertTreatmentLine(
     table,
     "rails-default",
@@ -891,8 +891,8 @@ test("judgeRows_classifies_a_row_with_agentError_as_errored_without_running_the_
   assert.equal(judged[0]!.judge.after.parsed, false);
 });
 
-function timedOutRawRow(treatmentId: string, caseId: string, rep: number, over: Partial<RawRow> = {}): RawRow {
-  return rawRow(treatmentId, caseId, { timedOut: true, files: {}, rep, ...over });
+function timedOutRawRow(treatmentId: string, caseId: string, repetition: number, over: Partial<RawRow> = {}): RawRow {
+  return rawRow(treatmentId, caseId, { timedOut: true, files: {}, repetition, ...over });
 }
 
 test("judgeRows_classifies_a_timed_out_row_as_timed_out_without_running_the_judge", async () => {
@@ -1371,8 +1371,8 @@ test("runScore_refuses_a_row_whose_delivered_pack_hash_does_not_match_the_claime
 test("runScore_refuses_a_run_where_some_rows_carry_a_delivery_stamp_and_others_dont", async () => {
   const treatmentId = "mixed-stamp";
   const treatmentsDir = writeTreatmentsDir({ [treatmentId]: {} });
-  const stamped = rawRow(treatmentId, "case-a", { rep: 1, delivered: deliveredStamp() });
-  const unstamped = rawRow(treatmentId, "case-b", { rep: 2 });
+  const stamped = rawRow(treatmentId, "case-a", { repetition: 1, delivered: deliveredStamp() });
+  const unstamped = rawRow(treatmentId, "case-b", { repetition: 2 });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [stamped, unstamped]);
 
@@ -1467,7 +1467,7 @@ test("runScore_writes_a_summary_and_prints_a_validity_block_for_a_fully_delivere
   const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, new RegExp(`${treatmentId}: reps=1 liveFirings=2 shadowFirings=0 delivered=ok`));
+  assert.match(result.stdout, new RegExp(`${treatmentId}: repetitions=1 liveFirings=2 shadowFirings=0 delivered=ok`));
   const blockIndex = result.stdout.indexOf("delivery validity");
   const tableIndex = result.stdout.indexOf("| treatment |");
   assert.ok(blockIndex >= 0 && tableIndex > blockIndex);
@@ -1504,7 +1504,7 @@ test("runScore_scores_a_prompt_carried_arm_as_verified_with_no_stamp_or_firing_c
   const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, new RegExp(`${treatmentId}: reps=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
+  assert.match(result.stdout, new RegExp(`${treatmentId}: repetitions=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
   assert.doesNotMatch(result.stdout, /unverifiable/);
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });
@@ -1559,8 +1559,8 @@ test("runScore_scores_a_mixed_run_applying_each_arms_own_delivery_checks", async
   const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, new RegExp(`${promptTreatmentId}: reps=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
-  assert.match(result.stdout, new RegExp(`${railTreatmentId}: reps=1 liveFirings=2 shadowFirings=0 delivered=ok`));
+  assert.match(result.stdout, new RegExp(`${promptTreatmentId}: repetitions=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
+  assert.match(result.stdout, new RegExp(`${railTreatmentId}: repetitions=1 liveFirings=2 shadowFirings=0 delivered=ok`));
   assert.doesNotMatch(result.stdout, /unverifiable/);
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });
@@ -1607,7 +1607,7 @@ test("runScore_verifies_a_prompt_carried_row_whose_task_carries_the_placeholders
   const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, new RegExp(`${treatmentId}: reps=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
+  assert.match(result.stdout, new RegExp(`${treatmentId}: repetitions=1 liveFirings=0 shadowFirings=0 delivered=prompt`));
 });
 
 test("runScore_refuses_a_prompt_carried_row_whose_task_still_carries_the_unfilled_placeholder_template", async () => {
@@ -1638,7 +1638,7 @@ test("runScore_refuses_a_prompt_carried_row_whose_case_has_no_manifest_in_the_co
 });
 
 test("runScore_classifies_a_rail_abort_row_as_errored_verdict", async () => {
-  const erroredRow = erroredRawRow("rails-default", "ts-flag-parser", "rail aborted the rep under eval (exit 17)", 1);
+  const erroredRow = erroredRawRow("rails-default", "ts-flag-parser", "rail aborted the repetition under eval (exit 17)", 1);
   const normalRow = tsFlagParserRow({}, { treatmentId: "control" });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [erroredRow, normalRow]);

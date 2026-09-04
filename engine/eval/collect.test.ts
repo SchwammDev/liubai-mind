@@ -69,7 +69,7 @@ function baseOpts(over: Partial<CollectOpts> = {}): CollectOpts {
     repoRoot: REPO_ROOT,
     runDir: tempDir("eval-run-"),
     workRoot: tempDir("eval-work-"),
-    reps: 1,
+    repetitions: 1,
     model: "claude-test-model",
     probeSpawner: passingProbeSpawner(),
     ...over,
@@ -95,7 +95,7 @@ function firstRow(runDir: string): RawRow {
 }
 
 function pairKey(row: RawRow): string {
-  return `${row.caseId}/${row.treatmentId}/${row.rep}`;
+  return `${row.caseId}/${row.treatmentId}/${row.repetition}`;
 }
 
 function assertRawRowCounts(result: { rowsWritten: number; rowsSkipped: number }, written: number, skipped: number): void {
@@ -278,7 +278,7 @@ function assertProvenanceStamped(row: RawRow, now: string): void {
   assert.equal(row.provenance.liubaiSha, gitSha(REPO_ROOT));
 }
 
-test("runCollect_writes_one_raw_row_per_case_treatment_rep", async () => {
+test("runCollect_writes_one_raw_row_per_case_treatment_repetition", async () => {
   const { spawner } = recordingSpawner((spec) => mutateEveryFile(spec.cwd));
   const opts = twoCaseTwoTreatmentOpts(spawner);
 
@@ -291,7 +291,7 @@ test("runCollect_writes_one_raw_row_per_case_treatment_rep", async () => {
 test("runCollect_resumes_by_skipping_keys_already_present_in_raw_jsonl", async () => {
   const { spawner } = recordingSpawner((spec) => mutateEveryFile(spec.cwd));
   const opts = twoCaseTwoTreatmentOpts(spawner);
-  writeExistingRawRow(opts.runDir, { caseId: "ts-flag-parser", treatmentId: "control", rep: 1 });
+  writeExistingRawRow(opts.runDir, { caseId: "ts-flag-parser", treatmentId: "control", repetition: 1 });
 
   const result = await runCollect(opts);
 
@@ -507,7 +507,7 @@ test("runCollect_writes_every_row_when_running_with_parallel_greater_than_one", 
 test("runCollect_resumes_by_skipping_keys_already_present_in_raw_jsonl_with_parallel_greater_than_one", async () => {
   const { spawner } = recordingSpawner((spec) => mutateEveryFile(spec.cwd));
   const opts = parallelOpts(["ts-flag-parser", "ts-order-validator"], ["control", "rails-default"], spawner, 2);
-  writeExistingRawRow(opts.runDir, { caseId: "ts-flag-parser", treatmentId: "control", rep: 1 });
+  writeExistingRawRow(opts.runDir, { caseId: "ts-flag-parser", treatmentId: "control", repetition: 1 });
 
   const result = await runCollect(opts);
 
@@ -779,7 +779,7 @@ test("runCollect_stamps_turns_tokens_and_rail_firings_from_stdout_onto_the_raw_r
   assertCostMetricsStamped(firstRow(opts.runDir));
 });
 
-test("runCollect_stamps_the_death_signal_and_stderr_tail_of_a_killed_rep_onto_the_raw_row", async () => {
+test("runCollect_stamps_the_death_signal_and_stderr_tail_of_a_killed_repetition_onto_the_raw_row", async () => {
   const spawner = fixedOutcomeSpawner({ exitCode: -1, stdoutJsonl: "", timedOut: false, signal: "SIGKILL", stderrTail: "gateway stream reset" });
   const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 

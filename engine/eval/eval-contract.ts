@@ -70,14 +70,14 @@ export interface Provenance {
 
 export interface SecondTouchInfo {
   sourceRun: string;
-  sourceRep: number | null;
+  sourceRepetition: number | null;
   control: boolean;
 }
 
 export interface RawRow {
   caseId: string;
   treatmentId: string;
-  rep: number;
+  repetition: number;
   provenance: Provenance;
   task?: string;
   files: Record<string, string>;

@@ -18,7 +18,7 @@ function assertParsedCollect(parsed: ParsedCli, over: Partial<Extract<ParsedCli,
     cmd: "collect",
     run: "baseline",
     model: "anthropic/claude-test",
-    reps: 5,
+    repetitions: 5,
     parallel: 1,
     ...over,
   });
@@ -57,11 +57,11 @@ function throwingCollect(message: string): (opts: CollectOpts) => Promise<Collec
 }
 
 test("parseCliArgs_parses_a_full_collect_invocation", () => {
-  const argv = collectArgv("--reps", "3", "--timeout-ms", "60000", ...repeated("--case", ["ts-flag-parser", "ts-order-validator"]), "--treatment", "control");
+  const argv = collectArgv("--repetitions", "3", "--timeout-ms", "60000", ...repeated("--case", ["ts-flag-parser", "ts-order-validator"]), "--treatment", "control");
 
   const parsed = parseCliArgs(argv);
 
-  assertParsedCollect(parsed, { reps: 3, timeoutMs: 60000, cases: ["ts-flag-parser", "ts-order-validator"], treatments: ["control"] });
+  assertParsedCollect(parsed, { repetitions: 3, timeoutMs: 60000, cases: ["ts-flag-parser", "ts-order-validator"], treatments: ["control"] });
 });
 
 test("parseCliArgs_reports_error_when_collect_is_missing_model", () => {
@@ -76,14 +76,14 @@ test("parseCliArgs_reports_error_when_collect_is_missing_run", () => {
   assert.ok("error" in parsed);
 });
 
-test("parseCliArgs_defaults_reps_to_five_when_omitted", () => {
+test("parseCliArgs_defaults_repetitions_to_five_when_omitted", () => {
   const parsed = parseCliArgs(["collect", "--run", "baseline", "--model", "anthropic/claude-test"]);
 
   assertParsedCollect(parsed, {});
 });
 
-test("parseCliArgs_rejects_non_integer_reps", () => {
-  const parsed = parseCliArgs(["collect", "--run", "baseline", "--model", "anthropic/claude-test", "--reps", "1.5"]);
+test("parseCliArgs_rejects_non_integer_repetitions", () => {
+  const parsed = parseCliArgs(["collect", "--run", "baseline", "--model", "anthropic/claude-test", "--repetitions", "1.5"]);
 
   assert.ok("error" in parsed);
 });
@@ -95,9 +95,9 @@ test("parseCliArgs_parses_the_parallel_flag_into_collect_opts", () => {
 });
 
 test("parseCliArgs_defaults_parallel_to_one_when_omitted", () => {
-  const parsed = parseCliArgs(collectArgv("--reps", "2"));
+  const parsed = parseCliArgs(collectArgv("--repetitions", "2"));
 
-  assertParsedCollect(parsed, { reps: 2 });
+  assertParsedCollect(parsed, { repetitions: 2 });
 });
 
 test("parseCliArgs_rejects_non_integer_parallel", () => {

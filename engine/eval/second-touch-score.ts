@@ -145,31 +145,31 @@ function classifySecondTouchVerdict(kase: CaseManifest, row: RawRow, seedFiles: 
   return "extended";
 }
 
-function sourceRowKey(caseId: string, treatmentId: string, rep: number): string {
-  return `${caseId}\0${treatmentId}\0${rep}`;
+function sourceRowKey(caseId: string, treatmentId: string, repetition: number): string {
+  return `${caseId}\0${treatmentId}\0${repetition}`;
 }
 
 function indexSourceRows(sourceRows: RawRow[]): Map<string, RawRow> {
   const map = new Map<string, RawRow>();
-  for (const row of sourceRows) map.set(sourceRowKey(row.caseId, row.treatmentId, row.rep), row);
+  for (const row of sourceRows) map.set(sourceRowKey(row.caseId, row.treatmentId, row.repetition), row);
   return map;
 }
 
 function findSourceRow(sourceRowsByKey: Map<string, RawRow>, row: RawRow): RawRow {
   const info = row.secondTouch;
-  if (info === undefined || info.control || info.sourceRep === null) {
-    throw new Error(`second-touch-score: ${row.caseId}/${row.treatmentId}#${row.rep} is not a seeded second-touch row`);
+  if (info === undefined || info.control || info.sourceRepetition === null) {
+    throw new Error(`second-touch-score: ${row.caseId}/${row.treatmentId}#${row.repetition} is not a seeded second-touch row`);
   }
-  const found = sourceRowsByKey.get(sourceRowKey(row.caseId, row.treatmentId, info.sourceRep));
+  const found = sourceRowsByKey.get(sourceRowKey(row.caseId, row.treatmentId, info.sourceRepetition));
   if (found === undefined) {
-    throw new Error(`second-touch-score: source row not found for ${row.caseId}/${row.treatmentId}#${info.sourceRep}`);
+    throw new Error(`second-touch-score: source row not found for ${row.caseId}/${row.treatmentId}#${info.sourceRepetition}`);
   }
   return found;
 }
 
 function seedFilesFor(row: RawRow, kase: CaseManifest, corpusDir: string, sourceRowsByKey: Map<string, RawRow>): Record<string, string> {
   if (row.secondTouch === undefined) {
-    throw new Error(`second-touch-score: ${row.caseId}/${row.treatmentId}#${row.rep} has no secondTouch info`);
+    throw new Error(`second-touch-score: ${row.caseId}/${row.treatmentId}#${row.repetition} has no secondTouch info`);
   }
   return row.secondTouch.control ? pristineFiles(corpusDir, kase) : findSourceRow(sourceRowsByKey, row).files;
 }
@@ -181,7 +181,7 @@ async function sourceVerdictOf(
   cache: Map<string, Verdict>,
 ): Promise<Verdict> {
   const sourceRow = findSourceRow(sourceRowsByKey, row);
-  const key = sourceRowKey(sourceRow.caseId, sourceRow.treatmentId, sourceRow.rep);
+  const key = sourceRowKey(sourceRow.caseId, sourceRow.treatmentId, sourceRow.repetition);
   const cached = cache.get(key);
   if (cached !== undefined) return cached;
 

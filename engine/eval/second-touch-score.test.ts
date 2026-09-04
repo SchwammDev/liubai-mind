@@ -150,7 +150,7 @@ function sourceRow(caseId: string, over: Partial<RawRow> = {}): RawRow {
   return {
     caseId,
     treatmentId: "rails-default",
-    rep: 1,
+    repetition: 1,
     provenance: provenance(),
     files: { "thing.ts": identitySource() },
     exitCode: 0,
@@ -161,14 +161,14 @@ function sourceRow(caseId: string, over: Partial<RawRow> = {}): RawRow {
 }
 
 function secondTouchInfo(over: Partial<SecondTouchInfo> = {}): SecondTouchInfo {
-  return { sourceRun: "source-run", sourceRep: 1, control: false, ...over };
+  return { sourceRun: "source-run", sourceRepetition: 1, control: false, ...over };
 }
 
 function seededRow(caseId: string, over: Partial<RawRow> = {}, infoOver: Partial<SecondTouchInfo> = {}): RawRow {
   return {
     caseId,
     treatmentId: "rails-default",
-    rep: 1,
+    repetition: 1,
     provenance: provenance(),
     files: { "thing.ts": extendedSource() },
     exitCode: 0,
@@ -180,7 +180,7 @@ function seededRow(caseId: string, over: Partial<RawRow> = {}, infoOver: Partial
 }
 
 function controlRow(caseId: string, over: Partial<RawRow> = {}): RawRow {
-  return seededRow(caseId, over, { sourceRep: null, control: true });
+  return seededRow(caseId, over, { sourceRepetition: null, control: true });
 }
 
 async function judgeOne(corpusDir: string, row: RawRow, sourceRows: RawRow[] = []): Promise<JudgedSecondTouchRow> {
