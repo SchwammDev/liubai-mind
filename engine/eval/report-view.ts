@@ -2,6 +2,7 @@ import type { Experiment, ExperimentKind, ExperimentStatus, ExperimentTreatment 
 import type { GamedReason, Tier } from "./eval-contract.ts";
 import type { Ending, StartsFrom } from "./repetition-record.ts";
 import type { FileAtCommit } from "./provenance.ts";
+import { RULE } from "../contract.ts";
 import type { RuleName } from "../contract.ts";
 import { buildTranscriptView } from "./session-log.ts";
 import type { TranscriptView } from "./session-log.ts";
@@ -18,6 +19,8 @@ export interface JudgedRecordForReport {
   linesRemoved: number;
   turns: number | null;
   tokensIn: number | null;
+  tokensOut: number | null;
+  durationMs: number;
   nudges: NudgeFirings | null;
   decisionPointsBefore: number;
   decisionPointsAfter: number;
@@ -27,6 +30,7 @@ export interface JudgedRecordForReport {
   failedBehaviorChecks: { index: number; reason: string }[];
   ending: Ending;
   transcriptPath: string | null;
+  filesCreated: string[];
 }
 
 export interface RawRowForReport {
@@ -39,6 +43,13 @@ export interface RawRowForReport {
   files: Record<string, string>;
 }
 
+export type VerdictBarSegmentClass = "g" | "m" | "x" | "w";
+
+export interface VerdictBarSegmentView {
+  cls: VerdictBarSegmentClass;
+  pct: number;
+}
+
 export interface RunRecordsForReport {
   judged: JudgedRecordForReport[];
   raw: RawRowForReport[];
@@ -48,6 +59,8 @@ export interface CaseFactsForReport {
   tier: Tier;
   entry: string;
   reference?: Record<string, string>;
+  behaviorChecksTotal?: number;
+  extensionBehaviorChecksTotal?: number;
 }
 
 export type CodeStateName = "original" | "change" | "earlier-change" | "follow-up-change";
@@ -66,14 +79,29 @@ export interface ReferenceFixView {
   text: string;
 }
 
+export interface ReviewStateCardView {
+  name: CodeStateName;
+  stateNumber: number;
+  title: string;
+  dedupeKey: string;
+  fileAtCommit?: string;
+  metricLine?: string;
+  verdict?: string;
+  taskText?: string;
+}
+
 export interface ReviewView {
   id: string;
   verdict: string;
   whyThisVerdict: string;
   entryFilename: string;
   codeStates: CodeStateView[];
+  stateCards: ReviewStateCardView[];
   defaultBeforeName: CodeStateName;
   defaultAfterName: CodeStateName;
+  statsLine: string;
+  nudgeSummary: string;
+  filesLine: string;
   reference?: ReferenceFixView;
   transcript?: TranscriptView;
   rawTranscriptHref?: string;
@@ -119,15 +147,21 @@ export interface TreatmentView {
   treatmentId: string;
   run: string;
   verdictDistribution: string;
+  verdictBarSegments: VerdictBarSegmentView[];
   meanTurns: string;
   meanTokensIn: string;
   meanNudgesPerRepetition: string;
   repetitions: RepetitionView[];
 }
 
+export interface PerCaseCellView {
+  label: string;
+  barSegments: VerdictBarSegmentView[];
+}
+
 export interface PerCaseRowView {
   caseId: string;
-  cells: string[];
+  cells: PerCaseCellView[];
   wherePart: string;
 }
 
@@ -268,6 +302,9 @@ interface RepetitionFacts {
   linesRemoved: number;
   turns: number | null;
   tokensIn: number | null;
+  tokensOut: number | null;
+  durationMs: number;
+  nudges: NudgeFirings | null;
   nudgesTotal: number | null;
   nudgeTurns: number[];
   decisionPointsBefore: number;
@@ -278,6 +315,7 @@ interface RepetitionFacts {
   failedBehaviorChecks: { index: number; reason: string }[];
   ending: Ending;
   transcriptPath: string | null;
+  filesCreated: string[];
 }
 
 function repetitionIdFor(facts: { run: string; caseId: string; treatmentId: string; repetition: number }): string {
@@ -310,6 +348,9 @@ function repetitionFactsFor(run: string, records: JudgedRecordForReport[]): Repe
       linesRemoved: record.linesRemoved,
       turns: record.turns,
       tokensIn: record.tokensIn,
+      tokensOut: record.tokensOut,
+      durationMs: record.durationMs,
+      nudges: record.nudges,
       nudgesTotal: total,
       nudgeTurns: turns,
       decisionPointsBefore: record.decisionPointsBefore,
@@ -320,6 +361,7 @@ function repetitionFactsFor(run: string, records: JudgedRecordForReport[]): Repe
       failedBehaviorChecks: record.failedBehaviorChecks,
       ending: record.ending,
       transcriptPath: record.transcriptPath,
+      filesCreated: record.filesCreated,
     };
   });
 }
@@ -375,6 +417,16 @@ function rawRowAt(runData: Map<string, RunRecordsForReport>, run: string, caseId
   return runData.get(run)?.raw.find((row) => row.caseId === caseId && row.treatmentId === treatmentId && row.repetition === repetition);
 }
 
+function judgedRecordAt(
+  runData: Map<string, RunRecordsForReport>,
+  run: string,
+  caseId: string,
+  treatmentId: string,
+  repetition: number,
+): JudgedRecordForReport | undefined {
+  return runData.get(run)?.judged.find((record) => record.caseId === caseId && record.treatmentId === treatmentId && record.repetition === repetition);
+}
+
 function ownFilesCodeState(
   name: Exclude<CodeStateName, "original">,
   label: string,
@@ -408,37 +460,122 @@ function changeDedupeKeyFor(name: Extract<CodeStateName, "change" | "follow-up-c
   return [name, facts.run, facts.caseId, facts.treatmentId, facts.repetition].join("\0");
 }
 
+const TASK_TRUNCATE_LENGTH = 60;
+
+function truncateTask(text: string): string {
+  const oneLine = text.split("\n")[0]!.trim();
+  return oneLine.length <= TASK_TRUNCATE_LENGTH ? oneLine : `${oneLine.slice(0, TASK_TRUNCATE_LENGTH).trimEnd()}…`;
+}
+
+function taskTextFor(row: RawRowForReport | undefined): string | undefined {
+  return row?.task === undefined ? undefined : truncateTask(row.task);
+}
+
+function complexityLine(before: number, after: number): string {
+  return `complexity ${before} → ${after}`;
+}
+
+const CHECKS_NOT_RUN_VERDICTS = new Set(["broken", "untouched", "timed-out", "errored"]);
+
+interface ChecksSource {
+  verdict: string;
+  failedBehaviorChecks: { index: number; reason: string }[];
+}
+
+function checksSuffixFor(total: number | undefined, source: ChecksSource): string {
+  if (total === undefined || total === 0) return "";
+  if (CHECKS_NOT_RUN_VERDICTS.has(source.verdict)) return "";
+  return ` · behavior checks ${total - source.failedBehaviorChecks.length} of ${total}`;
+}
+
+function changeMetricLineFor(total: number | undefined, source: ChecksSource & { decisionPointsBefore: number; decisionPointsAfter: number }): string {
+  return `${complexityLine(source.decisionPointsBefore, source.decisionPointsAfter)}${checksSuffixFor(total, source)}`;
+}
+
+function originalCard(dedupeKey: string, fileAtCommit: string, complexityBefore: number): ReviewStateCardView {
+  return { name: "original", stateNumber: 0, title: "state 0 · original source", dedupeKey, fileAtCommit, metricLine: `complexity ${complexityBefore}` };
+}
+
+function changeCardFor(
+  name: Exclude<CodeStateName, "original">,
+  stateNumber: number,
+  title: string,
+  dedupeKey: string,
+  checksTotal: number | undefined,
+  source: ChecksSource & { decisionPointsBefore: number; decisionPointsAfter: number },
+  row: RawRowForReport | undefined,
+): ReviewStateCardView {
+  const taskText = taskTextFor(row);
+  return {
+    name,
+    stateNumber,
+    title,
+    dedupeKey,
+    verdict: source.verdict,
+    metricLine: changeMetricLineFor(checksTotal, source),
+    ...(taskText !== undefined ? { taskText } : {}),
+  };
+}
+
 function codeStatesForOriginalSource(
+  kind: ExperimentKind,
   facts: RepetitionFacts,
-  entry: string,
+  caseFacts: CaseFactsForReport,
   ownRow: RawRowForReport | undefined,
   originalSourceByKey: Map<string, FileAtCommit>,
-): CodeStateView[] {
+): { codeStates: CodeStateView[]; cards: ReviewStateCardView[] } {
+  const entry = caseFacts.entry;
   const sha = ownRow?.provenance.liubaiSha ?? "unknown";
-  return [
-    originalCodeState(facts.caseId, sha, entry, originalSourceByKey),
-    ownFilesCodeState("change", "change", ownRow, entry, changeCaptionFor(facts), changeDedupeKeyFor("change", facts)),
-  ];
+  const original = originalCodeState(facts.caseId, sha, entry, originalSourceByKey);
+  const change = ownFilesCodeState("change", "change", ownRow, entry, changeCaptionFor(facts), changeDedupeKeyFor("change", facts));
+  const checksTotal = kind === "single-task" ? caseFacts.behaviorChecksTotal : caseFacts.extensionBehaviorChecksTotal;
+
+  return {
+    codeStates: [original, change],
+    cards: [
+      originalCard(original.dedupeKey, original.caption, facts.decisionPointsBefore),
+      changeCardFor("change", 1, "state 1 · change · this repetition", change.dedupeKey, checksTotal, facts, ownRow),
+    ],
+  };
 }
 
 function codeStatesForEarlierResult(
   facts: RepetitionFacts,
   startsFrom: Extract<StartsFrom, { kind: "earlier-result" }>,
-  entry: string,
+  caseFacts: CaseFactsForReport,
   runData: Map<string, RunRecordsForReport>,
   ownRow: RawRowForReport | undefined,
   originalSourceByKey: Map<string, FileAtCommit>,
-): CodeStateView[] {
+): { codeStates: CodeStateView[]; cards: ReviewStateCardView[] } {
+  const entry = caseFacts.entry;
   const sourceRow = rawRowAt(runData, startsFrom.sourceRun, facts.caseId, facts.treatmentId, startsFrom.sourceRepetition);
+  const sourceRecord = judgedRecordAt(runData, startsFrom.sourceRun, facts.caseId, facts.treatmentId, startsFrom.sourceRepetition);
   const sha = sourceRow?.provenance.liubaiSha ?? "unknown";
   const earlierCaption = `run folder ${startsFrom.sourceRun}, repetition ${startsFrom.sourceRepetition}`;
   const earlierDedupeKey = ["earlier-change", startsFrom.sourceRun, facts.caseId, facts.treatmentId, startsFrom.sourceRepetition].join("\0");
 
-  return [
-    originalCodeState(facts.caseId, sha, entry, originalSourceByKey),
-    ownFilesCodeState("earlier-change", "earlier change", sourceRow, entry, earlierCaption, earlierDedupeKey),
-    ownFilesCodeState("follow-up-change", "follow-up change", ownRow, entry, changeCaptionFor(facts), changeDedupeKeyFor("follow-up-change", facts)),
-  ];
+  const original = originalCodeState(facts.caseId, sha, entry, originalSourceByKey);
+  const earlierChange = ownFilesCodeState("earlier-change", "earlier change", sourceRow, entry, earlierCaption, earlierDedupeKey);
+  const followUpChange = ownFilesCodeState("follow-up-change", "follow-up change", ownRow, entry, changeCaptionFor(facts), changeDedupeKeyFor("follow-up-change", facts));
+
+  const earlierTitle = `state 1 · earlier change · run folder ${startsFrom.sourceRun}, repetition ${startsFrom.sourceRepetition}`;
+  const cards: ReviewStateCardView[] = [originalCard(original.dedupeKey, original.caption, facts.decisionPointsBefore)];
+  if (sourceRecord !== undefined) {
+    cards.push(changeCardFor("earlier-change", 1, earlierTitle, earlierChange.dedupeKey, caseFacts.behaviorChecksTotal, sourceRecord, sourceRow));
+  }
+  cards.push(
+    changeCardFor(
+      "follow-up-change",
+      2,
+      "state 2 · follow-up change · this repetition",
+      followUpChange.dedupeKey,
+      caseFacts.extensionBehaviorChecksTotal,
+      facts,
+      ownRow,
+    ),
+  );
+
+  return { codeStates: [original, earlierChange, followUpChange], cards };
 }
 
 function defaultPairFor(startsFrom: StartsFrom): { before: CodeStateName; after: CodeStateName } {
@@ -475,7 +612,59 @@ function transcriptFieldsFor(facts: RepetitionFacts, sessionLogByKey: Map<string
   };
 }
 
+function formatTokensK(value: number | null): string | undefined {
+  return value === null ? undefined : `${Math.round(value / 1000)} k`;
+}
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes} min ${seconds} s` : `${seconds} s`;
+}
+
+function statsLineFor(facts: RepetitionFacts): string {
+  const tokensIn = formatTokensK(facts.tokensIn);
+  const tokensOut = formatTokensK(facts.tokensOut);
+
+  return [
+    `+${facts.linesAdded} / −${facts.linesRemoved} lines`,
+    facts.turns === null ? undefined : `${facts.turns} turns`,
+    tokensIn === undefined ? undefined : `${tokensIn} input tokens`,
+    tokensOut === undefined ? undefined : `${tokensOut} output tokens`,
+    formatDuration(facts.durationMs),
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join(" · ");
+}
+
+const NUDGE_RULE_LABELS: Record<RuleName, string> = {
+  [RULE.cc]: "complexity",
+  [RULE.ccDelta]: "complexity",
+  [RULE.typeAnnotation]: "type annotation",
+  [RULE.testLinearity]: "test linearity",
+  [RULE.testAssertPile]: "test assert pile",
+  [RULE.testDataPlumbing]: "test data plumbing",
+  [RULE.discourageComments]: "discourage comments",
+};
+
+function nudgeSummaryFor(facts: RepetitionFacts): string {
+  if (facts.nudges === null) return "";
+  return Object.entries(facts.nudges)
+    .filter(([, firing]) => firing.count > 0)
+    .map(([rule, firing]) => `${NUDGE_RULE_LABELS[rule as RuleName]} nudge ×${firing.count}`)
+    .join(" · ");
+}
+
+function filesLineFor(ownRow: RawRowForReport | undefined, filesCreated: string[]): string {
+  if (ownRow === undefined) return "";
+  const created = new Set(filesCreated);
+  const entries = Object.keys(ownRow.files).map((file) => `${file} (${created.has(file) ? "created" : "modified"})`);
+  return entries.length === 0 ? "" : `files: ${entries.join(" · ")}`;
+}
+
 function reviewViewFor(
+  kind: ExperimentKind,
   facts: RepetitionFacts,
   caseFactsByCaseId: Map<string, CaseFactsForReport>,
   runData: Map<string, RunRecordsForReport>,
@@ -488,10 +677,10 @@ function reviewViewFor(
   if (caseFacts === undefined) return undefined;
 
   const ownRow = rawRowAt(runData, facts.run, facts.caseId, facts.treatmentId, facts.repetition);
-  const codeStates =
+  const { codeStates, cards } =
     facts.startsFrom.kind === "original-source"
-      ? codeStatesForOriginalSource(facts, caseFacts.entry, ownRow, originalSourceByKey)
-      : codeStatesForEarlierResult(facts, facts.startsFrom, caseFacts.entry, runData, ownRow, originalSourceByKey);
+      ? codeStatesForOriginalSource(kind, facts, caseFacts, ownRow, originalSourceByKey)
+      : codeStatesForEarlierResult(facts, facts.startsFrom, caseFacts, runData, ownRow, originalSourceByKey);
   const reference = referenceFixFor(facts.caseId, caseFacts);
   const defaultPair = defaultPairFor(facts.startsFrom);
   const id = repetitionIdFor(facts);
@@ -502,8 +691,12 @@ function reviewViewFor(
     whyThisVerdict: whyThisVerdictText(facts),
     entryFilename: caseFacts.entry,
     codeStates,
+    stateCards: cards,
     defaultBeforeName: defaultPair.before,
     defaultAfterName: defaultPair.after,
+    statsLine: statsLineFor(facts),
+    nudgeSummary: nudgeSummaryFor(facts),
+    filesLine: filesLineFor(ownRow, facts.filesCreated),
     notes: notesByKey.get(id) ?? [],
     live,
     ...(reference !== undefined ? { reference } : {}),
@@ -512,6 +705,7 @@ function reviewViewFor(
 }
 
 function repetitionViewOf(
+  kind: ExperimentKind,
   facts: RepetitionFacts,
   caseFactsByCaseId: Map<string, CaseFactsForReport>,
   runData: Map<string, RunRecordsForReport>,
@@ -520,7 +714,7 @@ function repetitionViewOf(
   notesByKey: Map<string, string[]>,
   live: boolean,
 ): RepetitionView {
-  const review = reviewViewFor(facts, caseFactsByCaseId, runData, originalSourceByKey, sessionLogByKey, notesByKey, live);
+  const review = reviewViewFor(kind, facts, caseFactsByCaseId, runData, originalSourceByKey, sessionLogByKey, notesByKey, live);
 
   return {
     id: repetitionIdFor(facts),
@@ -556,6 +750,46 @@ function distributionKey(order: readonly string[], facts: RepetitionFacts[]): st
     .join(",");
 }
 
+const SINGLE_TASK_SEGMENT_CLASS: Record<string, VerdictBarSegmentClass> = {
+  "genuine-fix": "g",
+  gamed: "m",
+  "bar-missed": "m",
+  broken: "x",
+  "behavior-broken": "x",
+  untouched: "w",
+  errored: "w",
+  "timed-out": "w",
+};
+
+const FOLLOW_UP_SEGMENT_CLASS: Record<string, VerdictBarSegmentClass> = {
+  extended: "g",
+  "extension-failed": "m",
+  regressed: "x",
+  broken: "x",
+  untouched: "w",
+  errored: "w",
+  "timed-out": "w",
+};
+
+function segmentClassFor(kind: ExperimentKind, verdict: string): VerdictBarSegmentClass {
+  const table = kind === "single-task" ? SINGLE_TASK_SEGMENT_CLASS : FOLLOW_UP_SEGMENT_CLASS;
+  return table[verdict] ?? "w";
+}
+
+const SEGMENT_ORDER: readonly VerdictBarSegmentClass[] = ["g", "m", "x", "w"];
+
+function barSegmentsFor(kind: ExperimentKind, facts: RepetitionFacts[]): VerdictBarSegmentView[] {
+  if (facts.length === 0) return [];
+
+  const counts = new Map<VerdictBarSegmentClass, number>();
+  for (const fact of facts) counts.set(segmentClassFor(kind, fact.verdict), (counts.get(segmentClassFor(kind, fact.verdict)) ?? 0) + 1);
+
+  return SEGMENT_ORDER.filter((cls) => (counts.get(cls) ?? 0) > 0).map((cls) => ({
+    cls,
+    pct: Math.round(((counts.get(cls) ?? 0) / facts.length) * 100),
+  }));
+}
+
 function meanOfDefined(values: (number | null)[]): number | null {
   const defined = values.filter((value): value is number => value !== null);
   if (defined.length === 0) return null;
@@ -567,6 +801,7 @@ function formatMean(value: number | null): string {
 }
 
 function treatmentViewOf(
+  kind: ExperimentKind,
   order: readonly string[],
   treatment: ExperimentTreatment,
   facts: RepetitionFacts[],
@@ -581,10 +816,11 @@ function treatmentViewOf(
     treatmentId: treatment.treatmentId,
     run: treatment.run,
     verdictDistribution: distributionLabel(order, facts),
+    verdictBarSegments: barSegmentsFor(kind, facts),
     meanTurns: formatMean(meanOfDefined(facts.map((fact) => fact.turns))),
     meanTokensIn: formatMean(meanOfDefined(facts.map((fact) => fact.tokensIn))),
     meanNudgesPerRepetition: formatMean(meanOfDefined(facts.map((fact) => fact.nudgesTotal))),
-    repetitions: facts.map((fact) => repetitionViewOf(fact, caseFactsByCaseId, runData, originalSourceByKey, sessionLogByKey, notesByKey, live)),
+    repetitions: facts.map((fact) => repetitionViewOf(kind, fact, caseFactsByCaseId, runData, originalSourceByKey, sessionLogByKey, notesByKey, live)),
   };
 }
 
@@ -610,7 +846,7 @@ function wherePartFactsFor(successVerdict: string, perTreatment: TreatmentCaseFa
   return chains;
 }
 
-function perCaseRowsFor(order: readonly string[], successVerdict: string, treatments: TreatmentCaseFacts[]): PerCaseRowView[] {
+function perCaseRowsFor(kind: ExperimentKind, order: readonly string[], successVerdict: string, treatments: TreatmentCaseFacts[]): PerCaseRowView[] {
   const caseIds = distinctSorted(treatments.flatMap((treatment) => treatment.facts.map((fact) => fact.caseId)));
 
   return caseIds.map((caseId) => {
@@ -621,7 +857,10 @@ function perCaseRowsFor(order: readonly string[], successVerdict: string, treatm
 
     return {
       caseId,
-      cells: perTreatment.map((treatment) => distributionLabel(order, treatment.facts)),
+      cells: perTreatment.map((treatment) => ({
+        label: distributionLabel(order, treatment.facts),
+        barSegments: barSegmentsFor(kind, treatment.facts),
+      })),
       wherePart: allMatch && !anyAbnormal ? "" : wherePartFactsFor(successVerdict, perTreatment).join("; "),
     };
   });
@@ -742,9 +981,10 @@ function experimentDetailFor(
     successVerdict,
     setupCheck: setupCheckFor(experiment, runData),
     treatments: treatmentsWithFacts.map(({ treatment, facts }) =>
-      treatmentViewOf(order, treatment, facts, caseFactsByCaseId, runData, originalSourceByKey, sessionLogByKey, notesByKey, live),
+      treatmentViewOf(experiment.kind, order, treatment, facts, caseFactsByCaseId, runData, originalSourceByKey, sessionLogByKey, notesByKey, live),
     ),
     perCase: perCaseRowsFor(
+      experiment.kind,
       order,
       successVerdict,
       treatmentsWithFacts.map(({ treatment, facts }) => ({ treatmentId: treatment.treatmentId, facts })),

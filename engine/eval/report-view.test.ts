@@ -36,6 +36,8 @@ function judgedRecord(caseId: string, treatmentId: string, repetition: number, o
     linesRemoved: 0,
     turns: null,
     tokensIn: null,
+    tokensOut: null,
+    durationMs: 0,
     nudges: null,
     decisionPointsBefore: 0,
     decisionPointsAfter: 0,
@@ -45,6 +47,7 @@ function judgedRecord(caseId: string, treatmentId: string, repetition: number, o
     failedBehaviorChecks: [],
     ending: "final-text",
     transcriptPath: null,
+    filesCreated: [],
     ...over,
   };
 }
@@ -60,8 +63,20 @@ function rawRow(treatmentId: string, model: string, over: Partial<RawRowForRepor
   };
 }
 
-function caseFacts(entry: string, tier: Tier = "hard", reference?: Record<string, string>): CaseFactsForReport {
-  return { tier, entry, ...(reference !== undefined ? { reference } : {}) };
+function caseFacts(
+  entry: string,
+  tier: Tier = "hard",
+  reference?: Record<string, string>,
+  behaviorChecksTotal = 0,
+  extensionBehaviorChecksTotal?: number,
+): CaseFactsForReport {
+  return {
+    tier,
+    entry,
+    behaviorChecksTotal,
+    ...(reference !== undefined ? { reference } : {}),
+    ...(extensionBehaviorChecksTotal !== undefined ? { extensionBehaviorChecksTotal } : {}),
+  };
 }
 
 function available(content: string): FileAtCommit {
@@ -776,4 +791,176 @@ test("a review is marked live only when the view model was built in serve mode",
   const liveReview = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId, new Map(), new Map(), new Map(), true));
 
   assert.deepEqual({ static: staticReview.live, live: liveReview.live }, { static: false, live: true });
+});
+
+function cardNamed(review: ReturnType<typeof reviewOf>, name: string) {
+  return review.stateCards.find((card) => card.name === name);
+}
+
+test("a single-task review's state cards read the original source as a plain complexity fact and the change as a verdict plus a complexity delta", () => {
+  const records = {
+    "run-a": {
+      judged: [
+        judgedRecord("case-a", "t1", 1, { verdict: "genuine-fix", decisionPointsBefore: 12, decisionPointsAfter: 9, failedBehaviorChecks: [] }),
+      ],
+      raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" }, task: "Reduce branching in entry.py." })],
+    },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py", "hard", undefined, 4)]]);
+
+  const review = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId));
+
+  assert.deepEqual(
+    {
+      original: cardNamed(review, "original"),
+      change: cardNamed(review, "change"),
+    },
+    {
+      original: { name: "original", stateNumber: 0, title: "state 0 · original source", fileAtCommit: "entry.py at commit sha1", metricLine: "complexity 12", dedupeKey: cardNamed(review, "original")!.dedupeKey },
+      change: {
+        name: "change",
+        stateNumber: 1,
+        title: "state 1 · change · this repetition",
+        verdict: "genuine-fix",
+        metricLine: "complexity 12 → 9 · behavior checks 4 of 4",
+        taskText: "Reduce branching in entry.py.",
+        dedupeKey: cardNamed(review, "change")!.dedupeKey,
+      },
+    },
+  );
+});
+
+test("a follow-up review's earlier-change card carries the source run's own verdict, not the follow-up repetition's verdict", () => {
+  const exp = experiment({ treatments: [{ treatmentId: "t1", run: "run-b" }], controlTreatment: "t1", kind: "with-follow-up-tasks", sourceRun: "run-a" });
+  const records = {
+    "run-a": {
+      judged: [judgedRecord("case-a", "t1", 5, { verdict: "genuine-fix", decisionPointsBefore: 14, decisionPointsAfter: 9 })],
+      raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 5, files: { "entry.py": "earlier\n" }, task: "Improve entry.py." })],
+    },
+    "run-b": {
+      judged: [
+        judgedRecord("case-a", "t1", 1, {
+          verdict: "extended",
+          decisionPointsBefore: 9,
+          decisionPointsAfter: 6,
+          startsFrom: { kind: "earlier-result", sourceRun: "run-a", sourceRepetition: 5 },
+        }),
+      ],
+      raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "follow-up\n" }, task: "Add weighting." })],
+    },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py", "hard", undefined, 4, 3)]]);
+
+  const review = reviewOf(experimentDetailFor(exp, records, caseFactsByCaseId));
+
+  assert.deepEqual(
+    {
+      earlierChange: {
+        title: cardNamed(review, "earlier-change")!.title,
+        verdict: cardNamed(review, "earlier-change")!.verdict,
+        metricLine: cardNamed(review, "earlier-change")!.metricLine,
+        taskText: cardNamed(review, "earlier-change")!.taskText,
+      },
+      followUpChange: {
+        title: cardNamed(review, "follow-up-change")!.title,
+        verdict: cardNamed(review, "follow-up-change")!.verdict,
+        metricLine: cardNamed(review, "follow-up-change")!.metricLine,
+        taskText: cardNamed(review, "follow-up-change")!.taskText,
+      },
+    },
+    {
+      earlierChange: {
+        title: "state 1 · earlier change · run folder run-a, repetition 5",
+        verdict: "genuine-fix",
+        metricLine: "complexity 14 → 9 · behavior checks 4 of 4",
+        taskText: "Improve entry.py.",
+      },
+      followUpChange: {
+        title: "state 2 · follow-up change · this repetition",
+        verdict: "extended",
+        metricLine: "complexity 9 → 6 · behavior checks 3 of 3",
+        taskText: "Add weighting.",
+      },
+    },
+  );
+});
+
+test("a review's header names the diff size, the cost of the repetition and its nudge summary", () => {
+  const records = {
+    "run-a": {
+      judged: [judgedRecord("case-a", "t1", 1, { linesAdded: 41, linesRemoved: 12, turns: 17, tokensIn: 102_000, tokensOut: 38_000, durationMs: 192_000, nudges: firingsOn(RULE.ccDelta, [5, 7, 11]) })],
+      raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" } })],
+    },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+
+  const review = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId));
+
+  assert.deepEqual(
+    { statsLine: review.statsLine, nudgeSummary: review.nudgeSummary },
+    { statsLine: "+41 / −12 lines · 17 turns · 102 k input tokens · 38 k output tokens · 3 min 12 s", nudgeSummary: "complexity nudge ×3" },
+  );
+});
+
+test("a review's files line marks a file created this repetition apart from one merely modified", () => {
+  const records = {
+    "run-a": {
+      judged: [judgedRecord("case-a", "t1", 1, { filesCreated: ["test_entry.py"] })],
+      raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n", "test_entry.py": "y\n" } })],
+    },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+
+  const review = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId));
+
+  assert.equal(review.filesLine, "files: entry.py (modified) · test_entry.py (created)");
+});
+
+test("a treatment's verdict bar assigns each verdict to a segment class and sizes it by its share of the repetitions", () => {
+  const exp = experiment({ treatments: [{ treatmentId: "t1", run: "run-a" }], controlTreatment: "t1", kind: "single-task" });
+  const records = {
+    "run-a": {
+      judged: [
+        judgedRecord("case-a", "t1", 1, { verdict: "genuine-fix" }),
+        judgedRecord("case-a", "t1", 2, { verdict: "genuine-fix" }),
+        judgedRecord("case-a", "t1", 3, { verdict: "genuine-fix" }),
+        judgedRecord("case-a", "t1", 4, { verdict: "broken" }),
+      ],
+      raw: [],
+    },
+  };
+
+  const detail = experimentDetailFor(exp, records);
+
+  assert.deepEqual(detail.treatments[0]!.verdictBarSegments, [
+    { cls: "g", pct: 75 },
+    { cls: "x", pct: 25 },
+  ]);
+});
+
+test("a per-case row's bar segments are computed from that case's own repetitions, not the whole treatment", () => {
+  const exp = experiment({
+    treatments: [
+      { treatmentId: "t1", run: "run-a" },
+      { treatmentId: "t2", run: "run-a" },
+    ],
+    controlTreatment: "t1",
+    kind: "single-task",
+  });
+  const records = {
+    "run-a": {
+      judged: [judgedRecord("case-a", "t1", 1, { verdict: "genuine-fix" }), judgedRecord("case-a", "t2", 1, { verdict: "untouched" })],
+      raw: [],
+    },
+  };
+
+  const detail = experimentDetailFor(exp, records);
+
+  assert.deepEqual(
+    detail.perCase[0]!.cells.map((cell) => cell.barSegments),
+    [
+      [{ cls: "g", pct: 100 }],
+      [{ cls: "w", pct: 100 }],
+    ],
+  );
 });

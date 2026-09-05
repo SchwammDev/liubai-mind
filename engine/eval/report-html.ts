@@ -4,12 +4,15 @@ import type {
   ExperimentDetailView,
   ExperimentView,
   MilestoneView,
+  PerCaseCellView,
   PerCaseRowView,
   RepetitionView,
   ReportViewModel,
+  ReviewStateCardView,
   ReviewView,
   SetupCheckView,
   TreatmentView,
+  VerdictBarSegmentView,
 } from "./report-view.ts";
 import type { TranscriptView } from "./session-log.ts";
 import { contextDiff } from "./diff-counts.ts";
@@ -51,6 +54,8 @@ const PAGE_STYLE = `
   .filter-bar button { font: inherit; padding: 2px 10px; margin-left: 4px; border: 1px solid #888; border-radius: 10px; background: #fff; cursor: pointer; }
   .filter-bar button.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
   table.repetitions, table.per-case { margin-top: 4px; }
+  table.repetitions tbody tr[data-repetition] { cursor: pointer; }
+  table.repetitions tbody tr[data-repetition]:hover { background: #f7f7f5; }
   .detail { font-size: 12.5px; color: #555; }
   .review { border: 1px solid #ddd; border-radius: 4px; padding: 10px 14px; margin: 6px 0 14px; }
   .review h4 { margin: 0 0 8px; font-size: 13px; font-weight: normal; color: #555; }
@@ -59,7 +64,17 @@ const PAGE_STYLE = `
   .states { display: flex; gap: 0; border: 1px solid #ddd; border-radius: 4px; margin: 8px 0; }
   .state-col { flex: 1; padding: 8px 12px; border-right: 1px solid #ddd; overflow: auto; }
   .state-col:last-child { border-right: none; }
+  .state-col .metric { margin-top: 2px; }
+  .state-col .task-text { margin-top: 6px; color: #555; }
+  .review-header { margin: 2px 0 8px; }
+  .review-header .stats, .review-header .nudge-summary { font-size: 12.5px; color: #555; margin-top: 2px; }
   .code-text { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-word; margin: 4px 0 0; }
+  .bar { display: inline-flex; height: 12px; width: 120px; border: 1px solid #888; overflow: hidden; vertical-align: middle; margin-right: 8px; }
+  .bar div { height: 100%; }
+  .bar .g { background: #1a1a1a; }
+  .bar .m { background: #999; }
+  .bar .x { background: repeating-linear-gradient(45deg, #fff 0 3px, #999 3px 5px); }
+  .bar .w { background: #fff; }
   .compare-controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; color: #555; margin: 8px 0; }
   .compare-controls button { font: inherit; padding: 2px 10px; border: 1px solid #888; border-radius: 10px; background: #fff; cursor: pointer; }
   .compare-controls button.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
@@ -203,24 +218,46 @@ function stateByName(states: CodeStateView[], name: CodeStateName): CodeStateVie
   return states.find((state) => state.name === name);
 }
 
-function renderCodeState(state: CodeStateView, seenStateKeys: Set<string>): string {
-  const anchorId = `state-${slug(state.dedupeKey)}`;
-  const isOwner = !seenStateKeys.has(state.dedupeKey);
-  if (isOwner) seenStateKeys.add(state.dedupeKey);
+function verdictChipClass(verdict: string): string {
+  return SEVERE_VERDICTS.has(verdict) ? "chip flag" : "chip";
+}
 
-  const body = isOwner
-    ? `<pre id="${anchorId}" class="code-text">${escapeHtml(state.text)}</pre>`
-    : `<a href="#${anchorId}" class="mono">same as shown above</a>`;
+const SEVERE_VERDICTS = new Set(["broken", "behavior-broken", "gamed", "bar-missed", "regressed", "extension-failed"]);
 
-  return `<div class="state-col" data-code-state="${escapeHtml(state.name)}" data-state-key="${escapeHtml(state.dedupeKey)}">
-      <div class="label">${escapeHtml(state.label)}</div>
-      <div class="mono kind">${escapeHtml(state.caption)}</div>
-      ${body}
+function stateLabelFor(review: ReviewView, name: CodeStateName): string {
+  return stateByName(review.codeStates, name)?.label ?? name;
+}
+
+function stateTextAnchorId(dedupeKey: string): string {
+  return `state-${slug(dedupeKey)}`;
+}
+
+function renderStateCard(card: ReviewStateCardView, label: string): string {
+  const fileLine = card.fileAtCommit === undefined ? "" : `<div class="mono">${escapeHtml(card.fileAtCommit)}</div>`;
+  const metricLine =
+    card.metricLine === undefined
+      ? ""
+      : `<div class="metric">${card.verdict === undefined ? "" : `<span class="${verdictChipClass(card.verdict)}">${escapeHtml(card.verdict)}</span> `}<span class="mono kind">${escapeHtml(card.metricLine)}</span></div>`;
+  const taskLine = card.taskText === undefined ? "" : `<div class="mono task-text">${escapeHtml(card.taskText)}</div>`;
+
+  return `<div class="state-col" data-code-state="${escapeHtml(card.name)}" data-state-key="${escapeHtml(stateTextAnchorId(card.dedupeKey))}" data-state-label="${escapeHtml(label)}">
+      <div class="kind">${escapeHtml(card.title)}</div>
+      ${fileLine}
+      ${metricLine}
+      ${taskLine}
     </div>`;
 }
 
-function renderStates(review: ReviewView, seenStateKeys: Set<string>): string {
-  return `<div class="states">${review.codeStates.map((state) => renderCodeState(state, seenStateKeys)).join("")}</div>`;
+function renderStates(review: ReviewView): string {
+  return `<div class="states">${review.stateCards.map((card) => renderStateCard(card, stateLabelFor(review, card.name))).join("")}</div>`;
+}
+
+function collectStateTexts(review: ReviewView, seenStateKeys: Set<string>, collector: ViewCollector): void {
+  for (const state of review.codeStates) {
+    if (seenStateKeys.has(state.dedupeKey)) continue;
+    seenStateKeys.add(state.dedupeKey);
+    collector.stateTexts.push(`<pre hidden id="${stateTextAnchorId(state.dedupeKey)}" class="code-text">${escapeHtml(state.text)}</pre>`);
+  }
 }
 
 function renderWhyBox(review: ReviewView): string {
@@ -265,10 +302,14 @@ function renderPairButton(review: ReviewView, before: CodeStateName, after: Code
 }
 
 function renderReferenceToggle(review: ReviewView): string {
-  if (review.reference === undefined) return "";
+  const hasReference = review.reference !== undefined;
   return `<span class="kind">against</span>
     <button type="button" class="active" data-before-source="own">before</button>
-    <button type="button" data-before-source="reference">reference fix</button>`;
+    <button type="button" data-before-source="reference"${hasReference ? "" : " disabled"}>reference fix</button>`;
+}
+
+function renderFilesLine(review: ReviewView): string {
+  return review.filesLine.length === 0 ? "" : `<span class="kind mono" style="margin-left: auto;">${escapeHtml(review.filesLine)}</span>`;
 }
 
 function renderCompareControls(review: ReviewView): string {
@@ -283,6 +324,7 @@ function renderCompareControls(review: ReviewView): string {
     <span class="kind">view</span>
     <button type="button" data-view-mode="side-by-side">side by side</button>
     <button type="button" class="active" data-view-mode="unified">unified</button>
+    ${renderFilesLine(review)}
   </div>`;
 }
 
@@ -338,21 +380,31 @@ function renderTranscriptBlock(review: ReviewView): string {
     </div>`;
   }
 
-  return `<div class="transcript-block" data-transcript-block>
+  return `<div class="transcript-block" data-transcript-block="${escapeHtml(review.id)}">
     <div class="transcript-toolbar">
-      <button type="button" data-open-transcript="${escapeHtml(review.id)}">open transcript</button>
       ${renderThinkingToggle(review.transcript.reasoningPresent)}
       ${rawLink}
     </div>
     <noscript><div class="no-js-note">the transcript needs JavaScript to render here; use the raw transcript file link above.</div></noscript>
-    <div class="transcript-viewer" hidden></div>
+    <div class="transcript-viewer"></div>
   </div>`;
 }
 
-function renderReview(review: ReviewView, seenStateKeys: Set<string>): string {
+function renderReviewHeader(review: ReviewView): string {
+  const nudgeLine = review.nudgeSummary.length === 0 ? "" : `<div class="nudge-summary mono">${escapeHtml(review.nudgeSummary)}</div>`;
+  return `<div class="review-header">
+    <h4><span class="${verdictChipClass(review.verdict)}">${escapeHtml(review.verdict)}</span></h4>
+    <div class="stats mono">${escapeHtml(review.statsLine)}</div>
+    ${nudgeLine}
+  </div>`;
+}
+
+function renderReview(review: ReviewView, seenStateKeys: Set<string>, collector: ViewCollector): string {
+  collectStateTexts(review, seenStateKeys, collector);
+
   return `<section data-review="${escapeHtml(review.id)}" class="review">
-    <h4><span class="chip">${escapeHtml(review.verdict)}</span></h4>
-    ${renderStates(review, seenStateKeys)}
+    ${renderReviewHeader(review)}
+    ${renderStates(review)}
     ${renderCompareControls(review)}
     <div class="diff-holder">${renderDefaultDiff(review)}</div>
     ${renderWhyBox(review)}
@@ -382,6 +434,7 @@ function renderReviewView(
   review: ReviewView,
   neighbors: RepetitionNeighbors,
   seenStateKeys: Set<string>,
+  collector: ViewCollector,
 ): string {
   return `<section data-view="review" id="${reviewViewId(review.id)}">
     ${reviewCrumb(detail, treatment, repetition)}
@@ -390,7 +443,7 @@ function renderReviewView(
       ${prevNextLink(neighbors.next, "next repetition ›")}
       <a class="btn" href="${hrefFor(transcriptViewId(review.id))}">transcript</a>
     </div>
-    ${renderReview(review, seenStateKeys)}
+    ${renderReview(review, seenStateKeys, collector)}
   </section>`;
 }
 
@@ -405,11 +458,16 @@ function renderTranscriptView(detail: ExperimentDetailView, treatment: Treatment
 interface ViewCollector {
   reviewViews: string[];
   transcriptViews: string[];
+  stateTexts: string[];
 }
 
-function reviewAndTranscriptLinks(review: ReviewView | undefined): string {
-  if (review === undefined) return "";
-  return ` · <a href="${hrefFor(reviewViewId(review.id))}">review</a> · <a href="${hrefFor(transcriptViewId(review.id))}">transcript</a>`;
+function caseCellFor(repetition: RepetitionView): string {
+  const label = `${escapeHtml(repetition.caseId)} · ${repetition.repetition}`;
+  return repetition.review === undefined ? label : `<a href="${hrefFor(reviewViewId(repetition.review.id))}">${label}</a>`;
+}
+
+function transcriptLink(review: ReviewView | undefined): string {
+  return review === undefined ? "" : ` · <a href="${hrefFor(transcriptViewId(review.id))}">transcript</a>`;
 }
 
 function renderRepetitionRow(
@@ -426,19 +484,19 @@ function renderRepetitionRow(
 
   if (repetition.review !== undefined) {
     const neighbors = neighborsOf(treatment.repetitions, index);
-    collector.reviewViews.push(renderReviewView(detail, treatment, repetition, repetition.review, neighbors, seenStateKeys));
+    collector.reviewViews.push(renderReviewView(detail, treatment, repetition, repetition.review, neighbors, seenStateKeys, collector));
     collector.transcriptViews.push(renderTranscriptView(detail, treatment, repetition, repetition.review));
   }
 
   return `<tr data-repetition="${escapeHtml(repetition.id)}" data-successful="${successful}" data-nudged="${nudged}" data-control="${control}">
-      <td class="mono">${escapeHtml(repetition.caseId)} · ${repetition.repetition}</td>
+      <td class="mono">${caseCellFor(repetition)}</td>
       <td><span class="chip">${escapeHtml(repetition.verdict)}</span></td>
       <td>${escapeHtml(repetition.startsFromLabel)}</td>
       <td class="mono">${escapeHtml(repetition.linesAddedRemoved)}</td>
       <td class="mono">${escapeHtml(repetition.turns)}</td>
       <td class="mono">${escapeHtml(repetition.tokensIn)}</td>
       <td class="mono">${escapeHtml(repetition.nudges)}</td>
-      <td class="detail">${escapeHtml(repetition.detail)}${reviewAndTranscriptLinks(repetition.review)}</td>
+      <td class="detail">${escapeHtml(repetition.detail)}${transcriptLink(repetition.review)}</td>
     </tr>`;
 }
 
@@ -467,7 +525,7 @@ function renderTreatmentRow(detail: ExperimentDetailView, treatment: TreatmentVi
         <button type="button" class="disclosure" data-toggle-repetitions aria-expanded="false" aria-controls="${panelId}">▸</button>
       </td>
       <td><b>${escapeHtml(treatment.treatmentId)}</b><br><span class="kind mono">run folder ${escapeHtml(treatment.run)}</span></td>
-      <td>${escapeHtml(treatment.verdictDistribution)}</td>
+      <td>${renderBar(treatment.verdictBarSegments)}<span class="mono kind">${escapeHtml(treatment.verdictDistribution)}</span></td>
       <td class="mono">${escapeHtml(treatment.meanTurns)}</td>
       <td class="mono">${escapeHtml(treatment.meanTokensIn)}</td>
       <td class="mono">${escapeHtml(treatment.meanNudgesPerRepetition)}</td>
@@ -492,8 +550,18 @@ function renderTreatmentsTable(detail: ExperimentDetailView, seenStateKeys: Set<
   </table>`;
 }
 
+function renderBar(segments: VerdictBarSegmentView[]): string {
+  if (segments.length === 0) return "";
+  const parts = segments.map((segment) => `<div class="${segment.cls}" style="width: ${segment.pct}%;"></div>`).join("");
+  return `<div class="bar">${parts}</div>`;
+}
+
+function renderPerCaseCell(cell: PerCaseCellView): string {
+  return `<td>${renderBar(cell.barSegments)}<span class="mono kind">${escapeHtml(cell.label)}</span></td>`;
+}
+
 function renderPerCaseRow(row: PerCaseRowView): string {
-  const cells = row.cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("");
+  const cells = row.cells.map(renderPerCaseCell).join("");
   return `<tr><td class="mono">${escapeHtml(row.caseId)}</td>${cells}<td>${escapeHtml(row.wherePart)}</td></tr>`;
 }
 
@@ -550,6 +618,16 @@ document.querySelectorAll("[data-toggle-repetitions]").forEach(function (button)
     button.setAttribute("aria-expanded", String(!expanded));
     panel.classList.toggle("expanded", !expanded);
     button.textContent = expanded ? "▸" : "▾";
+  });
+});
+</script>`;
+
+const ROW_CLICK_SCRIPT = `<script>
+document.querySelectorAll("tr[data-repetition]").forEach(function (row) {
+  row.addEventListener("click", function (event) {
+    if (event.target.closest("a")) return;
+    var link = row.querySelector("td a");
+    if (link) location.hash = link.getAttribute("href").slice(1);
   });
 });
 </script>`;
@@ -669,20 +747,32 @@ const REVIEW_SCRIPT = `<script>
       }
     }
     if (!col) return null;
-    var pre = col.querySelector(".code-text");
-    var label = col.querySelector(".label").textContent;
-    if (pre) return { text: pre.textContent, label: label };
-    var link = col.querySelector("a[href^='#']");
-    if (link) {
-      var target = document.getElementById(link.getAttribute("href").slice(1));
-      return { text: target ? target.textContent : "", label: label };
-    }
-    return { text: "", label: label };
+    var label = col.dataset.stateLabel;
+    var pre = document.getElementById(col.dataset.stateKey);
+    return { text: pre ? pre.textContent : "", label: label };
   }
 
   function referenceTextFor(section) {
     var pre = section.querySelector("[data-reference-state]");
     return pre ? pre.textContent : "";
+  }
+
+  var VIEW_MODE_STORAGE_KEY = "liubai-eval-report:diff-view-mode";
+
+  function storedViewMode() {
+    try {
+      return window.localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function storeViewMode(mode) {
+    try {
+      window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
+    } catch (err) {
+      // no persistence available; the choice just won't survive navigation or reload
+    }
   }
 
   document.querySelectorAll(".review").forEach(function (section) {
@@ -703,6 +793,14 @@ const REVIEW_SCRIPT = `<script>
       if (button.classList.contains("active")) state.view = button.dataset.viewMode;
     });
 
+    var remembered = storedViewMode();
+    if (remembered && remembered !== state.view) {
+      state.view = remembered;
+      viewButtons.forEach(function (button) {
+        button.classList.toggle("active", button.dataset.viewMode === remembered);
+      });
+    }
+
     function render() {
       var beforeInfo = state.useReference ? { text: referenceTextFor(section), label: "case reference" } : stateTextAndLabel(section, state.before);
       var afterInfo = stateTextAndLabel(section, state.after);
@@ -710,6 +808,8 @@ const REVIEW_SCRIPT = `<script>
       var ops = lineDiff(beforeInfo.text, afterInfo.text);
       holder.innerHTML = state.view === "unified" ? unifiedHtml(beforeInfo.label, afterInfo.label, ops) : sideBySideHtml(beforeInfo.label, afterInfo.label, ops);
     }
+
+    if (remembered && remembered !== "unified") render();
 
     pairButtons.forEach(function (button) {
       button.addEventListener("click", function () {
@@ -723,6 +823,7 @@ const REVIEW_SCRIPT = `<script>
 
     sourceButtons.forEach(function (button) {
       button.addEventListener("click", function () {
+        if (button.disabled) return;
         sourceButtons.forEach(function (b) { b.classList.remove("active"); });
         button.classList.add("active");
         state.useReference = button.dataset.beforeSource === "reference";
@@ -735,6 +836,7 @@ const REVIEW_SCRIPT = `<script>
         viewButtons.forEach(function (b) { b.classList.remove("active"); });
         button.classList.add("active");
         state.view = button.dataset.viewMode;
+        storeViewMode(state.view);
         render();
       });
     });
@@ -906,20 +1008,13 @@ const TRANSCRIPT_SCRIPT = `<script>
     });
   });
 
-  document.querySelectorAll("[data-open-transcript]").forEach(function (button) {
-    button.addEventListener("click", function () {
-      var id = button.getAttribute("data-open-transcript");
-      var block = button.closest(".transcript-block");
-      var viewer = block.querySelector(".transcript-viewer");
-      if (viewer.dataset.rendered !== "1") {
-        var island = document.querySelector('script[data-transcript="' + id + '"]');
-        var transcript = JSON.parse(island.textContent);
-        renderTranscript(viewer, transcript);
-        viewer.dataset.rendered = "1";
-      }
-      viewer.hidden = !viewer.hidden;
-      button.textContent = viewer.hidden ? "open transcript" : "close transcript";
-    });
+  document.querySelectorAll("[data-transcript-block]").forEach(function (block) {
+    var id = block.getAttribute("data-transcript-block");
+    var viewer = block.querySelector(".transcript-viewer");
+    var island = document.querySelector('script[data-transcript="' + id + '"]');
+    if (!viewer || !island) return;
+    var transcript = JSON.parse(island.textContent);
+    renderTranscript(viewer, transcript);
   });
 })();
 </script>`;
@@ -958,7 +1053,7 @@ function renderExperimentsView(model: ReportViewModel): string {
 
 export function renderReportHtml(model: ReportViewModel): string {
   const seenStateKeys = new Set<string>();
-  const collector: ViewCollector = { reviewViews: [], transcriptViews: [] };
+  const collector: ViewCollector = { reviewViews: [], transcriptViews: [], stateTexts: [] };
   const experimentSections = model.experimentDetails.map((detail) => renderExperimentDetail(detail, seenStateKeys, collector)).join("");
 
   return `<!doctype html>
@@ -975,8 +1070,10 @@ ${renderExperimentsView(model)}
 ${experimentSections}
 ${collector.reviewViews.join("")}
 ${collector.transcriptViews.join("")}
+${collector.stateTexts.join("")}
 ${FILTER_SCRIPT}
 ${DISCLOSURE_SCRIPT}
+${ROW_CLICK_SCRIPT}
 ${ROUTER_SCRIPT}
 ${REVIEW_SCRIPT}
 ${TRANSCRIPT_SCRIPT}
