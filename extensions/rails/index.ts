@@ -31,7 +31,7 @@ import { withoutDuplicateToolCalls } from "./duplicate-delivery.ts";
 import { cleanProse } from "./prose-gate.ts";
 import { injectWebSearch, loadWebSearchConfig, LIUBAI_CONFIG } from "./web-search.ts";
 import { analyze } from "../../engine/analyze.ts";
-import type { RuleName } from "../../engine/contract.ts";
+import type { Env, RuleName } from "../../engine/contract.ts";
 import { EVAL_ABORT_EXIT_CODE, RULE, packHash } from "../../engine/contract.ts";
 import { defaultEnv } from "../../engine/env.ts";
 import { detectLang } from "../../engine/lang.ts";
@@ -162,6 +162,7 @@ async function gateCommand(
 // Test seam: production wiring uses the real tools and process adapters,
 // tests inject fakes so no command ever leaves the process.
 export type RailsDeps = {
+  env?: Env;
   bashTool?: BashTool;
   editTool?: EditTool;
   exec?: Exec;
@@ -191,6 +192,7 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
   const logDedup = deps?.logDedup ?? createFileLog();
   const logShadow = deps?.logShadow ?? createShadowLog(cwd);
   const abort = deps?.abort ?? abortProcess;
+  const env = deps?.env ?? defaultEnv();
 
   stampDelivered(cwd, deps?.writeDelivered ?? createDeliveredWriter(cwd));
 
@@ -313,7 +315,7 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
     const analyzeRules = buildRules(DEFAULT_POLICY, lang);
     const resp = await analyze(
       { path: states.path, before: states.before, after: states.after, lang },
-      defaultEnv(),
+      env,
       analyzeRules,
     );
 

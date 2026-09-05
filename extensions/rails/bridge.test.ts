@@ -1,8 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, renameSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { defaultEnv } from "../../engine/env.ts";
+import { createPythonExtractor } from "../../engine/extract-python.ts";
 import { parseShadowRules, register } from "./index.ts";
 import type { RailsDeps, ShadowLogEntry } from "./index.ts";
 import type { DedupLog } from "./dedup.ts";
@@ -150,31 +152,16 @@ test("a write-named call carrying a foreign payload reaches no rail", async () =
   assert.deepEqual(railFailures(session.logs), []);
 });
 
-function hideEngineVenv(): () => void {
-  const venvPath = join(import.meta.dirname, "..", "..", "engine", ".venv");
-  const venvBackup = `${venvPath}.bak`;
-  if (existsSync(venvPath)) renameSync(venvPath, venvBackup);
-  return () => {
-    if (existsSync(venvBackup)) renameSync(venvBackup, venvPath);
-  };
-}
-
-async function withoutPython<T>(action: () => Promise<T>): Promise<T> {
-  const originalPath = process.env.PATH;
-  process.env.PATH = "";
-  const restoreVenv = hideEngineVenv();
-  try {
-    return await action();
-  } finally {
-    restoreVenv();
-    process.env.PATH = originalPath;
-  }
+function withAnUnrunnablePythonExtractor(over: RailsDeps = {}): RailsDeps {
+  const env = defaultEnv();
+  const unrunnable = createPythonExtractor(join(tmpdir(), "liubai-no-such-python"));
+  return { ...over, env: { ...env, extractors: { ...env.extractors, python: unrunnable } } };
 }
 
 test("an extractor that cannot run is logged instead of silently passing the write", async () => {
-  const session = railsSession();
+  const session = railsSession(undefined, new Map(), withAnUnrunnablePythonExtractor());
 
-  const outcome = await withoutPython(() => session.write("unrunnable", MODULE_FILE, "x = 1  # noise\n"));
+  const outcome = await session.write("unrunnable", MODULE_FILE, "x = 1  # noise\n");
 
   assert.equal(outcome.blocked, false);
   assert.deepEqual(railFailures(session.logs).map((entry) => entry.key), ["extract:python"]);
@@ -182,10 +169,10 @@ test("an extractor that cannot run is logged instead of silently passing the wri
 
 test("a broken extractor is reported to the operator once, however many calls fail", async () => {
   const notices: string[] = [];
-  const session = railsSession(notifyingCtx(notices));
+  const session = railsSession(notifyingCtx(notices), new Map(), withAnUnrunnablePythonExtractor());
 
-  await withoutPython(() => session.write("first", MODULE_FILE, "x = 1\n"));
-  await withoutPython(() => session.write("second", MODULE_FILE, "y = 2\n"));
+  await session.write("first", MODULE_FILE, "x = 1\n");
+  await session.write("second", MODULE_FILE, "y = 2\n");
 
   assert.equal(notices.length, 1);
 });
@@ -332,9 +319,9 @@ function assertFailedOpenWithoutAborting(outcome: ToolOutcome, messages: string[
 
 test("an extractor failure under LIUBAI_EVAL kills the repetition through the abort seam instead of degrading the rail", async () => {
   const { abort, messages } = abortSpy();
-  const session = railsSession(undefined, new Map(), { abort });
+  const session = railsSession(undefined, new Map(), withAnUnrunnablePythonExtractor({ abort }));
 
-  await withLiubaiEval(() => withoutPython(() => session.write("eval-abort", MODULE_FILE, "x = 1\n")));
+  await withLiubaiEval(() => session.write("eval-abort", MODULE_FILE, "x = 1\n"));
 
   assertAbortedNamingRailAndReason(messages, "extract:python");
   assert.deepEqual(railFailures(session.logs), []);
@@ -342,9 +329,9 @@ test("an extractor failure under LIUBAI_EVAL kills the repetition through the ab
 
 test("an extractor failure without LIUBAI_EVAL leaves the abort seam untouched and keeps failing open", async () => {
   const { abort, messages } = abortSpy();
-  const session = railsSession(undefined, new Map(), { abort });
+  const session = railsSession(undefined, new Map(), withAnUnrunnablePythonExtractor({ abort }));
 
-  const outcome = await withoutPython(() => session.write("no-eval-abort", MODULE_FILE, "x = 1\n"));
+  const outcome = await session.write("no-eval-abort", MODULE_FILE, "x = 1\n");
 
   assertFailedOpenWithoutAborting(outcome, messages, session.logs);
 });
