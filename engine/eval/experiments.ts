@@ -99,6 +99,25 @@ export function validateExperiments(experiments: Experiment[], known: { treatmen
   return violations;
 }
 
+function claimedRunFolders(experiments: Experiment[]): Set<string> {
+  const claimed = new Set<string>();
+
+  for (const experiment of experiments) {
+    for (const treatment of experiment.treatments) claimed.add(treatment.run);
+    if (experiment.sourceRun !== undefined) claimed.add(experiment.sourceRun);
+  }
+
+  return claimed;
+}
+
+export function unclaimedRunFolders(experiments: Experiment[], known: KnownNames): string[] {
+  const claimed = claimedRunFolders(experiments);
+
+  return Object.keys(known.treatmentIdsByRun)
+    .filter((run) => !claimed.has(run))
+    .sort();
+}
+
 export function loadExperiments(path: string = join(import.meta.dirname, "experiments.json")): Experiment[] {
   return JSON.parse(readFileSync(path, "utf8")) as Experiment[];
 }
