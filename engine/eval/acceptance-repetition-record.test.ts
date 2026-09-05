@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { runEval } from "./eval-cli.ts";
 import { runScore } from "./score.ts";
 import { routeScore } from "./follow-up-score.ts";
 import type { RawRow } from "./eval-contract.ts";
@@ -24,13 +23,14 @@ import {
 } from "./run-doubles.ts";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
-const RUNS_ROOT = join(import.meta.dirname, "runs");
-
-const COMMITTED_RUN = "numberless-prompt-v2-hard-flash";
-const SESSIONS_IN_THE_COMMITTED_RUN = 144;
 
 const CASE_ID = "ts-flag-parser";
 const ENTRY_FILE = "parse_flags.ts";
+const PYTHON_CASE_ID = "py-safe-convert";
+const PYTHON_ENTRY_FILE = "to_number.py";
+
+const TYPESCRIPT_HELPER = '\nfunction isFlag(token: string): boolean {\n  return token.startsWith("--");\n}\n';
+const PYTHON_HELPER = '\n\ndef _is_blank(text: str) -> bool:\n    return text.strip() == ""\n';
 const TREATMENT_ID = "rails-default";
 const EARLIER_RUN = "earlier-run";
 const ONLY_REPETITION = 1;
@@ -145,6 +145,60 @@ function singleTaskRunWhoseSessionEditsTwice(): string {
   });
 }
 
+type Session = { ending: string; row: RawRow };
+
+function entryWithAnAddedHelper(caseId: string, entryFile: string, helper: string): Record<string, string> {
+  return { [entryFile]: `${pristineSourceOf(caseId, entryFile)}${helper}` };
+}
+
+function sessionsCoveringEveryEnding(): Session[] {
+  return [
+    {
+      ending: "changed the entry",
+      row: collectedRow({ repetition: 1, files: entryWithAnAddedHelper(CASE_ID, ENTRY_FILE, TYPESCRIPT_HELPER) }),
+    },
+    {
+      ending: "left the entry untouched",
+      row: collectedRow({ repetition: 2 }),
+    },
+    {
+      ending: "ran out of time",
+      row: collectedRow({ repetition: 3, timedOut: true, signal: "SIGTERM", exitCode: -1, files: {} }),
+    },
+    {
+      ending: "errored before finishing",
+      row: collectedRow({ repetition: 4, agentError: "agent exited -1 after a partial run", exitCode: 1, files: {} }),
+    },
+    {
+      ending: "changed a python entry",
+      row: collectedRow({
+        repetition: 5,
+        caseId: PYTHON_CASE_ID,
+        files: entryWithAnAddedHelper(PYTHON_CASE_ID, PYTHON_ENTRY_FILE, PYTHON_HELPER),
+      }),
+    },
+  ];
+}
+
+function runHolding(sessions: Session[]): string {
+  const session = sessionThatEditsOnTurnsTwoAndFourAndIsNudgedBothTimes();
+  return writeRun(
+    tempDir("record-every-ending-"),
+    sessions.map(({ row }) => row),
+    Object.fromEntries(sessions.map(({ row }) => [singleTaskSessionLogName(row.caseId, row.treatmentId, row.repetition), session])),
+  );
+}
+
+function factsBySessionEnding(sessions: Session[], records: ReportRecord[]): Record<string, string[]> {
+  return Object.fromEntries(
+    sessions.map(({ ending, row }) => [ending, Object.keys(recordOfSession(records, row.repetition)).sort()]),
+  );
+}
+
+function everyEndingCarriesEveryFact(sessions: Session[]): Record<string, string[]> {
+  return Object.fromEntries(sessions.map(({ ending }) => [ending, [...FACTS_THE_REPORT_NEEDS].sort()]));
+}
+
 function earlierRunHoldingTheResultToBuildOn(): string {
   const runsRoot = tempDir("record-earlier-runs-");
   const earlierResult = collectedRow({ repetition: REPETITION_STARTED_FROM_THE_EARLIER_RESULT });
@@ -169,12 +223,6 @@ function followUpRunWithOneRepetitionFromEachStartingPoint(): string {
   });
 }
 
-async function scoreTheCommittedRun(): Promise<ReportRecord[]> {
-  const result = await runEval(["score", "--run", COMMITTED_RUN]);
-  assert.equal(result.status, 0, result.stdout);
-  return recordsOf(join(RUNS_ROOT, COMMITTED_RUN));
-}
-
 async function scoreSingleTaskRun(runDir: string): Promise<ReportRecord[]> {
   const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir: TREATMENTS_DIR });
   assert.equal(result.status, 0, result.stdout);
@@ -188,10 +236,12 @@ async function scoreFollowUpRun(runDir: string, runsRoot: string): Promise<Repor
   return recordsOf(runDir);
 }
 
-test("scoring the committed run gives every session a record carrying the facts the report needs", async () => {
-  const records = await scoreTheCommittedRun();
+test("every session gets a record carrying the facts the report needs, however the session ended", async () => {
+  const sessions = sessionsCoveringEveryEnding();
 
-  assert.deepEqual(factsOnEachOf(records), everySessionCarriesEveryFact(SESSIONS_IN_THE_COMMITTED_RUN));
+  const records = await scoreSingleTaskRun(runHolding(sessions));
+
+  assert.deepEqual(factsBySessionEnding(sessions, records), everyEndingCarriesEveryFact(sessions));
 });
 
 test("a record names the turns the nudges fired on and the turn of the first edit", async () => {
