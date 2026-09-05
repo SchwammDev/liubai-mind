@@ -373,6 +373,29 @@ test("buildBwrapArgs_exposes_a_venv_symlinked_into_another_users_home", () => {
   assert.equal(args.includes(pythonInstall), true, "python installation the venv resolves to is not bound into the sandbox");
 });
 
+function foreignHomeWithUvVersionAliasedVenv(): { installedVenv: string; versionAlias: string } {
+  const foreignHome = mkdtempSync(join(tmpdir(), "bwrap-foreign-home-"));
+  const uvPythons = join(foreignHome, ".local", "share", "uv", "python");
+  const pythonInstall = join(uvPythons, "cpython-3.12.12-linux-x86_64-gnu");
+  const versionAlias = join(uvPythons, "cpython-3.12-linux-x86_64-gnu");
+  mkdirSync(join(pythonInstall, "bin"), { recursive: true });
+  writeFileSync(join(pythonInstall, "bin", "python3.12"), "");
+  symlinkSync(pythonInstall, versionAlias);
+  const installedVenv = join(foreignHome, ".pi", "agent", "engine", ".venv");
+  mkdirSync(join(installedVenv, "bin"), { recursive: true });
+  symlinkSync(join(versionAlias, "bin", "python3.12"), join(installedVenv, "bin", "python"));
+  return { installedVenv, versionAlias };
+}
+
+test("buildBwrapArgs_exposes_the_uv_version_alias_directory_a_foreign_venv_reaches_its_python_through", () => {
+  const { installedVenv, versionAlias } = foreignHomeWithUvVersionAliasedVenv();
+  const repoRoot = repoWithVenvSymlinkedInto(installedVenv);
+
+  const args = buildBwrapArgs(stubMountPlan({ repoRoot }));
+
+  assert.equal(args.includes(versionAlias), true, "version alias the venv's python symlink passes through is not bound into the sandbox");
+});
+
 function foreignHomeWithVenvMissingPython(): string {
   const foreignHome = mkdtempSync(join(tmpdir(), "bwrap-foreign-home-"));
   const installedVenv = join(foreignHome, ".pi", "agent", "engine", ".venv");
