@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 export interface RunSpec {
   cwd: string;
@@ -73,13 +73,35 @@ function bindVisibleAgentConfig(args: string[], piAgentDir: string): void {
   }
 }
 
-function resolvePythonInstallRoot(resolvedVenv: string): string | undefined {
-  try {
-    const resolvedPython = realpathSync(join(resolvedVenv, "bin", "python"));
-    return dirname(dirname(resolvedPython));
-  } catch {
-    return undefined;
+function symlinkHopTargets(path: string): string[] {
+  const targets: string[] = [];
+  let current = path;
+  for (;;) {
+    let link: string;
+    try {
+      link = readlinkSync(current);
+    } catch {
+      return targets;
+    }
+    current = resolve(dirname(current), link);
+    targets.push(current);
   }
+}
+
+function installRootOf(python: string): string {
+  return dirname(dirname(python));
+}
+
+function pythonInstallRoots(resolvedVenv: string): string[] {
+  const venvPython = join(resolvedVenv, "bin", "python");
+  let resolvedPython: string;
+  try {
+    resolvedPython = realpathSync(venvPython);
+  } catch {
+    return [];
+  }
+  const pythons = [...symlinkHopTargets(venvPython), resolvedPython];
+  return [...new Set(pythons.map(installRootOf))];
 }
 
 function resolvedVenvBinds(repoRoot: string): string[] {
@@ -94,8 +116,7 @@ function resolvedVenvBinds(repoRoot: string): string[] {
   }
   if (resolvedVenv === venvPath) return [];
 
-  const pythonInstallRoot = resolvePythonInstallRoot(resolvedVenv);
-  return pythonInstallRoot === undefined ? [resolvedVenv] : [resolvedVenv, pythonInstallRoot];
+  return [resolvedVenv, ...pythonInstallRoots(resolvedVenv)];
 }
 
 export function buildBwrapArgs({ repoRoot, homeDir, workDir }: BwrapMountPlan): string[] {
