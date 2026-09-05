@@ -96,12 +96,12 @@ function validateExtracted(raw: unknown): Extracted {
   };
 }
 
-function runExtractorScript(payload: string): string {
-  if (!existsSync(PYTHON_BIN)) {
-    throw new Error(`extract-python: venv missing at ${PYTHON_BIN}; run \`./setup.sh\` (requires uv on PATH)`);
+function runExtractorScript(pythonBin: string, payload: string): string {
+  if (!existsSync(pythonBin)) {
+    throw new Error(`extract-python: venv missing at ${pythonBin}; run \`./setup.sh\` (requires uv on PATH)`);
   }
 
-  const res = spawnSync(PYTHON_BIN, [SCRIPT_PATH], { input: payload, encoding: "utf8" });
+  const res = spawnSync(pythonBin, [SCRIPT_PATH], { input: payload, encoding: "utf8" });
 
   if (res.error !== undefined) {
     throw new Error(res.error.message);
@@ -124,14 +124,18 @@ function parseExtractorOutput(stdout: string): unknown {
   }
 }
 
-export const pythonExtractor: Extractor = {
-  extract(input): Extracted {
-    const payload = JSON.stringify({
-      path: input.path,
-      ...(input.before !== undefined ? { before: input.before } : {}),
-      after: input.after,
-    });
+export function createPythonExtractor(pythonBin: string = PYTHON_BIN): Extractor {
+  return {
+    extract(input): Extracted {
+      const payload = JSON.stringify({
+        path: input.path,
+        ...(input.before !== undefined ? { before: input.before } : {}),
+        after: input.after,
+      });
 
-    return validateExtracted(parseExtractorOutput(runExtractorScript(payload)));
-  },
-};
+      return validateExtracted(parseExtractorOutput(runExtractorScript(pythonBin, payload)));
+    },
+  };
+}
+
+export const pythonExtractor: Extractor = createPythonExtractor();
