@@ -4,9 +4,8 @@
 # the one test runner; tsc always checks the whole project, since `tsc -p <cfg> <file>` is an error.
 #
 # Node: system node is too old for type stripping, so use the mise-managed
-# node@22 from setup.sh. Concurrency pinned to 1: async tests with live timers
-# (clarify suspend-path) interleave TAP output and keep the process from exiting
-# cleanly under higher concurrency — serial execution is the deterministic surface.
+# node@22 from setup.sh. Test files run 8 at a time — each file is its own
+# process, so nothing they do is visible to a sibling.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -26,7 +25,7 @@ status=0
 rm -rf "$COV_TMP"
 
 echo "## TypeScript (node --test)"
-ts_out=$(NODE_V8_COVERAGE="$COV_TMP" mise exec -- node --test --experimental-strip-types --test-concurrency=1 "${ts_args[@]}" 2>&1) || status=1
+ts_out=$(NODE_V8_COVERAGE="$COV_TMP" mise exec -- node --test --experimental-strip-types --test-concurrency=8 "${ts_args[@]}" 2>&1) || status=1
 if [ $status -eq 0 ]; then
   echo "✅ TypeScript tests passed"
 else
