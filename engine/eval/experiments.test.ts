@@ -1,8 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { validateExperiments, unclaimedRunFolders, loadExperiments, loadTreatmentIdsByRun } from "./experiments.ts";
 import type { Experiment } from "./experiments.ts";
+import { tempDir } from "./run-doubles.ts";
+
+function runsDirWithARunFolderBesideAToolDirectory(): string {
+  const runsDir = tempDir("experiments-runs-");
+
+  mkdirSync(join(runsDir, "real-run"));
+  writeFileSync(join(runsDir, "real-run", "raw.jsonl"), `${JSON.stringify({ treatmentId: "control" })}\n`);
+  mkdirSync(join(runsDir, ".nwave"));
+
+  return runsDir;
+}
 
 function singleTaskExperiment(overrides: Partial<Experiment> = {}): Experiment {
   return {
@@ -114,6 +127,12 @@ test("loadTreatmentIdsByRun_lists_the_distinct_treatmentIds_the_committed_run_fo
   const byRun = loadTreatmentIdsByRun();
 
   assert.deepEqual(byRun["numberless-prompt-v2-hard-flash"], ["cc-delta-numberless-prompt", "cc-delta-prompt", "control"]);
+});
+
+test("loadTreatmentIdsByRun_counts_only_directories_that_hold_a_raw_jsonl_as_run_folders", () => {
+  const runsDir = runsDirWithARunFolderBesideAToolDirectory();
+
+  assert.deepEqual(loadTreatmentIdsByRun(runsDir), { "real-run": ["control"] });
 });
 
 test("validateExperiments_finds_no_violations_in_the_committed_experiments_json_against_the_repo's_real_run_data", () => {

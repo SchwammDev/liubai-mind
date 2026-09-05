@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 export type ExperimentKind = "single-task" | "with-follow-up-tasks";
@@ -131,10 +131,15 @@ function treatmentIdsInRun(runDir: string): string[] {
   return [...new Set(rows.map((row) => row.treatmentId))].sort();
 }
 
+function holdsCollectedRows(runsDir: string, folder: string): boolean {
+  return existsSync(join(runsDir, folder, "raw.jsonl"));
+}
+
 export function loadTreatmentIdsByRun(runsDir: string = join(import.meta.dirname, "runs")): Record<string, string[]> {
   const runFolders = readdirSync(runsDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name);
+    .map((entry) => entry.name)
+    .filter((folder) => holdsCollectedRows(runsDir, folder));
 
   const result: Record<string, string[]> = {};
   for (const runFolder of runFolders) {
