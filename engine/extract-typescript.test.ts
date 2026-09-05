@@ -49,6 +49,23 @@ test("source_where_only_part_is_broken_extracts_nothing", async () => {
   assert.deepEqual(ext, { functions: [], comments: [] });
 });
 
+const LARGER_THAN_TREE_SITTERS_DEFAULT_32_KIB_BUFFER = 40_000;
+
+function sourceWithManyFunctions(minBytes: number): string {
+  const one = (i: number) => `export function f${i}(a: number): number {\n  return a + ${i};\n}\n`;
+  let src = "";
+  for (let i = 0; src.length < minBytes; i++) src += one(i);
+  return src;
+}
+
+test("a_source_larger_than_the_parsers_default_buffer_is_still_extracted", async () => {
+  const src = sourceWithManyFunctions(LARGER_THAN_TREE_SITTERS_DEFAULT_32_KIB_BUFFER);
+
+  const ext = await extractText("app/foo.ts", src);
+
+  assert.equal(findFn(ext, "f0").startLine, 1);
+});
+
 test("endLine_marks_the_last_line_of_the_function_node", async () => {
   const src = "function f() {\n  return 1;\n}\n";
   const fn = findFn(await extractText("app/foo.ts", src), "f");

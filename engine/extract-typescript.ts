@@ -308,7 +308,7 @@ function loadLanguage(ext: string): unknown {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _Parser: any;
-function getParser(): { new (): { setLanguage(language: unknown): void; parse(input: string): TreeRootLike } } {
+function getParser(): { new (): { setLanguage(language: unknown): void; parse(input: string, oldTree?: unknown, options?: { bufferSize: number }): TreeRootLike } } {
   if (_Parser === undefined) {
     _Parser = require_("tree-sitter");
   }
@@ -403,11 +403,15 @@ function rootHasError(root: RootNode): boolean {
   return typeof he === "function" ? he.call(root) : he === true;
 }
 
+function wholeSourceBufferSize(src: string): number {
+  return Buffer.byteLength(src, "utf8") + 1;
+}
+
 function parseSource(language: unknown, src: string): TreeRootLike | null {
   const ParserCtor = getParser();
   const parser = new ParserCtor();
   parser.setLanguage(language);
-  const tree = parser.parse(src) as unknown as TreeRootLike;
+  const tree = parser.parse(src, undefined, { bufferSize: wholeSourceBufferSize(src) }) as unknown as TreeRootLike;
   if (rootHasError(tree.rootNode)) return null;
   return tree;
 }
