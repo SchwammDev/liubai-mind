@@ -1,6 +1,7 @@
 import type { Experiment, ExperimentKind, ExperimentStatus, ExperimentTreatment } from "./experiments.ts";
 import type { GamedReason, Tier } from "./eval-contract.ts";
 import type { Ending, StartsFrom } from "./repetition-record.ts";
+import type { FileAtCommit } from "./provenance.ts";
 import type { RuleName } from "../contract.ts";
 
 type NudgeFirings = Record<RuleName, { count: number; turns: number[] }>;
@@ -16,6 +17,8 @@ export interface JudgedRecordForReport {
   turns: number | null;
   tokensIn: number | null;
   nudges: NudgeFirings | null;
+  decisionPointsBefore: number;
+  decisionPointsAfter: number;
   functionsBefore: number;
   functionsAfter: number;
   gamedReason: GamedReason | null;
@@ -28,11 +31,47 @@ export interface RawRowForReport {
   provenance: { model: string; liubaiSha: string; phrasingPackHash: string | null };
   task?: string;
   delivered?: { packHash: string | null };
+  caseId: string;
+  repetition: number;
+  files: Record<string, string>;
 }
 
 export interface RunRecordsForReport {
   judged: JudgedRecordForReport[];
   raw: RawRowForReport[];
+}
+
+export interface CaseFactsForReport {
+  tier: Tier;
+  entry: string;
+  reference?: Record<string, string>;
+}
+
+export type CodeStateName = "original" | "change" | "earlier-change" | "follow-up-change";
+
+export interface CodeStateView {
+  name: CodeStateName;
+  label: string;
+  caption: string;
+  dedupeKey: string;
+  available: boolean;
+  text: string;
+}
+
+export interface ReferenceFixView {
+  dedupeKey: string;
+  text: string;
+}
+
+export interface ReviewView {
+  id: string;
+  verdict: string;
+  whyThisVerdict: string;
+  entryFilename: string;
+  codeStates: CodeStateView[];
+  defaultBeforeName: CodeStateName;
+  defaultAfterName: CodeStateName;
+  reference?: ReferenceFixView;
 }
 
 export interface ExperimentView {
@@ -66,6 +105,7 @@ export interface RepetitionView {
   nudges: string;
   nudged: boolean;
   detail: string;
+  review?: ReviewView;
 }
 
 export interface TreatmentView {
@@ -134,8 +174,10 @@ function modelLabelOf(rows: RawRowForReport[]): string {
   return distinctSorted(rows.map((row) => row.provenance.model)).join(", ");
 }
 
-function tierLabelOf(records: JudgedRecordForReport[], tierByCaseId: Map<string, Tier>): string {
-  const tiers = distinctSorted(records.map((record) => tierByCaseId.get(record.caseId)).filter((tier): tier is Tier => tier !== undefined));
+function tierLabelOf(records: JudgedRecordForReport[], caseFactsByCaseId: Map<string, CaseFactsForReport>): string {
+  const tiers = distinctSorted(
+    records.map((record) => caseFactsByCaseId.get(record.caseId)?.tier).filter((tier): tier is Tier => tier !== undefined),
+  );
   return tiers.map((tier) => `${tier} cases`).join(", ");
 }
 
@@ -170,7 +212,7 @@ function allRawRowsFor(experiment: Experiment, runData: Map<string, RunRecordsFo
 function experimentViewOf(
   experiment: Experiment,
   runData: Map<string, RunRecordsForReport>,
-  tierByCaseId: Map<string, Tier>,
+  caseFactsByCaseId: Map<string, CaseFactsForReport>,
   identicalTreatmentsFlag: boolean,
 ): ExperimentView {
   const records = allJudgedRecordsFor(experiment, runData);
@@ -183,7 +225,7 @@ function experimentViewOf(
     question: experiment.question,
     treatmentIds: experiment.treatments.map((treatment) => treatment.treatmentId),
     model: modelLabelOf(rawRows),
-    tierLabel: tierLabelOf(records, tierByCaseId),
+    tierLabel: tierLabelOf(records, caseFactsByCaseId),
     size: sizeLabelOf(records),
     status: experiment.status,
     outcome: experiment.outcome,
@@ -220,6 +262,8 @@ interface RepetitionFacts {
   tokensIn: number | null;
   nudgesTotal: number | null;
   nudgeTurns: number[];
+  decisionPointsBefore: number;
+  decisionPointsAfter: number;
   functionsBefore: number;
   functionsAfter: number;
   gamedReason: GamedReason | null;
@@ -255,6 +299,8 @@ function repetitionFactsFor(run: string, records: JudgedRecordForReport[]): Repe
       tokensIn: record.tokensIn,
       nudgesTotal: total,
       nudgeTurns: turns,
+      decisionPointsBefore: record.decisionPointsBefore,
+      decisionPointsAfter: record.decisionPointsAfter,
       functionsBefore: record.functionsBefore,
       functionsAfter: record.functionsAfter,
       gamedReason: record.gamedReason,
@@ -285,7 +331,7 @@ function nudgeTurnsFact(facts: RepetitionFacts): string | undefined {
   return `nudges at turns ${facts.nudgeTurns.join(", ")}`;
 }
 
-function humanizeGamedReason(reason: GamedReason): string {
+export function humanizeGamedReason(reason: GamedReason): string {
   return reason.replace(/-/g, " ");
 }
 
@@ -311,7 +357,136 @@ function startsFromLabelOf(startsFrom: StartsFrom): string {
   return startsFrom.kind === "original-source" ? "original source" : `earlier result, repetition ${startsFrom.sourceRepetition}`;
 }
 
-function repetitionViewOf(facts: RepetitionFacts): RepetitionView {
+function rawRowAt(runData: Map<string, RunRecordsForReport>, run: string, caseId: string, treatmentId: string, repetition: number): RawRowForReport | undefined {
+  return runData.get(run)?.raw.find((row) => row.caseId === caseId && row.treatmentId === treatmentId && row.repetition === repetition);
+}
+
+function ownFilesCodeState(
+  name: Exclude<CodeStateName, "original">,
+  label: string,
+  row: RawRowForReport | undefined,
+  entry: string,
+  caption: string,
+  dedupeKey: string,
+): CodeStateView {
+  const text = row?.files[entry];
+  return { name, label, caption, dedupeKey, available: text !== undefined, text: text ?? "no recorded files for this repetition" };
+}
+
+function originalCodeState(caseId: string, sha: string, entry: string, originalSourceByKey: Map<string, FileAtCommit>): CodeStateView {
+  const resolved = originalSourceByKey.get(`${caseId}\0${sha}`);
+  const available = resolved !== undefined && "content" in resolved;
+  return {
+    name: "original",
+    label: "original source",
+    caption: `${entry} at commit ${sha}`,
+    dedupeKey: `original\0${caseId}\0${sha}`,
+    available,
+    text: available ? (resolved as { content: string }).content : `the source at commit ${sha} is unavailable`,
+  };
+}
+
+function changeCaptionFor(facts: RepetitionFacts): string {
+  return `run folder ${facts.run}, repetition ${facts.repetition}`;
+}
+
+function changeDedupeKeyFor(name: Extract<CodeStateName, "change" | "follow-up-change">, facts: RepetitionFacts): string {
+  return [name, facts.run, facts.caseId, facts.treatmentId, facts.repetition].join("\0");
+}
+
+function codeStatesForOriginalSource(
+  facts: RepetitionFacts,
+  entry: string,
+  ownRow: RawRowForReport | undefined,
+  originalSourceByKey: Map<string, FileAtCommit>,
+): CodeStateView[] {
+  const sha = ownRow?.provenance.liubaiSha ?? "unknown";
+  return [
+    originalCodeState(facts.caseId, sha, entry, originalSourceByKey),
+    ownFilesCodeState("change", "change", ownRow, entry, changeCaptionFor(facts), changeDedupeKeyFor("change", facts)),
+  ];
+}
+
+function codeStatesForEarlierResult(
+  facts: RepetitionFacts,
+  startsFrom: Extract<StartsFrom, { kind: "earlier-result" }>,
+  entry: string,
+  runData: Map<string, RunRecordsForReport>,
+  ownRow: RawRowForReport | undefined,
+  originalSourceByKey: Map<string, FileAtCommit>,
+): CodeStateView[] {
+  const sourceRow = rawRowAt(runData, startsFrom.sourceRun, facts.caseId, facts.treatmentId, startsFrom.sourceRepetition);
+  const sha = sourceRow?.provenance.liubaiSha ?? "unknown";
+  const earlierCaption = `run folder ${startsFrom.sourceRun}, repetition ${startsFrom.sourceRepetition}`;
+  const earlierDedupeKey = ["earlier-change", startsFrom.sourceRun, facts.caseId, facts.treatmentId, startsFrom.sourceRepetition].join("\0");
+
+  return [
+    originalCodeState(facts.caseId, sha, entry, originalSourceByKey),
+    ownFilesCodeState("earlier-change", "earlier change", sourceRow, entry, earlierCaption, earlierDedupeKey),
+    ownFilesCodeState("follow-up-change", "follow-up change", ownRow, entry, changeCaptionFor(facts), changeDedupeKeyFor("follow-up-change", facts)),
+  ];
+}
+
+function defaultPairFor(startsFrom: StartsFrom): { before: CodeStateName; after: CodeStateName } {
+  return startsFrom.kind === "original-source" ? { before: "original", after: "change" } : { before: "earlier-change", after: "follow-up-change" };
+}
+
+function whyThisVerdictText(facts: RepetitionFacts): string {
+  const parts = [
+    `verdict ${facts.verdict}`,
+    `decision points ${facts.decisionPointsBefore} → ${facts.decisionPointsAfter}`,
+    `functions ${facts.functionsBefore} → ${facts.functionsAfter}`,
+  ];
+  if (facts.failedBehaviorChecks.length > 0) {
+    parts.push(`failing checks: ${facts.failedBehaviorChecks.map((check) => check.reason).join(", ")}`);
+  }
+  if (facts.gamedReason !== null) parts.push(humanizeGamedReason(facts.gamedReason));
+  return parts.join(" · ");
+}
+
+function referenceFixFor(caseId: string, caseFacts: CaseFactsForReport): ReferenceFixView | undefined {
+  const text = caseFacts.reference?.[caseFacts.entry];
+  if (text === undefined) return undefined;
+  return { dedupeKey: `reference\0${caseId}`, text };
+}
+
+function reviewViewFor(
+  facts: RepetitionFacts,
+  caseFactsByCaseId: Map<string, CaseFactsForReport>,
+  runData: Map<string, RunRecordsForReport>,
+  originalSourceByKey: Map<string, FileAtCommit>,
+): ReviewView | undefined {
+  const caseFacts = caseFactsByCaseId.get(facts.caseId);
+  if (caseFacts === undefined) return undefined;
+
+  const ownRow = rawRowAt(runData, facts.run, facts.caseId, facts.treatmentId, facts.repetition);
+  const codeStates =
+    facts.startsFrom.kind === "original-source"
+      ? codeStatesForOriginalSource(facts, caseFacts.entry, ownRow, originalSourceByKey)
+      : codeStatesForEarlierResult(facts, facts.startsFrom, caseFacts.entry, runData, ownRow, originalSourceByKey);
+  const reference = referenceFixFor(facts.caseId, caseFacts);
+  const defaultPair = defaultPairFor(facts.startsFrom);
+
+  return {
+    id: `${facts.run}/${facts.caseId}/${facts.treatmentId}/${facts.repetition}`,
+    verdict: facts.verdict,
+    whyThisVerdict: whyThisVerdictText(facts),
+    entryFilename: caseFacts.entry,
+    codeStates,
+    defaultBeforeName: defaultPair.before,
+    defaultAfterName: defaultPair.after,
+    ...(reference !== undefined ? { reference } : {}),
+  };
+}
+
+function repetitionViewOf(
+  facts: RepetitionFacts,
+  caseFactsByCaseId: Map<string, CaseFactsForReport>,
+  runData: Map<string, RunRecordsForReport>,
+  originalSourceByKey: Map<string, FileAtCommit>,
+): RepetitionView {
+  const review = reviewViewFor(facts, caseFactsByCaseId, runData, originalSourceByKey);
+
   return {
     id: `${facts.run}/${facts.caseId}/${facts.treatmentId}/${facts.repetition}`,
     caseId: facts.caseId,
@@ -324,6 +499,7 @@ function repetitionViewOf(facts: RepetitionFacts): RepetitionView {
     nudges: facts.nudgesTotal === null || facts.nudgesTotal === 0 ? "-" : String(facts.nudgesTotal),
     nudged: facts.nudgesTotal !== null && facts.nudgesTotal > 0,
     detail: detailFactsFor(facts).join(" · "),
+    ...(review !== undefined ? { review } : {}),
   };
 }
 
@@ -355,7 +531,14 @@ function formatMean(value: number | null): string {
   return value === null ? "-" : value.toFixed(1);
 }
 
-function treatmentViewOf(order: readonly string[], treatment: ExperimentTreatment, facts: RepetitionFacts[]): TreatmentView {
+function treatmentViewOf(
+  order: readonly string[],
+  treatment: ExperimentTreatment,
+  facts: RepetitionFacts[],
+  caseFactsByCaseId: Map<string, CaseFactsForReport>,
+  runData: Map<string, RunRecordsForReport>,
+  originalSourceByKey: Map<string, FileAtCommit>,
+): TreatmentView {
   return {
     treatmentId: treatment.treatmentId,
     run: treatment.run,
@@ -363,7 +546,7 @@ function treatmentViewOf(order: readonly string[], treatment: ExperimentTreatmen
     meanTurns: formatMean(meanOfDefined(facts.map((fact) => fact.turns))),
     meanTokensIn: formatMean(meanOfDefined(facts.map((fact) => fact.tokensIn))),
     meanNudgesPerRepetition: formatMean(meanOfDefined(facts.map((fact) => fact.nudgesTotal))),
-    repetitions: facts.map(repetitionViewOf),
+    repetitions: facts.map((fact) => repetitionViewOf(fact, caseFactsByCaseId, runData, originalSourceByKey)),
   };
 }
 
@@ -492,7 +675,12 @@ function setupCheckFor(experiment: Experiment, runData: Map<string, RunRecordsFo
   return { summary, identicalTreatments };
 }
 
-function experimentDetailFor(experiment: Experiment, runData: Map<string, RunRecordsForReport>): ExperimentDetailView {
+function experimentDetailFor(
+  experiment: Experiment,
+  runData: Map<string, RunRecordsForReport>,
+  caseFactsByCaseId: Map<string, CaseFactsForReport>,
+  originalSourceByKey: Map<string, FileAtCommit>,
+): ExperimentDetailView {
   const order = severityOrderFor(experiment.kind);
   const successVerdict = successVerdictFor(experiment.kind);
 
@@ -511,7 +699,9 @@ function experimentDetailFor(experiment: Experiment, runData: Map<string, RunRec
     controlTreatmentId: experiment.controlTreatment,
     successVerdict,
     setupCheck: setupCheckFor(experiment, runData),
-    treatments: treatmentsWithFacts.map(({ treatment, facts }) => treatmentViewOf(order, treatment, facts)),
+    treatments: treatmentsWithFacts.map(({ treatment, facts }) =>
+      treatmentViewOf(order, treatment, facts, caseFactsByCaseId, runData, originalSourceByKey),
+    ),
     perCase: perCaseRowsFor(
       order,
       successVerdict,
@@ -545,16 +735,17 @@ function groupByMilestone(experiments: Experiment[]): MilestoneGroup[] {
 export function buildReportViewModel(
   experiments: Experiment[],
   runData: Map<string, RunRecordsForReport>,
-  tierByCaseId: Map<string, Tier>,
+  caseFactsByCaseId: Map<string, CaseFactsForReport>,
   unclaimedRunFolders: string[],
+  originalSourceByKey: Map<string, FileAtCommit> = new Map(),
 ): ReportViewModel {
-  const experimentDetails = experiments.map((experiment) => experimentDetailFor(experiment, runData));
+  const experimentDetails = experiments.map((experiment) => experimentDetailFor(experiment, runData, caseFactsByCaseId, originalSourceByKey));
   const identicalTreatmentsFlagById = new Map(experimentDetails.map((detail) => [detail.id, detail.setupCheck.identicalTreatments]));
 
   const milestones = groupByMilestone(experiments).map((group) => ({
     milestone: group.milestone,
     experiments: group.experiments.map((experiment) =>
-      experimentViewOf(experiment, runData, tierByCaseId, identicalTreatmentsFlagById.get(experiment.id) ?? false),
+      experimentViewOf(experiment, runData, caseFactsByCaseId, identicalTreatmentsFlagById.get(experiment.id) ?? false),
     ),
   }));
 

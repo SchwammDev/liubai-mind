@@ -2,9 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { buildReportViewModel } from "./report-view.ts";
-import type { JudgedRecordForReport, RawRowForReport, RunRecordsForReport } from "./report-view.ts";
+import type { CaseFactsForReport, JudgedRecordForReport, RawRowForReport, RunRecordsForReport } from "./report-view.ts";
 import type { Experiment } from "./experiments.ts";
 import type { Tier } from "./eval-contract.ts";
+import type { FileAtCommit } from "./provenance.ts";
 import { RULE } from "../contract.ts";
 import type { RuleName } from "../contract.ts";
 
@@ -36,6 +37,8 @@ function judgedRecord(caseId: string, treatmentId: string, repetition: number, o
     turns: null,
     tokensIn: null,
     nudges: null,
+    decisionPointsBefore: 0,
+    decisionPointsAfter: 0,
     functionsBefore: 1,
     functionsAfter: 1,
     gamedReason: null,
@@ -46,7 +49,22 @@ function judgedRecord(caseId: string, treatmentId: string, repetition: number, o
 }
 
 function rawRow(treatmentId: string, model: string, over: Partial<RawRowForReport> = {}): RawRowForReport {
-  return { treatmentId, provenance: { model, liubaiSha: "sha1", phrasingPackHash: null }, ...over };
+  return {
+    treatmentId,
+    provenance: { model, liubaiSha: "sha1", phrasingPackHash: null },
+    caseId: "case-a",
+    repetition: 1,
+    files: {},
+    ...over,
+  };
+}
+
+function caseFacts(entry: string, tier: Tier = "hard", reference?: Record<string, string>): CaseFactsForReport {
+  return { tier, entry, ...(reference !== undefined ? { reference } : {}) };
+}
+
+function available(content: string): FileAtCommit {
+  return { content };
 }
 
 function noFirings(): Record<RuleName, { count: number; turns: number[] }> {
@@ -100,9 +118,9 @@ test("model and difficulty tier come from a treatment's own rows and the case's 
   const records = runData({
     "run-a": { judged: [judgedRecord("case-hard", "rails-default", 1)], raw: [rawRow("rails-default", "deepseek-v4-flash")] },
   });
-  const tierByCaseId = new Map<string, Tier>([["case-hard", "hard"]]);
+  const caseFactsByCaseId = new Map<string, CaseFactsForReport>([["case-hard", caseFacts("entry.py", "hard")]]);
 
-  const view = buildReportViewModel(experiments, records, tierByCaseId, []);
+  const view = buildReportViewModel(experiments, records, caseFactsByCaseId, []);
 
   assert.deepEqual(
     { model: view.milestones[0]!.experiments[0]!.model, tierLabel: view.milestones[0]!.experiments[0]!.tierLabel },
@@ -130,12 +148,12 @@ test("model and difficulty tier are aggregated over every treatment, even when t
       raw: [rawRow("bare-metric-v1", "qwen-3.6-35b")],
     },
   });
-  const tierByCaseId = new Map<string, Tier>([
-    ["case-hard", "hard"],
-    ["case-easy", "easy"],
+  const caseFactsByCaseId = new Map<string, CaseFactsForReport>([
+    ["case-hard", caseFacts("entry.py", "hard")],
+    ["case-easy", caseFacts("entry.py", "easy")],
   ]);
 
-  const view = buildReportViewModel(experiments, records, tierByCaseId, []);
+  const view = buildReportViewModel(experiments, records, caseFactsByCaseId, []);
 
   assert.deepEqual(
     { model: view.milestones[0]!.experiments[0]!.model, tierLabel: view.milestones[0]!.experiments[0]!.tierLabel },
@@ -196,8 +214,13 @@ test("run folders no experiment claims are listed sorted, regardless of input or
   assert.deepEqual(view.unclaimedRunFolders, ["aaa-run", "zzz-run"]);
 });
 
-function experimentDetailFor(exp: Experiment, records: Record<string, RunRecordsForReport>): ReturnType<typeof buildReportViewModel>["experimentDetails"][number] {
-  return buildReportViewModel([exp], runData(records), new Map(), []).experimentDetails[0]!;
+function experimentDetailFor(
+  exp: Experiment,
+  records: Record<string, RunRecordsForReport>,
+  caseFactsByCaseId: Map<string, CaseFactsForReport> = new Map(),
+  originalSourceByKey: Map<string, FileAtCommit> = new Map(),
+): ReturnType<typeof buildReportViewModel>["experimentDetails"][number] {
+  return buildReportViewModel([exp], runData(records), caseFactsByCaseId, [], originalSourceByKey).experimentDetails[0]!;
 }
 
 test("a treatment's repetitions are ordered worst first for a single-task experiment", () => {
@@ -492,4 +515,167 @@ test("a treatment's means are computed only from repetitions that carry cost dat
     },
     { meanTurns: "10.0", meanTokensIn: "100.0", meanNudges: "1.0" },
   );
+});
+
+function singleTaskExperiment(): Experiment {
+  return experiment({ treatments: [{ treatmentId: "t1", run: "run-a" }], controlTreatment: "t1", kind: "single-task" });
+}
+
+function reviewOf(detail: ReturnType<typeof experimentDetailFor>, repetitionIndex = 0) {
+  return detail.treatments[0]!.repetitions[repetitionIndex]!.review!;
+}
+
+function codeStateNamed(review: ReturnType<typeof reviewOf>, name: string) {
+  return review.codeStates.find((state) => state.name === name);
+}
+
+test("a single-task repetition's review compares the original source against its own change by default", () => {
+  const records = {
+    "run-a": {
+      judged: [judgedRecord("case-a", "t1", 1, { startsFrom: { kind: "original-source" } })],
+      raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "def f(): return 2\n" } })],
+    },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+
+  const review = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId));
+
+  assert.deepEqual(
+    {
+      codeStateNames: review.codeStates.map((state) => state.name),
+      changeText: codeStateNamed(review, "change")?.text,
+      defaultPair: [review.defaultBeforeName, review.defaultAfterName],
+    },
+    { codeStateNames: ["original", "change"], changeText: "def f(): return 2\n", defaultPair: ["original", "change"] },
+  );
+});
+
+test("a follow-up repetition's review draws its earlier-change state from the source run's own row", () => {
+  const exp = experiment({ treatments: [{ treatmentId: "t1", run: "run-b" }], controlTreatment: "t1", kind: "with-follow-up-tasks", sourceRun: "run-a" });
+  const records = {
+    "run-a": { judged: [], raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 5, files: { "entry.py": "def f(): return 1\n" } })] },
+    "run-b": {
+      judged: [judgedRecord("case-a", "t1", 1, { startsFrom: { kind: "earlier-result", sourceRun: "run-a", sourceRepetition: 5 } })],
+      raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "def f(): return 2\n" } })],
+    },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+
+  const review = reviewOf(experimentDetailFor(exp, records, caseFactsByCaseId));
+
+  assert.deepEqual(
+    {
+      codeStateNames: review.codeStates.map((state) => state.name),
+      earlierChangeText: codeStateNamed(review, "earlier-change")?.text,
+      followUpChangeText: codeStateNamed(review, "follow-up-change")?.text,
+    },
+    { codeStateNames: ["original", "earlier-change", "follow-up-change"], earlierChangeText: "def f(): return 1\n", followUpChangeText: "def f(): return 2\n" },
+  );
+});
+
+test("a follow-up repetition's review defaults to comparing earlier-change against follow-up-change, not the original source", () => {
+  const exp = experiment({ treatments: [{ treatmentId: "t1", run: "run-b" }], controlTreatment: "t1", kind: "with-follow-up-tasks", sourceRun: "run-a" });
+  const records = {
+    "run-a": { judged: [], raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 5, files: { "entry.py": "def f(): return 1\n" } })] },
+    "run-b": {
+      judged: [judgedRecord("case-a", "t1", 1, { startsFrom: { kind: "earlier-result", sourceRun: "run-a", sourceRepetition: 5 } })],
+      raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "def f(): return 2\n" } })],
+    },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+
+  const review = reviewOf(experimentDetailFor(exp, records, caseFactsByCaseId));
+
+  assert.deepEqual([review.defaultBeforeName, review.defaultAfterName], ["earlier-change", "follow-up-change"]);
+});
+
+test("the why-this-verdict box names decision points, functions, failing checks and the gaming reason in words", () => {
+  const records = {
+    "run-a": {
+      judged: [
+        judgedRecord("case-a", "t1", 1, {
+          verdict: "gamed",
+          gamedReason: "helper-split",
+          decisionPointsBefore: 12,
+          decisionPointsAfter: 9,
+          functionsBefore: 2,
+          functionsAfter: 5,
+          failedBehaviorChecks: [{ index: 0, reason: "check 2 returned wrong total" }],
+        }),
+      ],
+      raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" } })],
+    },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+
+  const whyThisVerdict = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId)).whyThisVerdict;
+
+  assert.equal(whyThisVerdict, "verdict gamed · decision points 12 → 9 · functions 2 → 5 · failing checks: check 2 returned wrong total · helper split");
+});
+
+test("the reference fix is offered when the case carries a reference solution", () => {
+  const records = {
+    "run-a": { judged: [judgedRecord("case-a", "t1", 1)], raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" } })] },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py", "hard", { "entry.py": "reference text\n" })]]);
+
+  const review = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId));
+
+  assert.equal(review.reference?.text, "reference text\n");
+});
+
+test("the reference fix is not offered when the case has no reference solution", () => {
+  const records = {
+    "run-a": { judged: [judgedRecord("case-a", "t1", 1)], raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" } })] },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+
+  const review = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId));
+
+  assert.equal(review.reference, undefined);
+});
+
+test("two repetitions of the same case sharing a commit reference the same original-state key, so the page can embed it once", () => {
+  const records = {
+    "run-a": {
+      judged: [judgedRecord("case-a", "t1", 1), judgedRecord("case-a", "t1", 2)],
+      raw: [
+        rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" } }),
+        rawRow("t1", "model-a", { caseId: "case-a", repetition: 2, files: { "entry.py": "y\n" } }),
+      ],
+    },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+
+  const detail = experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId);
+  const originalKeys = detail.treatments[0]!.repetitions.map((repetition) => codeStateNamed(repetition.review!, "original")!.dedupeKey);
+
+  assert.equal(originalKeys[0], originalKeys[1]);
+});
+
+test("the original state shows the corpus source already resolved for the row's own commit", () => {
+  const records = {
+    "run-a": { judged: [judgedRecord("case-a", "t1", 1)], raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" } })] },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+  const originalSourceByKey = new Map([["case-a\0sha1", available("def f(): return 0\n")]]);
+
+  const review = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId, originalSourceByKey));
+
+  assert.equal(codeStateNamed(review, "original")?.text, "def f(): return 0\n");
+});
+
+test("the original state says the source is unavailable rather than falling back to the working tree", () => {
+  const records = {
+    "run-a": {
+      judged: [judgedRecord("case-a", "t1", 1)],
+      raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" }, provenance: { model: "model-a", liubaiSha: "abc1234-dirty", phrasingPackHash: null } })],
+    },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+  const originalSourceByKey = new Map<string, FileAtCommit>([["case-a\0abc1234-dirty", { unavailable: true }]]);
+
+  const original = codeStateNamed(reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId, originalSourceByKey)), "original")!;
+
+  assert.deepEqual({ available: original.available, mentionsUnavailable: original.text.includes("unavailable") }, { available: false, mentionsUnavailable: true });
 });

@@ -19,6 +19,21 @@ export function gitSha(repoRoot: string): string {
   return isDirtyOutsideRunOutputs(repoRoot) ? `${sha}-dirty` : sha;
 }
 
+export type FileAtCommit = { content: string } | { unavailable: true };
+
+function isDirtySha(sha: string): boolean {
+  return sha.endsWith("-dirty");
+}
+
+export function showFileAtCommit(repoRoot: string, sha: string, relativePath: string): FileAtCommit {
+  if (isDirtySha(sha)) return { unavailable: true };
+
+  const res = spawnSync("git", ["show", `${sha}:${relativePath}`], { cwd: repoRoot, encoding: "utf8" });
+  if (res.status !== 0) return { unavailable: true };
+
+  return { content: res.stdout };
+}
+
 export function buildProvenance(input: {
   treatmentId: string;
   packBytes: string | null;
