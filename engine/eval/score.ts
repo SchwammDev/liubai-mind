@@ -11,6 +11,7 @@ import { loadCases, declaredFiles } from "./corpus.ts";
 import { loadTreatments } from "./treatments.ts";
 import { promptCarriedTreatmentMessage } from "./prompt-carried-message.ts";
 import { runBehaviorChecks } from "./behavior-checks.ts";
+import type { BehaviorCheckOutcome } from "./behavior-checks.ts";
 import { scanReferences } from "./references.ts";
 import { sourceParses } from "./parse-check.ts";
 import { typescriptExtractor } from "../extract-typescript.ts";
@@ -18,12 +19,20 @@ import { pythonExtractor } from "../extract-python.ts";
 import { probePyCcBackend } from "./judge-env.ts";
 import { gitSha } from "./provenance.ts";
 import { classifyTranscript } from "./contamination.ts";
+import { sourceDiffCounts } from "./diff-counts.ts";
+import { buildRepetitionRecord } from "./repetition-record.ts";
+import type { RepetitionRecord, StartsFrom } from "./repetition-record.ts";
 
 export interface JudgedRow {
   row: RawRow;
   judge: JudgeResult;
   contaminated: boolean;
   consultedRail: boolean;
+  entryChanged: boolean;
+  entrySymbolComplexityBefore: number | null;
+  entrySymbolComplexityAfter: number | null;
+  linesAdded: number;
+  linesRemoved: number;
 }
 
 export interface JudgeEnv {
@@ -55,14 +64,14 @@ export interface SummaryRow {
 const VERDICTS: readonly Verdict[] = ["genuine-fix", "gamed", "bar-missed", "untouched", "broken", "behavior-broken", "errored", "timed-out"];
 const GAMED_REASONS: readonly GamedReason[] = ["helper-split", "silent-handler"];
 const SUMMARY_FILENAME = "summary.jsonl";
-const JUDGED_FILENAME = "judged.jsonl";
+export const JUDGED_FILENAME = "judged.jsonl";
 const RAW_FILENAME = "raw.jsonl";
 const ERROR_STATUS = 1;
 const OK_STATUS = 0;
 const FALLBACK_AGENT_ERROR = "agent error";
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
-const ANSWER_KEY_PREFIXES = [join(REPO_ROOT, "engine", "eval"), ".pi/agent/engine/eval"];
-const RAIL_PATH_PREFIXES = [REPO_ROOT, "/.pi/", "~/.pi"];
+export const ANSWER_KEY_PREFIXES = [join(REPO_ROOT, "engine", "eval"), ".pi/agent/engine/eval"];
+export const RAIL_PATH_PREFIXES = [REPO_ROOT, "/.pi/", "~/.pi"];
 const DEFAULT_TREATMENTS_DIR = join(import.meta.dirname, "treatments");
 
 function silentHandlerLang(lang: Lang): "typescript" | "python" {
@@ -125,7 +134,7 @@ async function aggregateAfterMetrics(lang: Lang, paths: string[], files: Record<
   return total;
 }
 
-function entryChangedFor(before: string, after: string | undefined): boolean {
+export function entryChangedFor(before: string, after: string | undefined): boolean {
   return after === undefined ? true : after !== before;
 }
 
@@ -139,11 +148,33 @@ function readBeforeSource(corpusDir: string, kase: CaseManifest): string {
   return readFileSync(join(corpusDir, kase.id, `${kase.entry}.case`), "utf8");
 }
 
-function createdFilesOf(kase: CaseManifest, files: Record<string, string>): string[] {
+export function createdFilesOf(kase: CaseManifest, files: Record<string, string>): string[] {
   const declared = new Set(declaredFiles(kase));
   return Object.keys(files)
     .filter((path) => !declared.has(path))
     .sort();
+}
+
+export async function metricsOf(kase: CaseManifest, files: Record<string, string>): Promise<Metrics> {
+  const createdFiles = createdFilesOf(kase, files);
+  const scan = scanReferences({ lang: referenceLang(kase.lang), entry: kase.entry, files, created: createdFiles });
+  return aggregateAfterMetrics(kase.lang, [kase.entry, ...scan.referenced], files);
+}
+
+function pristineSourceFiles(corpusDir: string, kase: CaseManifest): Record<string, string> {
+  const stripped = declaredFiles(kase);
+  const files: Record<string, string> = {};
+  kase.files.forEach((file, i) => {
+    files[stripped[i]!] = readFileSync(join(corpusDir, kase.id, file), "utf8");
+  });
+  return files;
+}
+
+export async function entrySymbolComplexityOf(kase: CaseManifest, source: string | undefined): Promise<number | null> {
+  if (source === undefined) return null;
+  const extracted = await extractFunctions(kase.lang, kase.entry, source);
+  const fn = extracted.functions.find((f) => f.name === kase.entrySymbol);
+  return fn?.cyclomaticComplexity ?? null;
 }
 
 function droppedHitFor(candidate: string, dropped: string[]): string | undefined {
@@ -165,11 +196,12 @@ function buildJudgeResult(
   before: Metrics,
   after: Metrics,
   entryChanged: boolean,
-  checksPassed: boolean | undefined,
+  checkOutcome: BehaviorCheckOutcome | undefined,
   createdFiles: string[],
   referencedFiles: string[],
   genuineDpMax: number | undefined,
 ): JudgeResult {
+  const checksPassed = checkOutcome?.passed;
   const { verdict, gamedReason } = classifyVerdict({
     before,
     after,
@@ -185,6 +217,7 @@ function buildJudgeResult(
     referencedFiles,
     ...(gamedReason !== undefined ? { gamedReason } : {}),
     ...(checksPassed !== undefined ? { checksPassed } : {}),
+    ...(checkOutcome !== undefined ? { failedBehaviorChecks: checkOutcome.failures } : {}),
   };
 }
 
@@ -200,8 +233,8 @@ function shouldRunBehaviorChecks(entryChanged: boolean, after: Metrics, afterSou
   return entryChanged && after.parsed && afterSource !== undefined;
 }
 
-function runCaseBehaviorChecks(kase: CaseManifest, afterSource: string, files: Record<string, string>): boolean {
-  const outcome = runBehaviorChecks({
+function runCaseBehaviorChecks(kase: CaseManifest, afterSource: string, files: Record<string, string>): BehaviorCheckOutcome {
+  return runBehaviorChecks({
     lang: checkLang(kase.lang),
     entryFilename: kase.entry,
     source: afterSource,
@@ -209,7 +242,6 @@ function runCaseBehaviorChecks(kase: CaseManifest, afterSource: string, files: R
     behaviorChecks: kase.behaviorChecks,
     files,
   });
-  return outcome.passed;
 }
 
 export interface ContaminationCheck {
@@ -218,11 +250,15 @@ export interface ContaminationCheck {
   railPrefixes: string[];
 }
 
-function transcriptPathFor(runDir: string, row: RawRow): string {
-  return join(runDir, "transcripts", `${row.caseId}.${row.treatmentId}.${row.repetition}.jsonl`);
+function transcriptRelativePath(row: RawRow): string {
+  return join("transcripts", `${row.caseId}.${row.treatmentId}.${row.repetition}.jsonl`);
 }
 
-function readTranscriptIfPresent(path: string): string | undefined {
+function transcriptPathFor(runDir: string, row: RawRow): string {
+  return join(runDir, transcriptRelativePath(row));
+}
+
+export function readTranscriptIfPresent(path: string): string | undefined {
   try {
     return readFileSync(path, "utf8");
   } catch {
@@ -246,15 +282,31 @@ function classifyRow(row: RawRow, contamination: ContaminationCheck | undefined)
   return classifyTranscript(transcript, { answerKeyPrefixes: contamination.answerKeyPrefixes, railPrefixes: contamination.railPrefixes });
 }
 
+interface RecordFacts {
+  entryChanged: boolean;
+  entrySymbolComplexityBefore: number | null;
+  entrySymbolComplexityAfter: number | null;
+  linesAdded: number;
+  linesRemoved: number;
+}
+
+async function computeRecordFacts(row: RawRow, corpusDir: string, kase: CaseManifest, beforeSource: string, afterSource: string | undefined): Promise<RecordFacts> {
+  const entryChanged = entryChangedFor(beforeSource, afterSource);
+  const entrySymbolComplexityBefore = await entrySymbolComplexityOf(kase, beforeSource);
+  const entrySymbolComplexityAfter = await entrySymbolComplexityOf(kase, afterSource);
+  const { linesAdded, linesRemoved } = sourceDiffCounts(pristineSourceFiles(corpusDir, kase), row.files, kase.lang);
+  return { entryChanged, entrySymbolComplexityBefore, entrySymbolComplexityAfter, linesAdded, linesRemoved };
+}
+
 async function judgeRow(row: RawRow, cases: CaseManifest[], corpusDir: string, contamination: ContaminationCheck | undefined): Promise<JudgedRow> {
   const { contaminated, consultedRail } = classifyRow(row, contamination);
-  if (row.timedOut === true) return { row, judge: timedOutJudgeResult(), contaminated, consultedRail };
-  if (row.agentError !== undefined) return { row, judge: erroredJudgeResult(), contaminated, consultedRail };
-
   const kase = findCase(cases, row.caseId);
   const beforeSource = readBeforeSource(corpusDir, kase);
   const afterSource = row.files[kase.entry];
-  const entryChanged = entryChangedFor(beforeSource, afterSource);
+  const recordFacts = await computeRecordFacts(row, corpusDir, kase, beforeSource, afterSource);
+
+  if (row.timedOut === true) return { row, judge: timedOutJudgeResult(), contaminated, consultedRail, ...recordFacts };
+  if (row.agentError !== undefined) return { row, judge: erroredJudgeResult(), contaminated, consultedRail, ...recordFacts };
 
   const before = await computeMetrics(kase.lang, kase.entry, beforeSource);
 
@@ -263,10 +315,10 @@ async function judgeRow(row: RawRow, cases: CaseManifest[], corpusDir: string, c
   assertNoDroppedReferences(row, scan.unresolved);
   const after = await aggregateAfterMetrics(kase.lang, [kase.entry, ...scan.referenced], row.files);
 
-  const checksPassed = shouldRunBehaviorChecks(entryChanged, after, afterSource) ? runCaseBehaviorChecks(kase, afterSource, row.files) : undefined;
+  const checkOutcome = shouldRunBehaviorChecks(recordFacts.entryChanged, after, afterSource) ? runCaseBehaviorChecks(kase, afterSource, row.files) : undefined;
 
-  const judge = buildJudgeResult(before, after, entryChanged, checksPassed, createdFiles, scan.referenced, kase.genuineDpMax);
-  return { row, judge, contaminated, consultedRail };
+  const judge = buildJudgeResult(before, after, recordFacts.entryChanged, checkOutcome, createdFiles, scan.referenced, kase.genuineDpMax);
+  return { row, judge, contaminated, consultedRail, ...recordFacts };
 }
 
 export async function judgeRows(rows: RawRow[], corpusDir: string, contamination?: ContaminationCheck): Promise<JudgedRow[]> {
@@ -572,50 +624,57 @@ function writeSummaryJsonl(runDir: string, summary: SummaryRow[]): void {
   writeFileSync(join(runDir, SUMMARY_FILENAME), content);
 }
 
-export interface JudgedJsonlRow {
-  caseId: string;
-  treatmentId: string;
-  repetition: number;
-  verdict: Verdict;
-  gamedReason?: GamedReason;
-  contaminated: boolean;
-  consultedRail: boolean;
-  dpBefore: number;
-  dpAfter: number;
-  checksPassed?: boolean;
-  turns?: number;
-  tokensIn?: number;
-  tokensOut?: number;
-  nudges?: Record<RuleName, number>;
-  durationMs: number;
-  timedOut: boolean;
-}
-
-export function toJudgedJsonlRow(judgedRow: JudgedRow): JudgedJsonlRow {
+export function recordFor(runDir: string, judgedRow: JudgedRow, startsFrom: StartsFrom): RepetitionRecord {
   const { row, judge, contaminated, consultedRail } = judgedRow;
-  return {
-    caseId: row.caseId,
-    treatmentId: row.treatmentId,
-    repetition: row.repetition,
+  const relativePath = transcriptRelativePath(row);
+  const sessionLog = readTranscriptIfPresent(join(runDir, relativePath));
+
+  return buildRepetitionRecord({
+    row,
+    startsFrom,
+    transcriptPath: sessionLog === undefined ? null : relativePath,
+    sessionLog,
     verdict: judge.verdict,
-    ...(judge.gamedReason !== undefined ? { gamedReason: judge.gamedReason } : {}),
+    gamedReason: judge.gamedReason ?? null,
+    failedBehaviorChecks: judge.failedBehaviorChecks ?? [],
+    decisionPointsBefore: judge.before.decisionPoints,
+    decisionPointsAfter: judge.after.decisionPoints,
+    entrySymbolComplexityBefore: judgedRow.entrySymbolComplexityBefore,
+    entrySymbolComplexityAfter: judgedRow.entrySymbolComplexityAfter,
+    functionsBefore: judge.before.nFunctions,
+    functionsAfter: judge.after.nFunctions,
+    linesAdded: judgedRow.linesAdded,
+    linesRemoved: judgedRow.linesRemoved,
+    entryUnchanged: !judgedRow.entryChanged,
+    filesCreated: judge.createdFiles,
     contaminated,
     consultedRail,
-    dpBefore: judge.before.decisionPoints,
-    dpAfter: judge.after.decisionPoints,
-    ...(judge.checksPassed !== undefined ? { checksPassed: judge.checksPassed } : {}),
-    ...(row.turns !== undefined ? { turns: row.turns } : {}),
-    ...(row.tokensIn !== undefined ? { tokensIn: row.tokensIn } : {}),
-    ...(row.tokensOut !== undefined ? { tokensOut: row.tokensOut } : {}),
-    ...(row.nudges !== undefined ? { nudges: row.nudges } : {}),
-    durationMs: row.durationMs,
-    timedOut: row.timedOut,
-  };
+  });
 }
 
-function writeJudgedJsonl(runDir: string, judged: JudgedRow[]): void {
-  const content = judged.map((judgedRow) => JSON.stringify(toJudgedJsonlRow(judgedRow))).join("\n") + "\n";
+function buildRecords(runDir: string, judged: JudgedRow[]): RepetitionRecord[] {
+  return judged.map((judgedRow) => recordFor(runDir, judgedRow, { kind: "original-source" }));
+}
+
+const MISSING_SESSION_LOG_PREVIEW_COUNT = 5;
+
+export function missingSessionLogWarning(records: RepetitionRecord[]): string | undefined {
+  const missing = records.filter((record) => record.transcriptPath === null);
+  if (missing.length === 0) return undefined;
+
+  const preview = missing.slice(0, MISSING_SESSION_LOG_PREVIEW_COUNT).map((r) => `${r.treatmentId}/${r.caseId}#${r.repetition}`);
+  const remaining = missing.length - preview.length;
+  const suffix = remaining > 0 ? `, and ${remaining} more` : "";
+  return `score: ${missing.length} session(s) have no session log: ${preview.join(", ")}${suffix}`;
+}
+
+export function writeJudgedJsonl(runDir: string, records: RepetitionRecord[]): void {
+  const content = records.map((record) => JSON.stringify(record)).join("\n") + "\n";
   writeFileSync(join(runDir, JUDGED_FILENAME), content);
+}
+
+export function withWarningSuffix(stdout: string, warning: string | undefined): string {
+  return warning === undefined ? stdout : `${stdout}\n${warning}`;
 }
 
 function anyRowNeedsPython(rows: RawRow[], cases: CaseManifest[]): boolean {
@@ -978,14 +1037,16 @@ export async function runScore(opts: {
 
   const { judged, summary, tierByCaseId: tierMap } = judgeResult;
   writeSummaryJsonl(opts.runDir, summary);
-  writeJudgedJsonl(opts.runDir, judged);
+  const records = buildRecords(opts.runDir, judged);
+  writeJudgedJsonl(opts.runDir, records);
   const table = formatMarkdown(summary);
   const validityPrefix = deliveryStdoutPrefix(validity.result);
+  const warning = missingSessionLogWarning(records);
 
-  if (opts.compareRunDir === undefined) return { status: OK_STATUS, stdout: `${validityPrefix}${table}` };
+  if (opts.compareRunDir === undefined) return { status: OK_STATUS, stdout: withWarningSuffix(`${validityPrefix}${table}`, warning) };
 
   const compareSection = await buildCompareSection(parsedRaw.rows, summary, opts.compareRunDir, opts.corpusDir, judgeEnv.env, tierMap);
   if ("error" in compareSection) return { status: ERROR_STATUS, stdout: compareSection.error };
 
-  return { status: OK_STATUS, stdout: `${validityPrefix}${compareSection.text}\n${table}` };
+  return { status: OK_STATUS, stdout: withWarningSuffix(`${validityPrefix}${compareSection.text}\n${table}`, warning) };
 }

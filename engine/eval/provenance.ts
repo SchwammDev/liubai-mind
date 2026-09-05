@@ -25,6 +25,7 @@ export function buildProvenance(input: {
   repoRoot: string;
   model: string;
   now: string;
+  reasoning: string;
 }): Provenance {
   return {
     treatmentId: input.treatmentId,
@@ -32,5 +33,6 @@ export function buildProvenance(input: {
     liubaiSha: gitSha(input.repoRoot),
     model: input.model,
     collectedAt: input.now,
+    reasoning: input.reasoning,
   };
 }

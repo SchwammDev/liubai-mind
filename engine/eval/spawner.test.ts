@@ -27,6 +27,7 @@ function spec(over: Partial<RunSpec> = {}): RunSpec {
     model: "prov/model",
     task: "improve",
     timeoutMs: 5000,
+    reasoning: "high",
     ...over,
   };
 }
@@ -76,7 +77,15 @@ test("defaultPiSpawner_receives_model_task_and_rails_extension_as_arguments", as
 
   const outcome = await defaultPiSpawner(repoRoot)(spec({ model: "aqueduct/m1", task: "fix it" }));
 
-  assert.match(outcome.stdoutJsonl, /--no-extensions -e .*extensions\/rails --model aqueduct\/m1 --mode json -p fix it/);
+  assert.match(outcome.stdoutJsonl, /--no-extensions -e .*extensions\/rails --model aqueduct\/m1 --mode json --thinking high -p fix it/);
+});
+
+test("defaultPiSpawner_asks_for_reasoning_at_the_level_the_run_spec_requests", async () => {
+  const repoRoot = stubRepoRoot('echo "$@"');
+
+  const outcome = await defaultPiSpawner(repoRoot)(spec({ reasoning: "xhigh" }));
+
+  assert.match(outcome.stdoutJsonl, /--thinking xhigh/);
 });
 
 test("defaultPiSpawner_kills_a_hung_process_and_reports_timeout", async () => {

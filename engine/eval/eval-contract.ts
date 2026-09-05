@@ -1,4 +1,5 @@
 import type { Lang, RuleName } from "../contract.ts";
+import type { BehaviorCheckFailure } from "./behavior-checks.ts";
 
 export interface TreatmentManifest {
   id: string;
@@ -54,6 +55,7 @@ export interface JudgeResult {
   verdict: Verdict;
   gamedReason?: GamedReason;
   checksPassed?: boolean;
+  failedBehaviorChecks?: BehaviorCheckFailure[];
   createdFiles: string[];
   referencedFiles: string[];
   before: Metrics;
@@ -66,6 +68,7 @@ export interface Provenance {
   liubaiSha: string;
   model: string;
   collectedAt: string;
+  reasoning?: string | null;
 }
 
 export interface FollowUpInfo {

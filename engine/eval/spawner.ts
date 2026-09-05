@@ -3,12 +3,15 @@ import { existsSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
+export const REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
 export interface RunSpec {
   cwd: string;
   env: Record<string, string>;
   model: string;
   task: string;
   timeoutMs: number;
+  reasoning: string;
 }
 
 export interface RunOutcome {
@@ -40,7 +43,7 @@ export function buildSpawnEnv(
 
 function piArgs(repoRoot: string, spec: RunSpec): string[] {
   const railsExtension = join(repoRoot, "extensions", "rails");
-  return ["--no-extensions", "-e", railsExtension, "--model", spec.model, "--mode", "json", "-p", spec.task];
+  return ["--no-extensions", "-e", railsExtension, "--model", spec.model, "--mode", "json", "--thinking", spec.reasoning, "-p", spec.task];
 }
 
 export function defaultPiSpawner(repoRoot: string): PiSpawner {
