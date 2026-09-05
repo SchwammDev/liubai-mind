@@ -10,3 +10,4 @@ config/models.json
 coverage/
 engine/eval/runs/*/judged.jsonl
 engine/eval/runs/*/summary.jsonl
+engine/eval/runs/report.html
