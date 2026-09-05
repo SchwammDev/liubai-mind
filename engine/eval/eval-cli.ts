@@ -5,6 +5,7 @@ import { runScore } from "./score.ts";
 import { runFollowUp } from "./follow-up.ts";
 import { routeScore } from "./follow-up-score.ts";
 import type { Tier } from "./eval-contract.ts";
+import { REASONING_LEVELS } from "./spawner.ts";
 
 export type ParsedCli =
   | {
@@ -17,6 +18,7 @@ export type ParsedCli =
       cases?: string[];
       treatments?: string[];
       tier?: Tier;
+      reasoning?: string;
     }
   | {
       cmd: "follow-up";
@@ -27,6 +29,7 @@ export type ParsedCli =
       timeoutMs?: number;
       cases?: string[];
       treatments?: string[];
+      reasoning?: string;
     }
   | { cmd: "score"; run: string; compare?: string }
   | { error: string };
@@ -42,8 +45,8 @@ const DEFAULT_PARALLEL = 1;
 
 const USAGE = [
   "Usage:",
-  "  liubai eval collect --run <name> --model <provider/id> [--repetitions N] [--parallel N] [--timeout-ms N] [--case id]... [--treatment id]... [--tier <easy|hard>]",
-  "  liubai eval follow-up --run <newRun> --source-run <existingRun> --model <provider/id> [--parallel N] [--timeout-ms N] [--case id]... [--treatment id]...",
+  "  liubai eval collect --run <name> --model <provider/id> [--repetitions N] [--parallel N] [--timeout-ms N] [--case id]... [--treatment id]... [--tier <easy|hard>] [--reasoning <off|minimal|low|medium|high|xhigh|max>]",
+  "  liubai eval follow-up --run <newRun> --source-run <existingRun> --model <provider/id> [--parallel N] [--timeout-ms N] [--case id]... [--treatment id]... [--reasoning <off|minimal|low|medium|high|xhigh|max>]",
   "  liubai eval score --run <name> [--compare <otherRunName>]",
 ].join("\n");
 
@@ -58,6 +61,7 @@ interface CollectAccum {
   parallelRaw?: string;
   timeoutMsRaw?: string;
   tierRaw?: string;
+  reasoningRaw?: string;
   cases: string[];
   treatments: string[];
 }
@@ -68,6 +72,7 @@ interface FollowUpAccum {
   model?: string;
   parallelRaw?: string;
   timeoutMsRaw?: string;
+  reasoningRaw?: string;
   cases: string[];
   treatments: string[];
 }
@@ -101,6 +106,7 @@ function collectFlagHandlers(): FlagHandlers<CollectAccum> {
     "--case": (a, v) => { a.cases.push(v); },
     "--treatment": (a, v) => { a.treatments.push(v); },
     "--tier": (a, v) => { a.tierRaw = v; },
+    "--reasoning": (a, v) => { a.reasoningRaw = v; },
   };
 }
 
@@ -113,6 +119,7 @@ function followUpFlagHandlers(): FlagHandlers<FollowUpAccum> {
     "--timeout-ms": (a, v) => { a.timeoutMsRaw = v; },
     "--case": (a, v) => { a.cases.push(v); },
     "--treatment": (a, v) => { a.treatments.push(v); },
+    "--reasoning": (a, v) => { a.reasoningRaw = v; },
   };
 }
 
@@ -143,7 +150,17 @@ function parseTier(raw: string | undefined): { value: Tier | undefined } | { err
   return { error: `--tier must be "easy" or "hard", got: ${raw}` };
 }
 
-function collectOptionalFields(accum: CollectAccum, tier: Tier | undefined): Partial<Extract<ParsedCli, { cmd: "collect" }>> {
+function parseReasoning(raw: string | undefined): { value: string | undefined } | { error: string } {
+  if (raw === undefined) return { value: undefined };
+  if ((REASONING_LEVELS as readonly string[]).includes(raw)) return { value: raw };
+  return { error: `--reasoning must be one of ${REASONING_LEVELS.join(", ")}, got: ${raw}` };
+}
+
+function collectOptionalFields(
+  accum: CollectAccum,
+  tier: Tier | undefined,
+  reasoning: string | undefined,
+): Partial<Extract<ParsedCli, { cmd: "collect" }>> {
   const timeoutMs = accum.timeoutMsRaw === undefined ? undefined : Number(accum.timeoutMsRaw);
 
   return {
@@ -151,6 +168,7 @@ function collectOptionalFields(accum: CollectAccum, tier: Tier | undefined): Par
     ...(accum.cases.length > 0 ? { cases: accum.cases } : {}),
     ...(accum.treatments.length > 0 ? { treatments: accum.treatments } : {}),
     ...(tier !== undefined ? { tier } : {}),
+    ...(reasoning !== undefined ? { reasoning } : {}),
   };
 }
 
@@ -167,13 +185,16 @@ function buildCollectResult(accum: CollectAccum): ParsedCli {
   const tier = parseTier(accum.tierRaw);
   if ("error" in tier) return usageError(tier.error);
 
+  const reasoning = parseReasoning(accum.reasoningRaw);
+  if ("error" in reasoning) return usageError(reasoning.error);
+
   return {
     cmd: "collect",
     run: accum.run,
     model: accum.model,
     repetitions: repetitions.value,
     parallel: parallel.value,
-    ...collectOptionalFields(accum, tier.value),
+    ...collectOptionalFields(accum, tier.value, reasoning.value),
   };
 }
 
@@ -184,13 +205,14 @@ function parseCollectArgs(args: string[]): ParsedCli {
   return buildCollectResult(accum);
 }
 
-function followUpOptionalFields(accum: FollowUpAccum): Partial<Extract<ParsedCli, { cmd: "follow-up" }>> {
+function followUpOptionalFields(accum: FollowUpAccum, reasoning: string | undefined): Partial<Extract<ParsedCli, { cmd: "follow-up" }>> {
   const timeoutMs = accum.timeoutMsRaw === undefined ? undefined : Number(accum.timeoutMsRaw);
 
   return {
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     ...(accum.cases.length > 0 ? { cases: accum.cases } : {}),
     ...(accum.treatments.length > 0 ? { treatments: accum.treatments } : {}),
+    ...(reasoning !== undefined ? { reasoning } : {}),
   };
 }
 
@@ -202,13 +224,16 @@ function buildFollowUpResult(accum: FollowUpAccum): ParsedCli {
   const parallel = parseParallel(accum.parallelRaw);
   if ("error" in parallel) return usageError(parallel.error);
 
+  const reasoning = parseReasoning(accum.reasoningRaw);
+  if ("error" in reasoning) return usageError(reasoning.error);
+
   return {
     cmd: "follow-up",
     run: accum.run,
     sourceRun: accum.sourceRun,
     model: accum.model,
     parallel: parallel.value,
-    ...followUpOptionalFields(accum),
+    ...followUpOptionalFields(accum, reasoning.value),
   };
 }
 
@@ -256,6 +281,7 @@ async function runCollectCmd(
     ...(parsed.cases !== undefined ? { cases: parsed.cases } : {}),
     ...(parsed.treatments !== undefined ? { treatments: parsed.treatments } : {}),
     ...(parsed.tier !== undefined ? { tier: parsed.tier } : {}),
+    ...(parsed.reasoning !== undefined ? { reasoning: parsed.reasoning } : {}),
   });
 
   return {
@@ -281,6 +307,7 @@ async function runFollowUpCmd(
     ...(parsed.timeoutMs !== undefined ? { timeoutMs: parsed.timeoutMs } : {}),
     ...(parsed.cases !== undefined ? { cases: parsed.cases } : {}),
     ...(parsed.treatments !== undefined ? { treatments: parsed.treatments } : {}),
+    ...(parsed.reasoning !== undefined ? { reasoning: parsed.reasoning } : {}),
   });
 
   return {

@@ -74,6 +74,7 @@ test("buildProvenance_stamps_a_null_pack_hash_when_no_pack_bytes_are_given", () 
     repoRoot: repo,
     model: "claude-test",
     now: "2026-08-24T00:00:00.000Z",
+    reasoning: "high",
   });
 
   assert.equal(provenance.phrasingPackHash, null);
@@ -89,12 +90,23 @@ test("buildProvenance_stamps_a_sha256_pack_hash_when_pack_bytes_are_given", () =
     repoRoot: repo,
     model: "claude-test",
     now: "2026-08-24T00:00:00.000Z",
+    reasoning: "high",
   });
 
   assert.equal(provenance.phrasingPackHash, packHash(bytes));
 });
 
-test("buildProvenance_passes_model_treatment_and_timestamp_through_unchanged", () => {
+function assertPassedThroughUnchanged(
+  provenance: ReturnType<typeof buildProvenance>,
+  expected: { treatmentId: string; model: string; collectedAt: string; reasoning: string },
+): void {
+  assert.deepEqual(
+    { treatmentId: provenance.treatmentId, model: provenance.model, collectedAt: provenance.collectedAt, reasoning: provenance.reasoning },
+    expected,
+  );
+}
+
+test("buildProvenance_passes_model_treatment_timestamp_and_reasoning_through_unchanged", () => {
   const repo = tempGitRepo();
 
   const provenance = buildProvenance({
@@ -103,9 +115,13 @@ test("buildProvenance_passes_model_treatment_and_timestamp_through_unchanged", (
     repoRoot: repo,
     model: "claude-test",
     now: "2026-08-24T00:00:00.000Z",
+    reasoning: "high",
   });
 
-  assert.equal(provenance.treatmentId, "rails-default");
-  assert.equal(provenance.model, "claude-test");
-  assert.equal(provenance.collectedAt, "2026-08-24T00:00:00.000Z");
+  assertPassedThroughUnchanged(provenance, {
+    treatmentId: "rails-default",
+    model: "claude-test",
+    collectedAt: "2026-08-24T00:00:00.000Z",
+    reasoning: "high",
+  });
 });

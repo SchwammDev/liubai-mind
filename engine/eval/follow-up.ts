@@ -38,6 +38,7 @@ export interface FollowUpOpts {
   treatmentsDir?: string;
   corpusDir?: string;
   parallel?: number;
+  reasoning?: string;
 }
 
 export interface FollowUpResult {

@@ -455,6 +455,28 @@ test("runCollect_stamps_provenance_with_treatment_git_sha_model_and_injected_now
   assertProvenanceStamped(firstRow(opts.runDir), now());
 });
 
+function assertReasoningAskedAndRecorded(calls: RunSpec[], runDir: string, level: string): void {
+  assert.deepEqual({ asked: calls[0]?.reasoning, recorded: firstRow(runDir).provenance.reasoning }, { asked: level, recorded: level });
+}
+
+test("runCollect_asks_the_agent_for_high_reasoning_when_no_level_is_given", async () => {
+  const { spawner, calls } = recordingSpawner();
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
+
+  await runCollect(opts);
+
+  assertReasoningAskedAndRecorded(calls, opts.runDir, "high");
+});
+
+test("runCollect_asks_the_agent_for_the_reasoning_level_given_in_opts", async () => {
+  const { spawner, calls } = recordingSpawner();
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner, reasoning: "low" });
+
+  await runCollect(opts);
+
+  assertReasoningAskedAndRecorded(calls, opts.runDir, "low");
+});
+
 test("runCollect_continues_past_a_rejecting_spawner_and_reports_status_1", async () => {
   const spawner = rejectFirstThenMutate();
   const opts = baseOpts({ cases: ["ts-flag-parser", "ts-order-validator"], treatments: ["control"], spawner });

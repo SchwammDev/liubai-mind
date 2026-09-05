@@ -3,11 +3,33 @@ import { join } from "node:path";
 
 import type { Lang, RuleName } from "../contract.ts";
 import { RULE } from "../contract.ts";
-import type { CaseManifest, BehaviorCheck, RawRow, Verdict } from "./eval-contract.ts";
+import type { CaseManifest, BehaviorCheck, RawRow, Verdict, Metrics } from "./eval-contract.ts";
 import { loadCases, declaredFiles } from "./corpus.ts";
 import { runBehaviorChecks } from "./behavior-checks.ts";
+import type { BehaviorCheckOutcome, BehaviorCheckFailure } from "./behavior-checks.ts";
 import { sourceParses } from "./parse-check.ts";
-import { readRawJsonl, judgeRows, runScore, checkLang } from "./score.ts";
+import {
+  readRawJsonl,
+  judgeRows,
+  runScore,
+  checkLang,
+  metricsOf,
+  entrySymbolComplexityOf,
+  createdFilesOf,
+  entryChangedFor,
+  readTranscriptIfPresent,
+  writeJudgedJsonl,
+  missingSessionLogWarning,
+  withWarningSuffix,
+  ANSWER_KEY_PREFIXES,
+  RAIL_PATH_PREFIXES,
+} from "./score.ts";
+import type { ContaminationCheck } from "./score.ts";
+import { sourceDiffCounts } from "./diff-counts.ts";
+import { classifyTranscript } from "./contamination.ts";
+import type { TranscriptClassification } from "./contamination.ts";
+import { buildRepetitionRecord } from "./repetition-record.ts";
+import type { RepetitionRecord, StartsFrom } from "./repetition-record.ts";
 
 export type FollowUpVerdict = "extended" | "extension-failed" | "regressed" | "broken" | "untouched" | "errored" | "timed-out";
 
@@ -15,12 +37,21 @@ export interface FollowUpJudgeResult {
   verdict: FollowUpVerdict;
   linesAdded: number;
   linesRemoved: number;
+  before: Metrics;
+  after: Metrics;
+  createdFiles: string[];
+  failedBehaviorChecks: BehaviorCheckFailure[];
 }
 
 export interface JudgedFollowUpRow {
   row: RawRow;
   judge: FollowUpJudgeResult;
   stratum: string;
+  contaminated: boolean;
+  consultedRail: boolean;
+  entryUnchanged: boolean;
+  entrySymbolComplexityBefore: number | null;
+  entrySymbolComplexityAfter: number | null;
 }
 
 export interface FollowUpSummaryRow {
@@ -43,65 +74,6 @@ const RULE_NAMES: readonly RuleName[] = Object.values(RULE);
 const SUMMARY_FILENAME = "summary.jsonl";
 const CONTROL_STRATUM = "control";
 
-function splitLines(content: string): string[] {
-  if (content.length === 0) return [];
-  const lines = content.split("\n");
-  if (lines[lines.length - 1] === "") lines.pop();
-  return lines;
-}
-
-function lcsLength(a: string[], b: string[]): number {
-  let previous = new Array<number>(b.length + 1).fill(0);
-  for (let i = 1; i <= a.length; i++) {
-    const current = new Array<number>(b.length + 1).fill(0);
-    for (let j = 1; j <= b.length; j++) {
-      current[j] = a[i - 1] === b[j - 1] ? previous[j - 1]! + 1 : Math.max(previous[j]!, current[j - 1]!);
-    }
-    previous = current;
-  }
-  return previous[b.length]!;
-}
-
-export interface DiffCounts {
-  linesAdded: number;
-  linesRemoved: number;
-}
-
-function changedLineCounts(before: string, after: string): DiffCounts {
-  if (before === after) return { linesAdded: 0, linesRemoved: 0 };
-  const a = splitLines(before);
-  const b = splitLines(after);
-  const common = lcsLength(a, b);
-  return { linesAdded: b.length - common, linesRemoved: a.length - common };
-}
-
-export function computeDiffCounts(earlierFiles: Record<string, string>, finalFiles: Record<string, string>): DiffCounts {
-  const keys = new Set([...Object.keys(earlierFiles), ...Object.keys(finalFiles)]);
-  let linesAdded = 0;
-  let linesRemoved = 0;
-  for (const key of keys) {
-    const counts = changedLineCounts(earlierFiles[key] ?? "", finalFiles[key] ?? "");
-    linesAdded += counts.linesAdded;
-    linesRemoved += counts.linesRemoved;
-  }
-  return { linesAdded, linesRemoved };
-}
-
-function isSourcePath(path: string, lang: CaseManifest["lang"]): boolean {
-  if (path.startsWith("playground/")) return false;
-  if (lang === "typescript") return path.endsWith(".ts");
-  if (lang === "python") return path.endsWith(".py");
-  return false;
-}
-
-function filterToSourceFiles(files: Record<string, string>, lang: CaseManifest["lang"]): Record<string, string> {
-  return Object.fromEntries(Object.entries(files).filter(([path]) => isSourcePath(path, lang)));
-}
-
-export function sourceDiffCounts(earlierFiles: Record<string, string>, finalFiles: Record<string, string>, lang: CaseManifest["lang"]): DiffCounts {
-  return computeDiffCounts(filterToSourceFiles(earlierFiles, lang), filterToSourceFiles(finalFiles, lang));
-}
-
 function pristineFiles(corpusDir: string, kase: CaseManifest): Record<string, string> {
   const stripped = declaredFiles(kase);
   const files: Record<string, string> = {};
@@ -117,8 +89,8 @@ function filesAreIdentical(earlier: Record<string, string>, final: Record<string
   return earlierKeys.every((key) => final[key] === earlier[key]);
 }
 
-function behaviorChecksPassFor(kase: CaseManifest, behaviorChecks: BehaviorCheck[], entrySource: string, files: Record<string, string>): boolean {
-  const outcome = runBehaviorChecks({
+function behaviorCheckOutcomeFor(kase: CaseManifest, behaviorChecks: BehaviorCheck[], entrySource: string, files: Record<string, string>): BehaviorCheckOutcome {
+  return runBehaviorChecks({
     lang: checkLang(kase.lang),
     entryFilename: kase.entry,
     source: entrySource,
@@ -127,22 +99,50 @@ function behaviorChecksPassFor(kase: CaseManifest, behaviorChecks: BehaviorCheck
     files,
     compare: "subset",
   });
-  return outcome.passed;
 }
 
-function classifyFollowUpVerdict(kase: CaseManifest, row: RawRow, earlierFiles: Record<string, string>): FollowUpVerdict {
-  if (row.timedOut === true) return "timed-out";
-  if (row.agentError !== undefined) return "errored";
+interface FollowUpClassification {
+  verdict: FollowUpVerdict;
+  failedBehaviorChecks: BehaviorCheckFailure[];
+}
+
+const NO_FAILED_BEHAVIOR_CHECKS: BehaviorCheckFailure[] = [];
+
+function classifyFollowUpRow(kase: CaseManifest, row: RawRow, earlierFiles: Record<string, string>): FollowUpClassification {
+  if (row.timedOut === true) return { verdict: "timed-out", failedBehaviorChecks: NO_FAILED_BEHAVIOR_CHECKS };
+  if (row.agentError !== undefined) return { verdict: "errored", failedBehaviorChecks: NO_FAILED_BEHAVIOR_CHECKS };
 
   const entrySource = row.files[kase.entry];
-  if (entrySource === undefined || !sourceParses(entrySource, checkLang(kase.lang))) return "broken";
+  if (entrySource === undefined || !sourceParses(entrySource, checkLang(kase.lang))) {
+    return { verdict: "broken", failedBehaviorChecks: NO_FAILED_BEHAVIOR_CHECKS };
+  }
 
-  if (filesAreIdentical(earlierFiles, row.files)) return "untouched";
+  if (filesAreIdentical(earlierFiles, row.files)) return { verdict: "untouched", failedBehaviorChecks: NO_FAILED_BEHAVIOR_CHECKS };
 
-  if (!behaviorChecksPassFor(kase, kase.behaviorChecks, entrySource, row.files)) return "regressed";
-  if (!behaviorChecksPassFor(kase, kase.extension!.behaviorChecks, entrySource, row.files)) return "extension-failed";
+  const originalOutcome = behaviorCheckOutcomeFor(kase, kase.behaviorChecks, entrySource, row.files);
+  if (!originalOutcome.passed) return { verdict: "regressed", failedBehaviorChecks: originalOutcome.failures };
 
-  return "extended";
+  const extensionOutcome = behaviorCheckOutcomeFor(kase, kase.extension!.behaviorChecks, entrySource, row.files);
+  if (!extensionOutcome.passed) return { verdict: "extension-failed", failedBehaviorChecks: extensionOutcome.failures };
+
+  return { verdict: "extended", failedBehaviorChecks: NO_FAILED_BEHAVIOR_CHECKS };
+}
+
+function followUpTranscriptRelativePath(row: RawRow): string {
+  const info = row.followUp!;
+  const suffix = info.control ? "control" : `from-repetition-${info.sourceRepetition}`;
+  return join("transcripts", `${row.caseId}.${row.treatmentId}.${suffix}.jsonl`);
+}
+
+const ROW_NOT_CONTAMINATED: TranscriptClassification = { contaminated: false, consultedRail: false };
+
+function classifyFollowUpRowContamination(row: RawRow, contamination: ContaminationCheck | undefined): TranscriptClassification {
+  if (contamination === undefined) return ROW_NOT_CONTAMINATED;
+
+  const transcript = readTranscriptIfPresent(join(contamination.runDir, followUpTranscriptRelativePath(row)));
+  if (transcript === undefined) return ROW_NOT_CONTAMINATED;
+
+  return classifyTranscript(transcript, { answerKeyPrefixes: contamination.answerKeyPrefixes, railPrefixes: contamination.railPrefixes });
 }
 
 function sourceRowKey(caseId: string, treatmentId: string, repetition: number): string {
@@ -198,7 +198,12 @@ function caseFor(cases: CaseManifest[], caseId: string): CaseManifest {
   return kase;
 }
 
-export async function judgeFollowUpRows(rows: RawRow[], sourceRows: RawRow[], corpusDir: string): Promise<JudgedFollowUpRow[]> {
+export async function judgeFollowUpRows(
+  rows: RawRow[],
+  sourceRows: RawRow[],
+  corpusDir: string,
+  contamination?: ContaminationCheck,
+): Promise<JudgedFollowUpRow[]> {
   const cases = loadCases(corpusDir);
   if ("error" in cases) throw new Error(`follow-up-score: failed to load corpus: ${cases.error}`);
 
@@ -209,10 +214,35 @@ export async function judgeFollowUpRows(rows: RawRow[], sourceRows: RawRow[], co
   for (const row of rows) {
     const kase = caseFor(cases, row.caseId);
     const earlierFiles = earlierFilesFor(row, kase, corpusDir, sourceRowsByKey);
-    const verdict = classifyFollowUpVerdict(kase, row, earlierFiles);
+    const classification = classifyFollowUpRow(kase, row, earlierFiles);
     const { linesAdded, linesRemoved } = sourceDiffCounts(earlierFiles, row.files, kase.lang);
     const stratum = row.followUp?.control ? CONTROL_STRATUM : await sourceVerdictOf(row, corpusDir, sourceRowsByKey, sourceVerdictCache);
-    judged.push({ row, judge: { verdict, linesAdded, linesRemoved }, stratum });
+
+    const before = await metricsOf(kase, earlierFiles);
+    const after = await metricsOf(kase, row.files);
+    const entrySymbolComplexityBefore = await entrySymbolComplexityOf(kase, earlierFiles[kase.entry]);
+    const entrySymbolComplexityAfter = await entrySymbolComplexityOf(kase, row.files[kase.entry]);
+    const filesCreated = createdFilesOf(kase, row.files);
+    const { contaminated, consultedRail } = classifyFollowUpRowContamination(row, contamination);
+
+    judged.push({
+      row,
+      judge: {
+        verdict: classification.verdict,
+        linesAdded,
+        linesRemoved,
+        before,
+        after,
+        createdFiles: filesCreated,
+        failedBehaviorChecks: classification.failedBehaviorChecks,
+      },
+      stratum,
+      contaminated,
+      consultedRail,
+      entryUnchanged: !entryChangedFor(earlierFiles[kase.entry]!, row.files[kase.entry]),
+      entrySymbolComplexityBefore,
+      entrySymbolComplexityAfter,
+    });
   }
   return judged;
 }
@@ -352,6 +382,39 @@ function writeFollowUpSummaryJsonl(runDir: string, summary: FollowUpSummaryRow[]
   writeFileSync(join(runDir, SUMMARY_FILENAME), content);
 }
 
+function startsFromOf(row: RawRow): StartsFrom {
+  const info = row.followUp!;
+  return info.control ? { kind: "original-source" } : { kind: "earlier-result", sourceRun: info.sourceRun, sourceRepetition: info.sourceRepetition! };
+}
+
+export function followUpRecordFor(runDir: string, judgedRow: JudgedFollowUpRow): RepetitionRecord {
+  const { row, judge } = judgedRow;
+  const relativePath = followUpTranscriptRelativePath(row);
+  const sessionLog = readTranscriptIfPresent(join(runDir, relativePath));
+
+  return buildRepetitionRecord({
+    row,
+    startsFrom: startsFromOf(row),
+    transcriptPath: sessionLog === undefined ? null : relativePath,
+    sessionLog,
+    verdict: judge.verdict,
+    gamedReason: null,
+    failedBehaviorChecks: judge.failedBehaviorChecks,
+    decisionPointsBefore: judge.before.decisionPoints,
+    decisionPointsAfter: judge.after.decisionPoints,
+    entrySymbolComplexityBefore: judgedRow.entrySymbolComplexityBefore,
+    entrySymbolComplexityAfter: judgedRow.entrySymbolComplexityAfter,
+    functionsBefore: judge.before.nFunctions,
+    functionsAfter: judge.after.nFunctions,
+    linesAdded: judge.linesAdded,
+    linesRemoved: judge.linesRemoved,
+    entryUnchanged: judgedRow.entryUnchanged,
+    filesCreated: judge.createdFiles,
+    contaminated: judgedRow.contaminated,
+    consultedRail: judgedRow.consultedRail,
+  });
+}
+
 export interface FollowUpScoreOpts {
   runDir: string;
   sourceRunDir: string;
@@ -365,16 +428,21 @@ export async function runFollowUpScore(opts: FollowUpScoreOpts): Promise<{ statu
   const sourceParsed = readRawJsonl(opts.sourceRunDir);
   if ("error" in sourceParsed) return { status: 1, stdout: sourceParsed.error };
 
+  const contamination: ContaminationCheck = { runDir: opts.runDir, answerKeyPrefixes: ANSWER_KEY_PREFIXES, railPrefixes: RAIL_PATH_PREFIXES };
+
   let judged: JudgedFollowUpRow[];
   try {
-    judged = await judgeFollowUpRows(parsedRaw.rows, sourceParsed.rows, opts.corpusDir);
+    judged = await judgeFollowUpRows(parsedRaw.rows, sourceParsed.rows, opts.corpusDir, contamination);
   } catch (err) {
     return { status: 1, stdout: err instanceof Error ? err.message : String(err) };
   }
 
   const summary = aggregateFollowUp(judged);
   writeFollowUpSummaryJsonl(opts.runDir, summary);
-  return { status: 0, stdout: formatFollowUpMarkdown(summary) };
+  const records = judged.map((judgedRow) => followUpRecordFor(opts.runDir, judgedRow));
+  writeJudgedJsonl(opts.runDir, records);
+  const warning = missingSessionLogWarning(records);
+  return { status: 0, stdout: withWarningSuffix(formatFollowUpMarkdown(summary), warning) };
 }
 
 export type TouchKind = { kind: "single-task" } | { kind: "follow-up"; sourceRun: string } | { error: string };

@@ -4,14 +4,16 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { judgeRows, aggregate, formatMarkdown, compareProvenance, runScore, toJudgedJsonlRow } from "./score.ts";
-import type { SummaryRow, JudgeEnv, JudgedJsonlRow } from "./score.ts";
+import { judgeRows, aggregate, formatMarkdown, compareProvenance, runScore, recordFor } from "./score.ts";
+import type { SummaryRow, JudgeEnv } from "./score.ts";
 import type { RawRow, Metrics, Verdict, GamedReason, Provenance, JudgeResult, Tier } from "./eval-contract.ts";
 import type { JudgedRow } from "./score.ts";
+import type { RepetitionRecord } from "./repetition-record.ts";
 import { venvPythonAvailable } from "./judge-env.ts";
 import { gitSha } from "./provenance.ts";
 import { RULE } from "../contract.ts";
 import type { RuleName } from "../contract.ts";
+import { nudgeFired, sessionLog, toolCall, turnStart } from "./run-doubles.ts";
 
 const CORPUS_DIR = join(import.meta.dirname, "corpus");
 const FIXTURE_PATH = join(import.meta.dirname, "fixtures", "raw-smoke.jsonl");
@@ -222,9 +224,9 @@ function readSummary(runDir: string): SummaryRow[] {
   return lines.map((line) => JSON.parse(line) as SummaryRow);
 }
 
-function readJudgedJsonl(runDir: string): JudgedJsonlRow[] {
+function readJudgedJsonl(runDir: string): RepetitionRecord[] {
   const lines = readFileSync(join(runDir, "judged.jsonl"), "utf8").trim().split("\n");
-  return lines.map((line) => JSON.parse(line) as JudgedJsonlRow);
+  return lines.map((line) => JSON.parse(line) as RepetitionRecord);
 }
 
 function assistantBashToolCallLine(command: string): string {
@@ -301,7 +303,13 @@ function judgedRow(
     referencedFiles: [],
     ...(gamedReason !== undefined ? { gamedReason } : {}),
   };
-  return { row: rawRow(treatmentId, caseId), judge, contaminated, consultedRail };
+  return { row: rawRow(treatmentId, caseId), judge, contaminated, consultedRail, ...recordFacts() };
+}
+
+function recordFacts(
+  over: Partial<Pick<JudgedRow, "entryChanged" | "entrySymbolComplexityBefore" | "entrySymbolComplexityAfter" | "linesAdded" | "linesRemoved">> = {},
+): Pick<JudgedRow, "entryChanged" | "entrySymbolComplexityBefore" | "entrySymbolComplexityAfter" | "linesAdded" | "linesRemoved"> {
+  return { entryChanged: true, entrySymbolComplexityBefore: null, entrySymbolComplexityAfter: null, linesAdded: 0, linesRemoved: 0, ...over };
 }
 
 function fullyPopulatedJudgedRow(): JudgedRow {
@@ -314,72 +322,78 @@ function fullyPopulatedJudgedRow(): JudgedRow {
       nudges: nudges({ cc: 1 }),
       durationMs: 5000,
       timedOut: true,
+      provenance: provenance({ treatmentId: "rails-default", reasoning: "high" }),
     }),
     judge: {
       verdict: "gamed",
       gamedReason: "helper-split",
       checksPassed: true,
+      failedBehaviorChecks: [{ index: 0, reason: "expected 2 got 1" }],
       before: metrics({ decisionPoints: 5 }),
       after: metrics({ decisionPoints: 2 }),
-      createdFiles: [],
+      createdFiles: ["extra.ts"],
       referencedFiles: [],
     },
     contaminated: true,
     consultedRail: false,
+    ...recordFacts({ entrySymbolComplexityBefore: 3, entrySymbolComplexityAfter: 1, linesAdded: 7, linesRemoved: 2 }),
   };
 }
 
-test("toJudgedJsonlRow_maps_verdict_dp_and_cost_fields_from_a_fully_populated_judged_row", () => {
+test("recordFor_maps_every_fact_from_a_fully_populated_judged_row_with_no_session_log", () => {
+  const runDir = tempRunDir();
   const judged = fullyPopulatedJudgedRow();
 
-  const row = toJudgedJsonlRow(judged);
+  const record = recordFor(runDir, judged, { kind: "original-source" });
 
-  assert.deepEqual(row, {
+  assert.deepEqual(record, {
     caseId: "case-a",
     treatmentId: "rails-default",
     repetition: 2,
+    startsFrom: { kind: "original-source" },
+    transcriptPath: null,
     verdict: "gamed",
     gamedReason: "helper-split",
-    contaminated: true,
-    consultedRail: false,
-    dpBefore: 5,
-    dpAfter: 2,
-    checksPassed: true,
+    failedBehaviorChecks: [{ index: 0, reason: "expected 2 got 1" }],
+    decisionPointsBefore: 5,
+    decisionPointsAfter: 2,
+    entrySymbolComplexityBefore: 3,
+    entrySymbolComplexityAfter: 1,
+    functionsBefore: 1,
+    functionsAfter: 1,
+    linesAdded: 7,
+    linesRemoved: 2,
     turns: 4,
     tokensIn: 100,
     tokensOut: 50,
-    nudges: nudges({ cc: 1 }),
     durationMs: 5000,
-    timedOut: true,
-  });
-});
-
-test("toJudgedJsonlRow_omits_optional_fields_absent_from_the_judged_row", () => {
-  const judged = judgedRow("rails-default", "case-a", "untouched");
-
-  const row = toJudgedJsonlRow(judged);
-
-  assert.deepEqual(row, {
-    caseId: "case-a",
-    treatmentId: "rails-default",
-    repetition: 1,
-    verdict: "untouched",
-    contaminated: false,
+    ending: "timed-out",
+    retries: null,
+    nudges: null,
+    toolCalls: null,
+    firstEditTurn: null,
+    filesCreated: ["extra.ts"],
+    reasoning: { requested: "high", present: false },
+    contaminated: true,
     consultedRail: false,
-    dpBefore: 4,
-    dpAfter: 4,
-    durationMs: 1,
-    timedOut: false,
   });
 });
 
-test("toJudgedJsonlRow_marks_consultedRail_true_for_a_row_that_read_the_rail_without_touching_the_answer_key", () => {
-  const judged = judgedRow("rails-default", "case-a", "untouched", undefined, [], undefined, false, true);
+test("recordFor_reads_the_sessions_log_for_facts_only_a_transcript_can_answer", () => {
+  const runDir = tempRunDir();
+  const judged = costJudgedRow("rails-default", "case-a", { repetition: 1 });
+  writeTranscript(
+    runDir,
+    judged.row,
+    sessionLog([turnStart(), toolCall("read"), turnStart(), toolCall("edit"), nudgeFired(RULE.ccDelta)]),
+  );
 
-  const row = toJudgedJsonlRow(judged);
+  const record = recordFor(runDir, judged, { kind: "original-source" });
 
-  assert.equal(row.contaminated, false);
-  assert.equal(row.consultedRail, true);
+  assert.deepEqual(
+    { transcriptPath: record.transcriptPath, retries: record.retries, ccDeltaNudges: record.nudges![RULE.ccDelta].count, firstEditTurn: record.firstEditTurn },
+    { transcriptPath: "transcripts/case-a.rails-default.1.jsonl", retries: 0, ccDeltaNudges: 1, firstEditTurn: 2 },
+  );
 });
 
 function emptyVerdictCounts(): Record<Verdict, number> {
@@ -689,7 +703,7 @@ function nudges(over: Partial<Record<RuleName, number>> = {}): Record<RuleName, 
 
 function costJudgedRow(treatmentId: string, caseId: string, over: Partial<RawRow> = {}): JudgedRow {
   const judge: JudgeResult = { verdict: "untouched", before: metrics(), after: metrics(), createdFiles: [], referencedFiles: [] };
-  return { row: rawRow(treatmentId, caseId, over), judge, contaminated: false, consultedRail: false };
+  return { row: rawRow(treatmentId, caseId, over), judge, contaminated: false, consultedRail: false, ...recordFacts() };
 }
 
 function costOf(summary: SummaryRow[], treatmentId: string, caseId: string | null): SummaryRow {
@@ -1139,6 +1153,130 @@ test("runScore_writes_judged_jsonl_with_one_row_per_raw_row_in_raw_jsonl_order",
     judged.map((r) => r.verdict),
     ["genuine-fix", "gamed", "untouched", "broken", "errored", "behavior-broken"],
   );
+});
+
+test("runScore_records_every_session_as_starting_from_the_original_source", async () => {
+  const row = rawRow("control", "ts-order-validator");
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [row]);
+
+  await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+  const [record] = readJudgedJsonl(runDir);
+  assert.deepEqual(record!.startsFrom, { kind: "original-source" });
+});
+
+test("runScore_records_a_null_transcript_path_when_no_session_log_was_collected", async () => {
+  const row = rawRow("control", "ts-order-validator");
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [row]);
+
+  await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+  const [record] = readJudgedJsonl(runDir);
+  assert.equal(record!.transcriptPath, null);
+});
+
+test("runScore_records_the_transcript_path_relative_to_the_run_folder_when_the_sessions_log_exists", async () => {
+  const row = rawRow("control", "ts-order-validator");
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [row]);
+  writeTranscript(runDir, row, sessionLog([turnStart()]));
+
+  await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+  const [record] = readJudgedJsonl(runDir);
+  assert.equal(record!.transcriptPath, "transcripts/ts-order-validator.control.1.jsonl");
+});
+
+test("runScore_records_ending_as_errored_ahead_of_no_edit_for_a_row_with_an_agentError", async () => {
+  const untouchedRow = rawRow("control", "ts-order-validator");
+  const erroredRow = erroredRawRow("rails-default", "ts-flag-parser", "OpenAI API error (404): model not found", 1);
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [untouchedRow, erroredRow]);
+
+  await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+  const records = readJudgedJsonl(runDir);
+  const errored = records.find((r) => r.treatmentId === "rails-default")!;
+  assert.equal(errored.ending, "errored");
+});
+
+test("runScore_records_lines_added_and_removed_between_the_files_the_session_started_from_and_ended_with", async () => {
+  const row = tsFlagParserRow({}, { files: { "parse_flags.ts": `${tsFlagParserEntrySource()}// note\n` } });
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [row]);
+
+  await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+  const [record] = readJudgedJsonl(runDir);
+  assert.deepEqual({ linesAdded: record!.linesAdded, linesRemoved: record!.linesRemoved }, { linesAdded: 1, linesRemoved: 0 });
+});
+
+test("runScore_records_the_entry_symbols_complexity_separately_from_the_whole_files_decision_point_total", { skip: !venvPythonAvailable() }, async () => {
+  const source = readFileSync(join(CORPUS_DIR, "py-grid-accumulate", "accumulate_grid.py.case"), "utf8");
+  const row = rawRow("rails-default", "py-grid-accumulate", { files: { "accumulate_grid.py": source } });
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [row]);
+
+  await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+  const [record] = readJudgedJsonl(runDir);
+  assert.deepEqual(
+    { wholeFileDecisionPoints: record!.decisionPointsBefore, accumulateGridComplexity: record!.entrySymbolComplexityBefore },
+    { wholeFileDecisionPoints: 46, accumulateGridComplexity: 40 },
+  );
+});
+
+test("runScore_records_a_null_entry_symbol_complexity_after_when_the_session_never_returned_the_entry_file", async () => {
+  const row = rawRow("rails-default", "ts-flag-parser");
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [row]);
+
+  await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+  const [record] = readJudgedJsonl(runDir);
+  assert.equal(record!.entrySymbolComplexityAfter, null);
+});
+
+test("runScore_names_the_failed_behavior_check_by_index_and_reason_when_behaviorChecks_ran_and_failed", async () => {
+  const rows = tsOnlyRows(readFixtureRows());
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, rows);
+
+  await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+  const records = readJudgedJsonl(runDir);
+  const behaviorBroken = records.find((r) => r.verdict === "behavior-broken")!;
+  assert.equal(behaviorBroken.failedBehaviorChecks.length > 0, true);
+  assert.equal(typeof behaviorBroken.failedBehaviorChecks[0]!.reason, "string");
+});
+
+test("runScore_records_no_failed_behavior_checks_when_none_failed_or_none_ran", async () => {
+  const rows = tsOnlyRows(readFixtureRows());
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, rows);
+
+  await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+  const records = readJudgedJsonl(runDir);
+  const genuineFix = records.find((r) => r.verdict === "genuine-fix")!;
+  const untouched = records.find((r) => r.verdict === "untouched")!;
+  assert.deepEqual(
+    { genuineFix: genuineFix.failedBehaviorChecks, untouched: untouched.failedBehaviorChecks },
+    { genuineFix: [], untouched: [] },
+  );
+});
+
+test("runScore_warns_about_sessions_with_no_session_log_after_writing_judged_jsonl", async () => {
+  const row = rawRow("control", "ts-order-validator");
+  const runDir = tempRunDir();
+  writeRawJsonl(runDir, [row]);
+
+  const result = await runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT });
+
+  assert.match(result.stdout, /1 session.* no session log/);
+  assert.match(result.stdout, /ts-order-validator/);
 });
 
 test("runScore_flags_a_row_whose_transcript_touches_the_repo_root_as_contaminated", async () => {

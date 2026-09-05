@@ -15,6 +15,7 @@ import { defaultPiSpawner, defaultProbeSpawner } from "./spawner.ts";
 import type { PiSpawner, ProbeSpawner, RunOutcome } from "./spawner.ts";
 import { snapshotExtras } from "./snapshot.ts";
 import type { WorkDirSnapshot } from "./snapshot.ts";
+import { nudgeFiringsIn } from "./session-log.ts";
 
 export interface CollectOpts {
   repoRoot: string;
@@ -32,6 +33,7 @@ export interface CollectOpts {
   treatmentsDir?: string;
   corpusDir?: string;
   parallel?: number;
+  reasoning?: string;
 }
 
 export interface CollectResult {
@@ -58,6 +60,7 @@ export interface CollectContext {
   workRoot: string;
   now: () => string;
   parallel: number;
+  reasoning: string;
 }
 
 export interface ItemResult {
@@ -67,6 +70,7 @@ export interface ItemResult {
 }
 
 const DEFAULT_TIMEOUT_MS = 900000;
+export const DEFAULT_REASONING_LEVEL = "high";
 const FALLBACK_AGENT_ERROR = "agent error";
 
 interface AutoRetryEndEvent {
@@ -175,53 +179,9 @@ function emptyNudges(): Record<RuleName, number> {
   return Object.fromEntries(RULE_NAMES.map((rule) => [rule, 0])) as Record<RuleName, number>;
 }
 
-function toolExecutionEndResultOf(line: string): Record<string, unknown> | undefined {
-  const parsed = parseJsonLine(line);
-  if (typeof parsed !== "object" || parsed === null) return undefined;
-
-  const obj = parsed as Record<string, unknown>;
-  if (obj.type !== "tool_execution_end" || typeof obj.result !== "object" || obj.result === null) return undefined;
-
-  return obj.result as Record<string, unknown>;
-}
-
-function textPartOf(part: unknown): string | undefined {
-  if (typeof part !== "object" || part === null) return undefined;
-
-  const { type, text } = part as Record<string, unknown>;
-  return type === "text" && typeof text === "string" ? text : undefined;
-}
-
-function toolResultTexts(line: string): string[] {
-  const result = toolExecutionEndResultOf(line);
-  const content = result?.content;
-  if (!Array.isArray(content)) return [];
-
-  return content.map(textPartOf).filter((text): text is string => text !== undefined);
-}
-
-function countRuleMarkersIn(text: string, marker: string): number {
-  let count = 0;
-  let index = text.indexOf(marker);
-  while (index !== -1) {
-    count += 1;
-    index = text.indexOf(marker, index + marker.length);
-  }
-  return count;
-}
-
 export function countNudges(stdoutJsonl: string): Record<RuleName, number> {
-  const counts = emptyNudges();
-
-  for (const line of nonEmptyLines(stdoutJsonl)) {
-    for (const text of toolResultTexts(line)) {
-      for (const rule of RULE_NAMES) {
-        counts[rule] += countRuleMarkersIn(text, `[${rule}]`);
-      }
-    }
-  }
-
-  return counts;
+  const firings = nudgeFiringsIn(stdoutJsonl);
+  return Object.fromEntries(RULE_NAMES.map((rule) => [rule, firings[rule].count])) as Record<RuleName, number>;
 }
 
 export function countShadowNudges(logContents: string): Record<RuleName, number> {
@@ -366,6 +326,7 @@ export async function spawnForItem(
     model: ctx.model,
     task,
     timeoutMs: ctx.timeoutMs,
+    reasoning: ctx.reasoning,
   });
   return { outcome, durationMs: Date.now() - start };
 }
@@ -404,6 +365,7 @@ export function buildRawRowCore(
     repoRoot: ctx.repoRoot,
     model: ctx.model,
     now: ctx.now(),
+    reasoning: ctx.reasoning,
   });
 
   const agentError = detectAgentError(outcome.stdoutJsonl, outcome.exitCode);
@@ -505,6 +467,7 @@ export interface EngineOptsBase {
   workRoot?: string;
   now?: () => string;
   parallel?: number;
+  reasoning?: string;
 }
 
 export function buildContext(opts: EngineOptsBase, corpusDir: string, treatmentsDir: string): CollectContext {
@@ -519,6 +482,7 @@ export function buildContext(opts: EngineOptsBase, corpusDir: string, treatments
     workRoot: opts.workRoot ?? tmpdir(),
     now: opts.now ?? (() => new Date().toISOString()),
     parallel: opts.parallel ?? 1,
+    reasoning: opts.reasoning ?? DEFAULT_REASONING_LEVEL,
   };
 }
 

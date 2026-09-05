@@ -5,17 +5,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  computeDiffCounts,
-  sourceDiffCounts,
   judgeFollowUpRows,
   aggregateFollowUp,
   formatFollowUpMarkdown,
   touchKindOf,
   routeScore,
   runFollowUpScore,
+  followUpRecordFor,
 } from "./follow-up-score.ts";
 import type { JudgedFollowUpRow, FollowUpSummaryRow, FollowUpVerdict } from "./follow-up-score.ts";
-import type { RawRow, Provenance, FollowUpInfo } from "./eval-contract.ts";
+import type { RawRow, Provenance, FollowUpInfo, Metrics } from "./eval-contract.ts";
+import type { RepetitionRecord } from "./repetition-record.ts";
 import { RULE } from "../contract.ts";
 import type { RuleName } from "../contract.ts";
 
@@ -359,77 +359,9 @@ test("judgeFollowUpRows_stratifies_every_control_row_into_the_control_stratum", 
   assert.equal(judged.stratum, "control");
 });
 
-test("computeDiffCounts_reports_only_added_lines_when_lines_are_appended", () => {
-  const counts = computeDiffCounts({ "a.ts": "one\ntwo\n" }, { "a.ts": "one\ntwo\nthree\nfour\n" });
-
-  assert.deepEqual(counts, { linesAdded: 2, linesRemoved: 0 });
-});
-
-test("computeDiffCounts_reports_only_removed_lines_when_lines_are_deleted", () => {
-  const counts = computeDiffCounts({ "a.ts": "one\ntwo\nthree\nfour\n" }, { "a.ts": "one\ntwo\n" });
-
-  assert.deepEqual(counts, { linesAdded: 0, linesRemoved: 2 });
-});
-
-test("computeDiffCounts_counts_every_line_of_a_newly_created_file_as_added", () => {
-  const counts = computeDiffCounts({ "a.ts": "one\n" }, { "a.ts": "one\n", "b.ts": "x\ny\nz\n" });
-
-  assert.deepEqual(counts, { linesAdded: 3, linesRemoved: 0 });
-});
-
-test("computeDiffCounts_counts_every_line_of_a_file_dropped_from_final_as_removed", () => {
-  const counts = computeDiffCounts({ "a.ts": "one\n", "b.ts": "x\ny\nz\n" }, { "a.ts": "one\n" });
-
-  assert.deepEqual(counts, { linesAdded: 0, linesRemoved: 3 });
-});
-
-test("computeDiffCounts_counts_a_modified_line_as_one_removed_and_one_added", () => {
-  const counts = computeDiffCounts({ "a.ts": "one\n" }, { "a.ts": "two\n" });
-
-  assert.deepEqual(counts, { linesAdded: 1, linesRemoved: 1 });
-});
-
-test("computeDiffCounts_sums_added_and_removed_lines_across_every_file", () => {
-  const counts = computeDiffCounts({ "a.ts": "one\ntwo\n", "b.ts": "x\n" }, { "a.ts": "one\ntwo\nthree\n", "b.ts": "y\n" });
-
-  assert.deepEqual(counts, { linesAdded: 2, linesRemoved: 1 });
-});
-
-test("computeDiffCounts_reports_zero_added_and_removed_for_byte_identical_files", () => {
-  const counts = computeDiffCounts({ "a.ts": "one\ntwo\n" }, { "a.ts": "one\ntwo\n" });
-
-  assert.deepEqual(counts, { linesAdded: 0, linesRemoved: 0 });
-});
-
-test("sourceDiffCounts_ignores_a_package_lock_json_added_by_the_solution_for_a_typescript_case", () => {
-  const counts = sourceDiffCounts({ "a.ts": "one\n" }, { "a.ts": "one\n", "package-lock.json": "{\n  \"x\": 1\n}\n" }, "typescript");
-
-  assert.deepEqual(counts, { linesAdded: 0, linesRemoved: 0 });
-});
-
-test("sourceDiffCounts_ignores_a_scratch_file_added_under_playground_for_a_typescript_case", () => {
-  const counts = sourceDiffCounts({ "a.ts": "one\n" }, { "a.ts": "one\n", "playground/scratch.ts": "x\ny\n" }, "typescript");
-
-  assert.deepEqual(counts, { linesAdded: 0, linesRemoved: 0 });
-});
-
-test("sourceDiffCounts_ignores_a_compiled_js_file_while_still_counting_ts_files_for_a_typescript_case", () => {
-  const counts = sourceDiffCounts({ "a.ts": "one\n" }, { "a.ts": "one\ntwo\n", "a.js": "var one;\nvar two;\n" }, "typescript");
-
-  assert.deepEqual(counts, { linesAdded: 1, linesRemoved: 0 });
-});
-
-test("sourceDiffCounts_counts_a_new_py_source_file_for_a_python_case", () => {
-  const counts = sourceDiffCounts({ "a.py": "one\n" }, { "a.py": "one\n", "b.py": "x\ny\n" }, "python");
-
-  assert.deepEqual(counts, { linesAdded: 2, linesRemoved: 0 });
-});
-
-test("sourceDiffCounts_ignores_litter_present_in_the_earlier_files_but_absent_from_final_files", () => {
-  const counts = sourceDiffCounts({ "a.ts": "one\n", "package-lock.json": "{\n  \"x\": 1\n}\n" }, { "a.ts": "one\n" }, "typescript");
-
-  assert.deepEqual(counts, { linesAdded: 0, linesRemoved: 0 });
-});
+function emptyMetrics(): Metrics {
+  return { decisionPoints: 0, nFunctions: 0, silentHandlers: 0, parsed: true };
+}
 
 function judgedFollowUpRow(
   treatmentId: string,
@@ -439,7 +371,16 @@ function judgedFollowUpRow(
   over: Partial<RawRow> = {},
   diffCounts: { linesAdded: number; linesRemoved: number } = { linesAdded: 0, linesRemoved: 0 },
 ): JudgedFollowUpRow {
-  return { row: earlierResultRow(caseId, { treatmentId, ...over }), judge: { verdict, ...diffCounts }, stratum };
+  return {
+    row: earlierResultRow(caseId, { treatmentId, ...over }),
+    judge: { verdict, ...diffCounts, before: emptyMetrics(), after: emptyMetrics(), createdFiles: [], failedBehaviorChecks: [] },
+    stratum,
+    contaminated: false,
+    consultedRail: false,
+    entryUnchanged: false,
+    entrySymbolComplexityBefore: null,
+    entrySymbolComplexityAfter: null,
+  };
 }
 
 function rollupOf(summary: FollowUpSummaryRow[], treatmentId: string): FollowUpSummaryRow {
@@ -744,4 +685,95 @@ test("runFollowUpScore_writes_a_summary_jsonl_beside_the_follow_up_raw_jsonl", a
   const result = await runFollowUpScore({ runDir, sourceRunDir, corpusDir });
 
   assertSummaryHasBothStrata(result, runDir);
+});
+
+function warnsAboutMissingSessionLogs(result: { stdout: string }): boolean {
+  return /session\(s\) have no session log/.test(result.stdout);
+}
+
+test("runFollowUpScore_warns_in_its_output_when_a_row_has_no_session_log", async () => {
+  const caseId = "follow-up-missing-session-log-warning";
+  const corpusDir = extendableCorpusDir(caseId);
+  const sourceRunDir = tempDir("eval-follow-up-score-source-");
+  writeRawJsonl(sourceRunDir, [sourceRow(caseId)]);
+  const runDir = tempDir("eval-follow-up-score-run-");
+  writeRawJsonl(runDir, [earlierResultRow(caseId, { files: { "thing.ts": extendedSource() } })]);
+
+  const result = await runFollowUpScore({ runDir, sourceRunDir, corpusDir });
+
+  assert.ok(warnsAboutMissingSessionLogs(result));
+});
+
+async function followUpRecordOf(corpusDir: string, row: RawRow, sourceRows: RawRow[] = []): Promise<RepetitionRecord> {
+  const [judged] = await judgeFollowUpRows([row], sourceRows, corpusDir);
+  return followUpRecordFor(tempDir("eval-follow-up-record-"), judged!);
+}
+
+function startsFromOf(record: RepetitionRecord): unknown {
+  return record.startsFrom;
+}
+
+function beforeMetricsOf(record: RepetitionRecord): unknown {
+  return { decisionPointsBefore: record.decisionPointsBefore, entrySymbolComplexityBefore: record.entrySymbolComplexityBefore };
+}
+
+function logDerivedFactsOf(record: RepetitionRecord): unknown {
+  return { transcriptPath: record.transcriptPath, retries: record.retries, nudges: record.nudges, toolCalls: record.toolCalls, firstEditTurn: record.firstEditTurn };
+}
+
+function verdictAndGamedReasonOf(record: RepetitionRecord): unknown {
+  return { verdict: record.verdict, gamedReason: record.gamedReason };
+}
+
+test("followUpRecordFor_names_a_control_records_startsFrom_as_the_original_source", async () => {
+  const caseId = "follow-up-record-control-starts-from";
+  const corpusDir = extendableCorpusDir(caseId);
+  const row = controlRow(caseId, { files: { "thing.ts": extendedSource() } });
+
+  const record = await followUpRecordOf(corpusDir, row);
+
+  assert.deepEqual(startsFromOf(record), { kind: "original-source" });
+});
+
+test("followUpRecordFor_names_the_earlier_run_and_repetition_an_earlierResult_record_started_from", async () => {
+  const caseId = "follow-up-record-earlier-starts-from";
+  const corpusDir = extendableCorpusDir(caseId);
+  const source = sourceRow(caseId, { repetition: 3 });
+  const row = earlierResultRow(caseId, { files: { "thing.ts": extendedSource() } }, { sourceRun: "earlier-run", sourceRepetition: 3 });
+
+  const record = await followUpRecordOf(corpusDir, row, [source]);
+
+  assert.deepEqual(startsFromOf(record), { kind: "earlier-result", sourceRun: "earlier-run", sourceRepetition: 3 });
+});
+
+test("followUpRecordFor_computes_before_metrics_from_the_earlier_files_not_the_pristine_source", async () => {
+  const caseId = "follow-up-record-before-metrics";
+  const corpusDir = extendableCorpusDir(caseId);
+  const source = sourceRow(caseId, { files: { "thing.ts": extendedSource() } });
+  const row = earlierResultRow(caseId, { files: { "thing.ts": `${extendedSource()}// noop\n` } });
+
+  const record = await followUpRecordOf(corpusDir, row, [source]);
+
+  assert.deepEqual(beforeMetricsOf(record), { decisionPointsBefore: 1, entrySymbolComplexityBefore: 2 });
+});
+
+test("followUpRecordFor_leaves_log_derived_facts_null_when_the_session_log_is_missing", async () => {
+  const caseId = "follow-up-record-missing-log";
+  const corpusDir = extendableCorpusDir(caseId);
+  const row = controlRow(caseId, { files: { "thing.ts": extendedSource() } });
+
+  const record = await followUpRecordOf(corpusDir, row);
+
+  assert.deepEqual(logDerivedFactsOf(record), { transcriptPath: null, retries: null, nudges: null, toolCalls: null, firstEditTurn: null });
+});
+
+test("followUpRecordFor_names_the_verdict_and_never_a_gaming_reason", async () => {
+  const caseId = "follow-up-record-verdict-reuse";
+  const corpusDir = extendableCorpusDir(caseId);
+  const source = sourceRow(caseId);
+  const row = earlierResultRow(caseId, { files: { "thing.ts": extendedSource() } });
+
+  const record = await followUpRecordOf(corpusDir, row, [source]);
+
+  assert.deepEqual(verdictAndGamedReasonOf(record), { verdict: "extended", gamedReason: null });
 });

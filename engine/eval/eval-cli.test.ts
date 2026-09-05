@@ -124,6 +124,18 @@ test("parseCliArgs_rejects_an_unknown_tier_value", () => {
   assert.ok("error" in parsed);
 });
 
+test("parseCliArgs_parses_the_reasoning_flag_into_collect_opts", () => {
+  const parsed = parseCliArgs(collectArgv("--reasoning", "xhigh"));
+
+  assertParsedCollect(parsed, { reasoning: "xhigh" });
+});
+
+test("parseCliArgs_rejects_a_reasoning_level_pi_does_not_accept", () => {
+  const parsed = parseCliArgs(collectArgv("--reasoning", "extreme"));
+
+  assert.ok("error" in parsed);
+});
+
 test("parseCliArgs_parses_score_with_compare", () => {
   const parsed = parseCliArgs(["score", "--run", "baseline", "--compare", "rails-default"]);
 
@@ -183,6 +195,22 @@ test("runEval_passes_tier_through_to_the_collect_dependency", async () => {
   await runEval(["collect", "--run", "baseline", "--model", "anthropic/claude-test", "--tier", "hard"], { collect });
 
   assert.equal(calls[0]?.tier, "hard");
+});
+
+test("runEval_passes_reasoning_through_to_the_collect_dependency", async () => {
+  const { collect, calls } = recordingCollect({ status: 0, rowsWritten: 1, rowsSkipped: 0, stderr: "" });
+
+  await runEval(["collect", "--run", "baseline", "--model", "anthropic/claude-test", "--reasoning", "low"], { collect });
+
+  assert.equal(calls[0]?.reasoning, "low");
+});
+
+test("runEval_leaves_reasoning_unset_for_the_collect_dependency_to_default_when_the_flag_is_omitted", async () => {
+  const { collect, calls } = recordingCollect({ status: 0, rowsWritten: 1, rowsSkipped: 0, stderr: "" });
+
+  await runEval(["collect", "--run", "baseline", "--model", "anthropic/claude-test"], { collect });
+
+  assert.equal(calls[0]?.reasoning, undefined);
 });
 
 test("runEval_propagates_nonzero_status_from_dependency", async () => {
@@ -262,6 +290,18 @@ test("parseCliArgs_defaults_follow_up_parallel_to_one_when_omitted", () => {
   assertParsedFollowUp(parsed, {});
 });
 
+test("parseCliArgs_parses_the_reasoning_flag_into_follow_up_opts", () => {
+  const parsed = parseCliArgs(followUpArgv("--reasoning", "xhigh"));
+
+  assertParsedFollowUp(parsed, { reasoning: "xhigh" });
+});
+
+test("parseCliArgs_rejects_a_reasoning_level_pi_does_not_accept_for_follow_up", () => {
+  const parsed = parseCliArgs(followUpArgv("--reasoning", "extreme"));
+
+  assert.ok("error" in parsed);
+});
+
 test("parseCliArgs_reports_error_when_follow_up_is_missing_run", () => {
   const parsed = parseCliArgs(["follow-up", "--source-run", "baseline", "--model", "anthropic/claude-test"]);
 
@@ -293,6 +333,22 @@ test("runEval_routes_follow_up_to_the_dependency_with_resolved_run_and_source_ru
 
   assertFollowUpRunAndSourceRunResolved(calls);
   assert.equal(result.stdout, "rows written: 2, skipped: 0");
+});
+
+test("runEval_passes_reasoning_through_to_the_follow_up_dependency", async () => {
+  const { followUp, calls } = recordingFollowUp({ status: 0, rowsWritten: 1, rowsSkipped: 0, stderr: "" });
+
+  await runEval(["follow-up", "--run", "extended", "--source-run", "baseline", "--model", "anthropic/claude-test", "--reasoning", "low"], { followUp });
+
+  assert.equal(calls[0]?.reasoning, "low");
+});
+
+test("runEval_leaves_reasoning_unset_for_the_follow_up_dependency_to_default_when_the_flag_is_omitted", async () => {
+  const { followUp, calls } = recordingFollowUp({ status: 0, rowsWritten: 1, rowsSkipped: 0, stderr: "" });
+
+  await runEval(["follow-up", "--run", "extended", "--source-run", "baseline", "--model", "anthropic/claude-test"], { followUp });
+
+  assert.equal(calls[0]?.reasoning, undefined);
 });
 
 test("runEval_propagates_follow_up_stderr_and_nonzero_status", async () => {

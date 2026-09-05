@@ -8,4 +8,5 @@ config/models.json
 .coverage
 .venv
 coverage/
-engine/eval/runs/
+engine/eval/runs/*/judged.jsonl
+engine/eval/runs/*/summary.jsonl
