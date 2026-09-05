@@ -364,10 +364,9 @@ function bodyOnly(page: string): string {
 function transcriptIslandJson(page: string, id: string): unknown {
   const opening = page.indexOf(`data-transcript="${id}"`);
   assert.notEqual(opening, -1, `the page carries no data-transcript for ${id}`);
-  const start = page.indexOf(`data-transcript="`, opening);
-  const next = page.indexOf(`data-transcript="`, start + 1);
-  const island = page.slice(start, next === -1 ? page.length : next);
-  return JSON.parse(island.slice(island.indexOf(">") + 1, island.lastIndexOf("</script>")));
+  const tagEnd = page.indexOf(">", opening);
+  const closing = page.indexOf("</script>", tagEnd);
+  return JSON.parse(page.slice(tagEnd + 1, closing));
 }
 
 test("a review with a transcript renders its viewer already expanded, with a raw transcript file link", () => {
@@ -391,6 +390,12 @@ test("a review's transcript island parses back into the same turns it was given"
     parsed.turns.map((turn) => turn.toolCalls),
     [["bash"], ["edit"]],
   );
+});
+
+test("the transcript islands are emitted before the script that reads them, so its lookup never runs before they exist in the DOM", () => {
+  const html = pageWithOneReviewCarrying({ transcript: transcript() });
+
+  assert.equal(html.indexOf('data-transcript="') < html.indexOf("function renderTranscript(container, transcript)"), true);
 });
 
 test("the last of several transcript islands on the page still parses cleanly, even with global scripts on the page", () => {

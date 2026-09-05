@@ -69,13 +69,17 @@ function caseFacts(
   reference?: Record<string, string>,
   behaviorChecksTotal = 0,
   extensionBehaviorChecksTotal?: number,
+  task = "do the task",
+  extensionTask?: string,
 ): CaseFactsForReport {
   return {
     tier,
     entry,
+    task,
     behaviorChecksTotal,
     ...(reference !== undefined ? { reference } : {}),
     ...(extensionBehaviorChecksTotal !== undefined ? { extensionBehaviorChecksTotal } : {}),
+    ...(extensionTask !== undefined ? { extensionTask } : {}),
   };
 }
 
@@ -882,6 +886,75 @@ test("a follow-up review's earlier-change card carries the source run's own verd
         taskText: "Add weighting.",
       },
     },
+  );
+});
+
+test("a change card's task text is shown in full, however long the task, with no truncation ellipsis", () => {
+  const longTask =
+    "Refactor the aggregation pipeline so it validates every input row against the schema before computing rolling averages across all time windows.";
+  const records = {
+    "run-a": {
+      judged: [judgedRecord("case-a", "t1", 1, {})],
+      raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" }, task: longTask })],
+    },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+
+  const review = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId));
+
+  assert.equal(cardNamed(review, "change")!.taskText, longTask);
+});
+
+test("a change card falls back to the case's own manifest task when its treatment recorded no task on the row", () => {
+  const records = {
+    "run-a": {
+      judged: [judgedRecord("case-a", "t1", 1, {})],
+      raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" } })],
+    },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py", "hard", undefined, 0, undefined, "Reduce branching in entry.py.")]]);
+
+  const review = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId));
+
+  assert.equal(cardNamed(review, "change")!.taskText, "Reduce branching in entry.py.");
+});
+
+test("a with-follow-up-tasks review's change card falls back to the case's extension task when its treatment recorded no task on the row", () => {
+  const exp = experiment({ treatments: [{ treatmentId: "control", run: "run-a" }], controlTreatment: "control", kind: "with-follow-up-tasks" });
+  const records = {
+    "run-a": {
+      judged: [judgedRecord("case-a", "control", 1, {})],
+      raw: [rawRow("control", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" } })],
+    },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py", "hard", undefined, 0, 3, "Reduce branching in entry.py.", "Add weighting.")]]);
+
+  const review = reviewOf(experimentDetailFor(exp, records, caseFactsByCaseId));
+
+  assert.equal(cardNamed(review, "change")!.taskText, "Add weighting.");
+});
+
+test("a follow-up review's earlier-change and follow-up-change cards fall back to the manifest tasks when their own rows recorded none", () => {
+  const exp = experiment({ treatments: [{ treatmentId: "t1", run: "run-b" }], controlTreatment: "t1", kind: "with-follow-up-tasks", sourceRun: "run-a" });
+  const records = {
+    "run-a": {
+      judged: [judgedRecord("case-a", "t1", 5, { verdict: "genuine-fix" })],
+      raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 5, files: { "entry.py": "earlier\n" } })],
+    },
+    "run-b": {
+      judged: [
+        judgedRecord("case-a", "t1", 1, { verdict: "extended", startsFrom: { kind: "earlier-result", sourceRun: "run-a", sourceRepetition: 5 } }),
+      ],
+      raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "follow-up\n" } })],
+    },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py", "hard", undefined, 4, 3, "Improve entry.py.", "Add weighting.")]]);
+
+  const review = reviewOf(experimentDetailFor(exp, records, caseFactsByCaseId));
+
+  assert.deepEqual(
+    { earlierChangeTask: cardNamed(review, "earlier-change")!.taskText, followUpChangeTask: cardNamed(review, "follow-up-change")!.taskText },
+    { earlierChangeTask: "Improve entry.py.", followUpChangeTask: "Add weighting." },
   );
 });
 

@@ -87,9 +87,12 @@ function caseFactsByCaseIdFrom(corpusDir: string): { map: Map<string, CaseFactsF
         {
           tier: kase.tier,
           entry: kase.entry,
+          task: kase.task,
           behaviorChecksTotal: kase.behaviorChecks.length,
           ...(kase.reference !== undefined ? { reference: kase.reference } : {}),
-          ...(kase.extension !== undefined ? { extensionBehaviorChecksTotal: kase.extension.behaviorChecks.length } : {}),
+          ...(kase.extension !== undefined
+            ? { extensionBehaviorChecksTotal: kase.extension.behaviorChecks.length, extensionTask: kase.extension.task }
+            : {}),
         },
       ]),
     ),
