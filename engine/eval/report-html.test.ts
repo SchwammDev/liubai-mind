@@ -241,7 +241,7 @@ test("the default diff is a unified view that collapses unchanged lines far from
   );
 });
 
-test("the view-mode control defaults to unified, matching the diff already rendered without JavaScript", () => {
+test("without JavaScript, the view-mode control's active state matches the unified diff a no-JavaScript reader actually sees", () => {
   const detail = experimentDetailView({ treatments: [treatmentView({ repetitions: [repetitionView()] })] });
 
   const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
@@ -250,6 +250,12 @@ test("the view-mode control defaults to unified, matching the diff already rende
     { unifiedActive: buttonActiveFor(html, "data-view-mode", "unified"), sideBySideActive: buttonActiveFor(html, "data-view-mode", "side-by-side") },
     { unifiedActive: true, sideBySideActive: false },
   );
+});
+
+test("a review shows side by side when the reader has expressed no view-mode preference", () => {
+  const html = renderReportHtml(viewModel({ experimentDetails: [experimentDetailView({ treatments: [treatmentView({ repetitions: [repetitionView()] })] })] }));
+
+  assert.equal(html.includes('var DEFAULT_VIEW_MODE = "side-by-side"') && html.includes("storedViewMode() || DEFAULT_VIEW_MODE"), true);
 });
 
 test("the why-this-verdict box carries the literal phrase alongside the computed explanation", () => {
