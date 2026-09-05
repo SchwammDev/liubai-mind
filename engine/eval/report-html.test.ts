@@ -9,8 +9,10 @@ import type {
   ExperimentView,
   RepetitionView,
   ReportViewModel,
+  ReviewStateCardView,
   ReviewView,
   TreatmentView,
+  VerdictBarSegmentView,
 } from "./report-view.ts";
 import type { TranscriptTurnView, TranscriptView } from "./session-log.ts";
 
@@ -72,6 +74,10 @@ function codeState(name: CodeStateName, over: Partial<CodeStateView> = {}): Code
   return { name, label: name, caption: `caption for ${name}`, dedupeKey: `key-${name}`, available: true, text: `text for ${name}`, ...over };
 }
 
+function stateCard(name: CodeStateName, stateNumber: number, over: Partial<ReviewStateCardView> = {}): ReviewStateCardView {
+  return { name, stateNumber, title: `state ${stateNumber} · ${name}`, dedupeKey: `key-${name}`, ...over };
+}
+
 function review(over: Partial<ReviewView> = {}): ReviewView {
   return {
     id: "run-a/case-a/t1/1",
@@ -79,8 +85,12 @@ function review(over: Partial<ReviewView> = {}): ReviewView {
     whyThisVerdict: "verdict gamed",
     entryFilename: "entry.py",
     codeStates: [codeState("original"), codeState("change")],
+    stateCards: [stateCard("original", 0), stateCard("change", 1)],
     defaultBeforeName: "original",
     defaultAfterName: "change",
+    statsLine: "+1 / −1 lines · 1 turn",
+    nudgeSummary: "",
+    filesLine: "",
     notes: [],
     live: false,
     ...over,
@@ -110,12 +120,17 @@ function treatmentView(over: Partial<TreatmentView> = {}): TreatmentView {
     treatmentId: "t1",
     run: "run-a",
     verdictDistribution: "",
+    verdictBarSegments: [],
     meanTurns: "-",
     meanTokensIn: "-",
     meanNudgesPerRepetition: "-",
     repetitions: [repetitionView()],
     ...over,
   };
+}
+
+function barSegment(cls: VerdictBarSegmentView["cls"], pct: number): VerdictBarSegmentView {
+  return { cls, pct };
 }
 
 function experimentDetailView(over: Partial<ExperimentDetailView> = {}): ExperimentDetailView {
@@ -145,7 +160,12 @@ test("a repetition's review section carries the repetition's own id and its code
     treatments: [
       treatmentView({
         repetitions: [
-          repetitionView({ review: review({ codeStates: [codeState("original"), codeState("earlier-change"), codeState("follow-up-change")] }) }),
+          repetitionView({
+            review: review({
+              codeStates: [codeState("original"), codeState("earlier-change"), codeState("follow-up-change")],
+              stateCards: [stateCard("original", 0), stateCard("earlier-change", 1), stateCard("follow-up-change", 2)],
+            }),
+          }),
         ],
       }),
     ],
@@ -180,23 +200,14 @@ function pageWithRepetitionsSharingOneOriginal(repetitionCount: 1 | 2): string {
   return renderReportHtml(viewModel({ experimentDetails: [detail] }));
 }
 
-function statesPanelOf(page: string, reviewId: string): string {
-  const start = page.indexOf(`data-review="${reviewId}"`);
-  if (start === -1) return "";
-  const end = page.indexOf('class="compare-controls"', start);
-  return page.slice(start, end);
+function hiddenStateTextCopies(page: string, text: string): number {
+  return (page.match(new RegExp(`<pre hidden id="state-[^"]*" class="code-text">${text}</pre>`, "g")) ?? []).length;
 }
 
-function occurrencesOfSharedOriginalText(page: string): number {
-  const statesPanels = statesPanelOf(page, "run-a/case-a/t1/1") + statesPanelOf(page, "run-a/case-a/t1/2");
-  return statesPanels.split("shared original text").length - 1;
-}
+test("a code state shared by two repetitions is embedded in the hidden state-text pool exactly once", () => {
+  const page = pageWithRepetitionsSharingOneOriginal(2);
 
-test("a code state shared by two repetitions costs no extra copies of its text among the embedded states", () => {
-  const withOneRepetition = occurrencesOfSharedOriginalText(pageWithRepetitionsSharingOneOriginal(1));
-  const withTwoRepetitions = occurrencesOfSharedOriginalText(pageWithRepetitionsSharingOneOriginal(2));
-
-  assert.equal(withTwoRepetitions, withOneRepetition);
+  assert.equal(hiddenStateTextCopies(page, "shared original text"), 1);
 });
 
 function sectionStartingAt(page: string, marker: string): string {
@@ -254,7 +265,13 @@ test("the why-this-verdict box carries the literal phrase alongside the computed
   );
 });
 
-test("the reference-fix control is offered only when the review carries a reference", () => {
+function referenceFixButton(html: string): string {
+  const match = /<button[^>]*data-before-source="reference"[^>]*>/.exec(html);
+  assert.notEqual(match, null, "no reference-fix control found");
+  return match![0];
+}
+
+test("the reference-fix control is enabled when the review carries a reference, and disabled when it does not", () => {
   const withReference = experimentDetailView({
     treatments: [treatmentView({ repetitions: [repetitionView({ review: review({ reference: { dedupeKey: "ref-1", text: "ref text" } }) })] })],
   });
@@ -262,10 +279,10 @@ test("the reference-fix control is offered only when the review carries a refere
 
   assert.deepEqual(
     {
-      offeredWhenPresent: renderReportHtml(viewModel({ experimentDetails: [withReference] })).includes("reference fix"),
-      offeredWhenAbsent: renderReportHtml(viewModel({ experimentDetails: [withoutReference] })).includes("reference fix"),
+      enabledWhenPresent: referenceFixButton(renderReportHtml(viewModel({ experimentDetails: [withReference] }))).includes("disabled"),
+      disabledWhenAbsent: referenceFixButton(renderReportHtml(viewModel({ experimentDetails: [withoutReference] }))).includes("disabled"),
     },
-    { offeredWhenPresent: true, offeredWhenAbsent: false },
+    { enabledWhenPresent: false, disabledWhenAbsent: true },
   );
 });
 
@@ -353,12 +370,12 @@ function transcriptIslandJson(page: string, id: string): unknown {
   return JSON.parse(island.slice(island.indexOf(">") + 1, island.lastIndexOf("</script>")));
 }
 
-test("a review with a transcript offers an open-transcript control and a raw transcript file link", () => {
+test("a review with a transcript renders its viewer already expanded, with a raw transcript file link", () => {
   const html = bodyOnly(pageWithOneReviewCarrying({ transcript: transcript(), rawTranscriptHref: "run-a/transcripts/x.jsonl" }));
 
   assert.deepEqual(
-    { hasOpenControl: html.includes("open transcript"), hasRawLink: html.includes('href="run-a/transcripts/x.jsonl"') },
-    { hasOpenControl: true, hasRawLink: true },
+    { viewerStartsExpanded: /<div class="transcript-viewer">/.test(html), hasRawLink: html.includes('href="run-a/transcripts/x.jsonl"') },
+    { viewerStartsExpanded: true, hasRawLink: true },
   );
 });
 
@@ -398,22 +415,16 @@ test("the last of several transcript islands on the page still parses cleanly, e
   assert.deepEqual(last.turns[0]!.toolCalls, ["write"]);
 });
 
-test("a review with no transcript offers no open-transcript control, but still names the reason", () => {
+test("a review with no transcript names the reason instead of rendering a viewer", () => {
   const html = bodyOnly(pageWithOneReviewCarrying({}));
 
-  assert.deepEqual(
-    { hasOpenControl: html.includes("open transcript"), mentionsNoTranscript: html.includes("no transcript recorded") },
-    { hasOpenControl: false, mentionsNoTranscript: true },
-  );
+  assert.equal(html.includes("no transcript recorded"), true);
 });
 
 test("a review whose transcript file could not be read still offers the raw link, with a note instead of the viewer", () => {
   const html = bodyOnly(pageWithOneReviewCarrying({ rawTranscriptHref: "run-a/transcripts/x.jsonl" }));
 
-  assert.deepEqual(
-    { hasOpenControl: html.includes("open transcript"), hasRawLink: html.includes('href="run-a/transcripts/x.jsonl"') },
-    { hasOpenControl: false, hasRawLink: true },
-  );
+  assert.equal(html.includes('href="run-a/transcripts/x.jsonl"'), true);
 });
 
 test("the thinking toggle is disabled and says not recorded when the transcript carries no reasoning", () => {
@@ -500,6 +511,16 @@ test("a repetition with a review offers links to its review view and its transcr
   );
 });
 
+test("the row's own case cell opens the review directly, not a link tucked away in the detail column", () => {
+  const detail = experimentDetailView({
+    treatments: [treatmentView({ repetitions: [repetitionView({ caseId: "case-a", repetition: 3, review: review({ id: "run-a-case-a-t1-3" }) })] })],
+  });
+  const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
+
+  const row = repetitionsTableOf(html);
+  assert.equal(/<td[^>]*>\s*<a href="#view-review-run-a-case-a-t1-3">case-a · 3<\/a>\s*<\/td>/.test(row), true);
+});
+
 test("a review's breadcrumb links back to the experiments list and to its own experiment", () => {
   const detail = experimentDetailView({ id: "exp-1", treatments: [treatmentView({ repetitions: [repetitionView({ review: review() })] })] });
   const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
@@ -553,4 +574,94 @@ test("a no-JavaScript reader is told view navigation needs JavaScript", () => {
 
   const noscriptMatch = /<noscript>([\s\S]*?)<\/noscript>/.exec(html);
   assert.equal((noscriptMatch?.[1] ?? "").toLowerCase().includes("javascript"), true);
+});
+
+function statesContainerOf(html: string): string {
+  const start = html.indexOf('class="states"');
+  const end = html.indexOf('class="compare-controls"', start);
+  return html.slice(start, end);
+}
+
+test("a state card shows its title and metric line, not the underlying source text", () => {
+  const detail = experimentDetailView({
+    treatments: [
+      treatmentView({
+        repetitions: [
+          repetitionView({
+            review: review({
+              codeStates: [codeState("original", { text: "SECRET SOURCE TEXT" }), codeState("change", { text: "change text" })],
+              stateCards: [
+                stateCard("original", 0, { fileAtCommit: "entry.py at commit sha1", metricLine: "complexity 12" }),
+                stateCard("change", 1, { verdict: "genuine-fix", metricLine: "complexity 12 → 9" }),
+              ],
+            }),
+          }),
+        ],
+      }),
+    ],
+  });
+
+  const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
+
+  assert.deepEqual(
+    {
+      cardShowsMetric: statesContainerOf(html).includes("complexity 12 → 9"),
+      cardHidesSourceText: statesContainerOf(html).includes("SECRET SOURCE TEXT"),
+      pageStillCarriesSourceText: html.includes("SECRET SOURCE TEXT"),
+    },
+    { cardShowsMetric: true, cardHidesSourceText: false, pageStillCarriesSourceText: true },
+  );
+});
+
+test("the review header shows the stats line and nudge summary above the state cards", () => {
+  const detail = experimentDetailView({
+    treatments: [
+      treatmentView({ repetitions: [repetitionView({ review: review({ statsLine: "+41 / −12 lines · 17 turns", nudgeSummary: "complexity nudge ×3" }) })] }),
+    ],
+  });
+
+  const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
+
+  assert.deepEqual(
+    { hasStatsLine: html.includes("+41 / −12 lines · 17 turns"), hasNudgeSummary: html.includes("complexity nudge ×3") },
+    { hasStatsLine: true, hasNudgeSummary: true },
+  );
+});
+
+test("the review's files line is rendered alongside the compare controls", () => {
+  const detail = experimentDetailView({
+    treatments: [treatmentView({ repetitions: [repetitionView({ review: review({ filesLine: "files: entry.py (modified) · test_entry.py (created)" }) })] })],
+  });
+
+  const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
+
+  assert.equal(html.includes("files: entry.py (modified) · test_entry.py (created)"), true);
+});
+
+test("a treatment's row draws a verdict bar segment for each class it carries, alongside the counts as text", () => {
+  const detail = experimentDetailView({
+    treatments: [treatmentView({ verdictDistribution: "genuine-fix 3 · broken 1", verdictBarSegments: [barSegment("g", 75), barSegment("x", 25)] })],
+  });
+
+  const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
+
+  assert.deepEqual(
+    {
+      hasGreenSegment: /<div class="g" style="width: 75%;"><\/div>/.test(html),
+      hasHatchedSegment: /<div class="x" style="width: 25%;"><\/div>/.test(html),
+      stillNamesTheCounts: html.includes("genuine-fix 3 · broken 1"),
+    },
+    { hasGreenSegment: true, hasHatchedSegment: true, stillNamesTheCounts: true },
+  );
+});
+
+test("a per-case row draws its own verdict bar per treatment cell", () => {
+  const detail = experimentDetailView({
+    treatmentIds: ["t1"],
+    perCase: [{ caseId: "case-a", cells: [{ label: "genuine-fix 1", barSegments: [barSegment("g", 100)] }], wherePart: "" }],
+  });
+
+  const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
+
+  assert.equal(/<div class="g" style="width: 100%;"><\/div>/.test(html), true);
 });

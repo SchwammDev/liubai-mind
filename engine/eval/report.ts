@@ -84,7 +84,13 @@ function caseFactsByCaseIdFrom(corpusDir: string): { map: Map<string, CaseFactsF
     map: new Map(
       cases.map((kase) => [
         kase.id,
-        { tier: kase.tier, entry: kase.entry, ...(kase.reference !== undefined ? { reference: kase.reference } : {}) },
+        {
+          tier: kase.tier,
+          entry: kase.entry,
+          behaviorChecksTotal: kase.behaviorChecks.length,
+          ...(kase.reference !== undefined ? { reference: kase.reference } : {}),
+          ...(kase.extension !== undefined ? { extensionBehaviorChecksTotal: kase.extension.behaviorChecks.length } : {}),
+        },
       ]),
     ),
   };
