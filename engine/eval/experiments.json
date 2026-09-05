@@ -1,0 +1,18 @@
+[
+  {
+    "id": "numberless-prompt",
+    "name": "numberless prompt",
+    "question": "Does dropping the counts from the complexity nudge reduce metric gaming?",
+    "kind": "single-task",
+    "milestone": "coaching-over-metrics",
+    "treatments": [
+      { "treatmentId": "cc-delta-prompt", "run": "numberless-prompt-v2-hard-flash" },
+      { "treatmentId": "cc-delta-numberless-prompt", "run": "numberless-prompt-v2-hard-flash" },
+      { "treatmentId": "control", "run": "numberless-prompt-v2-hard-flash" }
+    ],
+    "controlTreatment": "control",
+    "status": "concluded",
+    "outcome": "numberless wording became the default",
+    "issues": [60, 69]
+  }
+]
