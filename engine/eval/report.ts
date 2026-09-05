@@ -114,6 +114,30 @@ function originalSourceByKeyFrom(
   return resolved;
 }
 
+function readSessionLogIfPresent(path: string): string | undefined {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (err) {
+    if (isEnoent(err)) return undefined;
+    throw err;
+  }
+}
+
+function sessionLogByKeyFrom(runsDir: string, runData: Map<string, RunRecordsForReport>): Map<string, string> {
+  const logs = new Map<string, string>();
+
+  for (const [run, records] of runData) {
+    for (const record of records.judged) {
+      if (record.transcriptPath === null) continue;
+
+      const log = readSessionLogIfPresent(join(runsDir, run, record.transcriptPath));
+      if (log !== undefined) logs.set(`${run}/${record.caseId}/${record.treatmentId}/${record.repetition}`, log);
+    }
+  }
+
+  return logs;
+}
+
 export async function runReport(opts: ReportOpts): Promise<ReportResult> {
   const experiments = loadExperiments(opts.experimentsPath);
   const known = { treatmentIdsByRun: loadTreatmentIdsByRun(opts.runsDir) };
@@ -129,8 +153,9 @@ export async function runReport(opts: ReportOpts): Promise<ReportResult> {
 
   const unclaimed = unclaimedRunFolders(experiments, known);
   const originalSourceByKey = originalSourceByKeyFrom(opts.repoRoot, opts.corpusDir, caseFacts.map, runData.runData);
+  const sessionLogByKey = sessionLogByKeyFrom(opts.runsDir, runData.runData);
 
-  const viewModel = buildReportViewModel(experiments, runData.runData, caseFacts.map, unclaimed, originalSourceByKey);
+  const viewModel = buildReportViewModel(experiments, runData.runData, caseFacts.map, unclaimed, originalSourceByKey, sessionLogByKey);
   writeFileSync(opts.outPath, renderReportHtml(viewModel));
 
   return { status: 0, stdout: `report written: ${opts.outPath}` };

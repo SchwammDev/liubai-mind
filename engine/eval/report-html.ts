@@ -11,6 +11,7 @@ import type {
   SetupCheckView,
   TreatmentView,
 } from "./report-view.ts";
+import type { TranscriptView } from "./session-log.ts";
 import { contextDiff } from "./diff-counts.ts";
 import type { ContextDiffLine } from "./diff-counts.ts";
 
@@ -21,6 +22,10 @@ function escapeHtml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function escapeScriptClose(json: string): string {
+  return json.replace(/<\/script/gi, "<\\/script");
 }
 
 const PAGE_STYLE = `
@@ -68,6 +73,24 @@ const PAGE_STYLE = `
   .diff-col .code .skip { color: #999; font-style: italic; }
   .note-box { border: 1px dashed #bbb; border-radius: 4px; padding: 8px 12px; margin: 8px 0; }
   .note-box textarea { width: 100%; font: inherit; margin-top: 6px; resize: vertical; }
+  .transcript-block { border: 1px solid #ddd; border-radius: 4px; padding: 10px 14px; margin: 8px 0; }
+  .transcript-block button { font: inherit; padding: 2px 10px; border: 1px solid #888; border-radius: 10px; background: #fff; cursor: pointer; }
+  .transcript-block button[disabled] { color: #999; cursor: default; }
+  .transcript-block button.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+  .transcript-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .transcript-viewer { margin-top: 10px; }
+  .t-layout { display: grid; grid-template-columns: 1fr 240px; gap: 14px; align-items: start; }
+  .t-turns { display: flex; flex-direction: column; gap: 8px; }
+  .t-turn { border: 1px solid #ddd; border-radius: 4px; padding: 8px 12px; }
+  .t-nudge { border: 1px dashed #999; border-radius: 4px; padding: 6px 12px; background: #f6f6f4; margin: 2px 0; }
+  .t-retry { border: 1px dashed #bbb; border-radius: 4px; padding: 6px 12px; text-align: center; font-size: 12.5px; }
+  .t-tool { margin-top: 4px; }
+  .t-tool summary { cursor: pointer; }
+  .t-tool[data-tool-error="1"] summary { color: #b3261e; }
+  .t-code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-word; margin: 4px 0 0; }
+  .t-thinking { margin-top: 4px; white-space: pre-wrap; }
+  .t-panel { border: 1px solid #ddd; border-radius: 4px; padding: 8px 12px; }
+  .no-js-note { font-size: 13px; color: #555; margin-top: 6px; }
 `;
 
 function renderTreatments(treatmentIds: string[]): string {
@@ -215,6 +238,33 @@ function renderReferenceState(review: ReviewView, seenStateKeys: Set<string>): s
   return `<pre hidden id="${anchorId}" data-reference-state="${escapeHtml(review.reference.dedupeKey)}" class="code-text">${escapeHtml(review.reference.text)}</pre>`;
 }
 
+function renderThinkingToggle(reasoningPresent: boolean): string {
+  if (!reasoningPresent) {
+    return `<button type="button" disabled>thinking</button><span class="kind mono">not recorded</span>`;
+  }
+  return `<button type="button" data-toggle-thinking>thinking</button>`;
+}
+
+function renderTranscriptBlock(review: ReviewView): string {
+  const rawLink = review.rawTranscriptHref === undefined ? "" : `<a class="mono kind" href="${escapeHtml(review.rawTranscriptHref)}">raw transcript file</a>`;
+
+  if (review.transcript === undefined) {
+    return `<div class="transcript-block">
+      <div class="transcript-toolbar"><span class="kind">no transcript recorded for this repetition</span>${rawLink}</div>
+    </div>`;
+  }
+
+  return `<div class="transcript-block" data-transcript-block>
+    <div class="transcript-toolbar">
+      <button type="button" data-open-transcript="${escapeHtml(review.id)}">open transcript</button>
+      ${renderThinkingToggle(review.transcript.reasoningPresent)}
+      ${rawLink}
+    </div>
+    <noscript><div class="no-js-note">the transcript needs JavaScript to render here; use the raw transcript file link above.</div></noscript>
+    <div class="transcript-viewer" hidden></div>
+  </div>`;
+}
+
 function renderReview(review: ReviewView, seenStateKeys: Set<string>): string {
   return `<section id="review-${slug(review.id)}" data-review="${escapeHtml(review.id)}" class="review">
     <h4><span class="chip">${escapeHtml(review.verdict)}</span></h4>
@@ -223,6 +273,7 @@ function renderReview(review: ReviewView, seenStateKeys: Set<string>): string {
     <div class="diff-holder">${renderDefaultDiff(review)}</div>
     ${renderWhyBox(review)}
     ${renderReferenceState(review, seenStateKeys)}
+    ${renderTranscriptBlock(review)}
     ${renderNoteBox()}
   </section>`;
 }
@@ -508,6 +559,185 @@ const REVIEW_SCRIPT = `<script>
 })();
 </script>`;
 
+const TRANSCRIPT_SCRIPT = `<script>
+(function () {
+  function escapeHtml(value) {
+    return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function turnHeader(turn) {
+    if (turn.isRetryFailure) return "turn " + turn.number + " · provider error, retried";
+    if (turn.userText !== null) return "turn " + turn.number + " · user";
+    if (turn.toolCalls.length > 0) return "turn " + turn.number + " · assistant · tool call";
+    if (turn.isFinal) return "turn " + turn.number + " · assistant · final";
+    return "turn " + turn.number + " · assistant";
+  }
+
+  function toolCallHtml(call) {
+    var summary = escapeHtml(call.name) + (call.args && call.args !== "{}" ? " " + escapeHtml(call.args) : "");
+    var body = "";
+    if (call.diff !== null) {
+      body = '<pre class="t-code">' + escapeHtml(call.diff) + (call.diffTruncated ? "\\n… see the raw transcript file for the rest" : "") + "</pre>";
+    } else if (call.result !== null) {
+      body =
+        '<div class="kind mono">result · ' + call.resultLineCount + " line" + (call.resultLineCount === 1 ? "" : "s") + "</div>" +
+        '<pre class="t-code">' + escapeHtml(call.result) + (call.resultTruncated ? "\\n… see the raw transcript file for the rest" : "") + "</pre>";
+    }
+    return '<details class="t-tool"' + (call.isError ? ' data-tool-error="1"' : "") + '><summary class="mono">' + summary + "</summary>" + body + "</details>";
+  }
+
+  function turnBodyHtml(turn) {
+    var parts = [];
+    if (turn.userText !== null) parts.push("<div>" + escapeHtml(turn.userText) + "</div>");
+    if (turn.assistantText !== null) parts.push("<div>" + escapeHtml(turn.assistantText) + "</div>");
+    if (turn.thinking !== null) parts.push('<div class="t-thinking mono kind" hidden>' + escapeHtml(turn.thinking) + "</div>");
+    turn.toolCallDetails.forEach(function (call) { parts.push(toolCallHtml(call)); });
+    return parts.join("");
+  }
+
+  function nudgeHtml(turn, rule) {
+    return '<div class="t-nudge"><div class="kind" style="font-size:12.5px;">turn ' + turn.number + " · rail nudge · " + escapeHtml(rule) + "</div></div>";
+  }
+
+  function turnHtml(turn) {
+    var html = '<div class="t-turn" data-turn="' + turn.number + '"><div class="kind" style="font-size:13px;">' + escapeHtml(turnHeader(turn)) + "</div>" + turnBodyHtml(turn) + "</div>";
+    turn.nudges.forEach(function (rule) { html += nudgeHtml(turn, rule); });
+    return html;
+  }
+
+  function collapsedRetryHtml(count, resumingTurn) {
+    return '<div class="t-retry kind">' + count + " automatic retr" + (count === 1 ? "y" : "ies") + " before turn " + resumingTurn + ", collapsed</div>";
+  }
+
+  function turnsHtml(turns) {
+    var html = "";
+    var i = 0;
+    while (i < turns.length) {
+      if (turns[i].isRetryFailure) {
+        var start = i;
+        while (i < turns.length && turns[i].isRetryFailure) i++;
+        var resumingTurn = i < turns.length ? turns[i].number : turns[start].number;
+        html += collapsedRetryHtml(i - start, resumingTurn);
+        continue;
+      }
+      html += turnHtml(turns[i]);
+      i++;
+    }
+    return html;
+  }
+
+  function tokensPanelHtml(turns) {
+    var rows = turns.map(function (turn) {
+      return turn.number + " · " + (turn.tokensIn === null ? "-" : turn.tokensIn) + " · " + (turn.tokensOut === null ? "-" : turn.tokensOut);
+    });
+    return '<div class="t-panel"><div class="kind" style="font-size:13px;">per turn · input · output tokens</div><div class="mono" style="font-size:12.5px; line-height:1.6;">' + rows.join("<br>") + "</div></div>";
+  }
+
+  function toolsPanelHtml(turns) {
+    var counts = {};
+    turns.forEach(function (turn) { turn.toolCalls.forEach(function (name) { counts[name] = (counts[name] || 0) + 1; }); });
+    var names = Object.keys(counts).sort();
+    var rows = names.map(function (name) { return escapeHtml(name) + " ×" + counts[name]; });
+    return '<div class="t-panel"><div class="kind" style="font-size:13px;">tools used</div><div class="mono" style="font-size:12.5px; line-height:1.6;">' + (rows.length === 0 ? "none" : rows.join("<br>")) + "</div></div>";
+  }
+
+  function writeCallPath(call) {
+    var match = /"path"\\s*:\\s*"([^"]+)"/.exec(call.args);
+    return match ? match[1] : null;
+  }
+
+  function jumpPanelHtml(turns) {
+    var firstEdit = null;
+    var filesCreated = [];
+    var seenPaths = {};
+    var nudgeTurns = [];
+    var finalTurn = null;
+
+    turns.forEach(function (turn) {
+      turn.toolCallDetails.forEach(function (call) {
+        if (firstEdit === null && (call.name === "edit" || call.name === "write")) firstEdit = turn.number;
+        if (call.name === "write") {
+          var path = writeCallPath(call);
+          if (path !== null && !seenPaths[path]) {
+            seenPaths[path] = true;
+            filesCreated.push({ path: path, turn: turn.number });
+          }
+        }
+      });
+      if (turn.nudges.length > 0) nudgeTurns.push(turn.number);
+      if (turn.isFinal) finalTurn = turn.number;
+    });
+
+    var lines = [];
+    lines.push(firstEdit === null ? "first edit · none" : "first edit · turn " + firstEdit);
+    lines.push(nudgeTurns.length === 0 ? "rail nudges · none" : "rail nudges · turns " + nudgeTurns.join(", "));
+    filesCreated.forEach(function (file) {
+      lines.push(escapeHtml(file.path.split("/").pop()) + " created · turn " + file.turn);
+    });
+    lines.push(finalTurn === null ? "final message · none" : "final message · turn " + finalTurn);
+
+    return '<div class="t-panel"><div class="kind" style="font-size:13px;">jump to</div><div style="line-height:1.7;">' + lines.join("<br>") + "</div></div>";
+  }
+
+  function renderTranscript(container, transcript) {
+    container.innerHTML =
+      '<div class="t-layout"><div class="t-turns">' + turnsHtml(transcript.turns) + '</div><div class="t-side">' +
+      tokensPanelHtml(transcript.turns) + toolsPanelHtml(transcript.turns) + jumpPanelHtml(transcript.turns) +
+      "</div></div>";
+  }
+
+  document.querySelectorAll("[data-toggle-thinking]").forEach(function (toggle) {
+    var shown = false;
+    toggle.addEventListener("click", function () {
+      shown = !shown;
+      toggle.classList.toggle("active", shown);
+      var block = toggle.closest(".transcript-block");
+      block.querySelectorAll(".t-thinking").forEach(function (el) { el.hidden = !shown; });
+    });
+  });
+
+  document.querySelectorAll("[data-open-transcript]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var id = button.getAttribute("data-open-transcript");
+      var block = button.closest(".transcript-block");
+      var viewer = block.querySelector(".transcript-viewer");
+      if (viewer.dataset.rendered !== "1") {
+        var island = document.querySelector('script[data-transcript="' + id + '"]');
+        var transcript = JSON.parse(island.textContent);
+        renderTranscript(viewer, transcript);
+        viewer.dataset.rendered = "1";
+      }
+      viewer.hidden = !viewer.hidden;
+      button.textContent = viewer.hidden ? "open transcript" : "close transcript";
+    });
+  });
+})();
+</script>`;
+
+interface TranscriptIsland {
+  id: string;
+  transcript: TranscriptView;
+}
+
+function collectTranscriptIslands(model: ReportViewModel): TranscriptIsland[] {
+  const islands: TranscriptIsland[] = [];
+  for (const detail of model.experimentDetails) {
+    for (const treatment of detail.treatments) {
+      for (const repetition of treatment.repetitions) {
+        const transcript = repetition.review?.transcript;
+        if (transcript !== undefined) islands.push({ id: repetition.review!.id, transcript });
+      }
+    }
+  }
+  return islands;
+}
+
+function renderTranscriptIslands(islands: TranscriptIsland[]): string {
+  return islands
+    .map((island) => `<script type="application/json" data-transcript="${escapeHtml(island.id)}">${escapeScriptClose(JSON.stringify(island.transcript))}</script>`)
+    .join("");
+}
+
 export function renderReportHtml(model: ReportViewModel): string {
   const seenStateKeys = new Set<string>();
 
@@ -525,6 +755,8 @@ ${renderUnclaimed(model.unclaimedRunFolders)}
 ${model.experimentDetails.map((detail) => renderExperimentDetail(detail, seenStateKeys)).join("")}
 ${FILTER_SCRIPT}
 ${REVIEW_SCRIPT}
+${TRANSCRIPT_SCRIPT}
+${renderTranscriptIslands(collectTranscriptIslands(model))}
 </body>
 </html>
 `;

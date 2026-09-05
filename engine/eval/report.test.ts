@@ -172,3 +172,43 @@ test("runReport loads an experiment's sourceRun even when no experiment claims i
     { status: 0, pageMentionsEarlierChangeText: true },
   );
 });
+
+test("a repetition's own transcript file on disk is embedded as a transcript island keyed by its repetition id", async () => {
+  const runsRoot = tempDir("report-transcript-present-");
+  const RUN = "run-with-a-transcript";
+
+  writeHandCraftedRun(
+    join(runsRoot, RUN),
+    [minimalJudgedRow({ transcriptPath: "transcripts/x.jsonl" })],
+    [minimalRawRow(1, { [ENTRY_FILE]: "function processBatch() { return 1; }\n" })],
+  );
+  mkdirSync(join(runsRoot, RUN, "transcripts"), { recursive: true });
+  writeFileSync(join(runsRoot, RUN, "transcripts", "x.jsonl"), `${JSON.stringify({ type: "turn_start" })}\n${JSON.stringify({ type: "tool_execution_start", toolCallId: "t", toolName: "bash", args: {} })}\n`);
+  writeFileSync(join(runsRoot, "experiments.json"), JSON.stringify([experimentClaiming(RUN)]));
+
+  const result = await runReport(reportOn(runsRoot));
+
+  assert.deepEqual(
+    { status: result.status, hasTranscriptIsland: readFileSync(join(runsRoot, "report.html"), "utf8").includes(`data-transcript="${RUN}/${CASE_ID}/${TREATMENT}/1"`) },
+    { status: 0, hasTranscriptIsland: true },
+  );
+});
+
+test("a repetition whose transcript file has gone missing from disk still renders the report, just without that island", async () => {
+  const runsRoot = tempDir("report-missing-transcript-");
+  const RUN = "run-with-a-missing-transcript";
+
+  writeHandCraftedRun(
+    join(runsRoot, RUN),
+    [minimalJudgedRow({ transcriptPath: "transcripts/gone.jsonl" })],
+    [minimalRawRow(1, { [ENTRY_FILE]: "function processBatch() { return 1; }\n" })],
+  );
+  writeFileSync(join(runsRoot, "experiments.json"), JSON.stringify([experimentClaiming(RUN)]));
+
+  const result = await runReport(reportOn(runsRoot));
+
+  assert.deepEqual(
+    { status: result.status, hasTranscriptIsland: readFileSync(join(runsRoot, "report.html"), "utf8").includes('<script type="application/json" data-transcript="') },
+    { status: 0, hasTranscriptIsland: false },
+  );
+});

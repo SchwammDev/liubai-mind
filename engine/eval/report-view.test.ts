@@ -44,6 +44,7 @@ function judgedRecord(caseId: string, treatmentId: string, repetition: number, o
     gamedReason: null,
     failedBehaviorChecks: [],
     ending: "final-text",
+    transcriptPath: null,
     ...over,
   };
 }
@@ -219,8 +220,9 @@ function experimentDetailFor(
   records: Record<string, RunRecordsForReport>,
   caseFactsByCaseId: Map<string, CaseFactsForReport> = new Map(),
   originalSourceByKey: Map<string, FileAtCommit> = new Map(),
+  sessionLogByKey: Map<string, string> = new Map(),
 ): ReturnType<typeof buildReportViewModel>["experimentDetails"][number] {
-  return buildReportViewModel([exp], runData(records), caseFactsByCaseId, [], originalSourceByKey).experimentDetails[0]!;
+  return buildReportViewModel([exp], runData(records), caseFactsByCaseId, [], originalSourceByKey, sessionLogByKey).experimentDetails[0]!;
 }
 
 test("a treatment's repetitions are ordered worst first for a single-task experiment", () => {
@@ -678,4 +680,53 @@ test("the original state says the source is unavailable rather than falling back
   const original = codeStateNamed(reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId, originalSourceByKey)), "original")!;
 
   assert.deepEqual({ available: original.available, mentionsUnavailable: original.text.includes("unavailable") }, { available: false, mentionsUnavailable: true });
+});
+
+function sessionLogWithOneBashCall(): string {
+  return `${JSON.stringify({ type: "turn_start" })}\n${JSON.stringify({ type: "tool_execution_start", toolCallId: "t", toolName: "bash", args: {} })}\n`;
+}
+
+test("a review carries the transcript built from its own repetition's session log", () => {
+  const records = {
+    "run-a": { judged: [judgedRecord("case-a", "t1", 1, { transcriptPath: "transcripts/x.jsonl" })], raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" } })] },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+  const sessionLogByKey = new Map([["run-a/case-a/t1/1", sessionLogWithOneBashCall()]]);
+
+  const review = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId, new Map(), sessionLogByKey));
+
+  assert.deepEqual(review.transcript?.turns[0]!.toolCalls, ["bash"]);
+});
+
+test("a review with no matching session log carries no transcript", () => {
+  const records = {
+    "run-a": { judged: [judgedRecord("case-a", "t1", 1, { transcriptPath: "transcripts/x.jsonl" })], raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" } })] },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+
+  const review = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId));
+
+  assert.equal(review.transcript, undefined);
+});
+
+test("a review's raw transcript link points at the run's own copy of the session log file", () => {
+  const records = {
+    "run-a": { judged: [judgedRecord("case-a", "t1", 1, { transcriptPath: "transcripts/x.jsonl" })], raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" } })] },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+
+  const review = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId));
+
+  assert.equal(review.rawTranscriptHref, "run-a/transcripts/x.jsonl");
+});
+
+test("a repetition with no recorded transcript path offers no raw transcript link", () => {
+  const records = {
+    "run-a": { judged: [judgedRecord("case-a", "t1", 1, { transcriptPath: null })], raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" } })] },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+
+  const review = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId));
+
+  assert.equal(review.rawTranscriptHref, undefined);
 });

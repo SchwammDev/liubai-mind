@@ -3,6 +3,8 @@ import type { GamedReason, Tier } from "./eval-contract.ts";
 import type { Ending, StartsFrom } from "./repetition-record.ts";
 import type { FileAtCommit } from "./provenance.ts";
 import type { RuleName } from "../contract.ts";
+import { buildTranscriptView } from "./session-log.ts";
+import type { TranscriptView } from "./session-log.ts";
 
 type NudgeFirings = Record<RuleName, { count: number; turns: number[] }>;
 
@@ -24,6 +26,7 @@ export interface JudgedRecordForReport {
   gamedReason: GamedReason | null;
   failedBehaviorChecks: { index: number; reason: string }[];
   ending: Ending;
+  transcriptPath: string | null;
 }
 
 export interface RawRowForReport {
@@ -72,6 +75,8 @@ export interface ReviewView {
   defaultBeforeName: CodeStateName;
   defaultAfterName: CodeStateName;
   reference?: ReferenceFixView;
+  transcript?: TranscriptView;
+  rawTranscriptHref?: string;
 }
 
 export interface ExperimentView {
@@ -269,6 +274,11 @@ interface RepetitionFacts {
   gamedReason: GamedReason | null;
   failedBehaviorChecks: { index: number; reason: string }[];
   ending: Ending;
+  transcriptPath: string | null;
+}
+
+function repetitionIdFor(facts: { run: string; caseId: string; treatmentId: string; repetition: number }): string {
+  return `${facts.run}/${facts.caseId}/${facts.treatmentId}/${facts.repetition}`;
 }
 
 function nudgeSummaryOf(nudges: NudgeFirings | null): { total: number | null; turns: number[] } {
@@ -306,6 +316,7 @@ function repetitionFactsFor(run: string, records: JudgedRecordForReport[]): Repe
       gamedReason: record.gamedReason,
       failedBehaviorChecks: record.failedBehaviorChecks,
       ending: record.ending,
+      transcriptPath: record.transcriptPath,
     };
   });
 }
@@ -450,11 +461,23 @@ function referenceFixFor(caseId: string, caseFacts: CaseFactsForReport): Referen
   return { dedupeKey: `reference\0${caseId}`, text };
 }
 
+function transcriptFieldsFor(facts: RepetitionFacts, sessionLogByKey: Map<string, string>): Pick<ReviewView, "transcript" | "rawTranscriptHref"> {
+  const log = sessionLogByKey.get(repetitionIdFor(facts));
+  const transcript = log === undefined ? undefined : buildTranscriptView(log);
+  const rawTranscriptHref = facts.transcriptPath === null ? undefined : `${facts.run}/${facts.transcriptPath}`;
+
+  return {
+    ...(transcript !== undefined ? { transcript } : {}),
+    ...(rawTranscriptHref !== undefined ? { rawTranscriptHref } : {}),
+  };
+}
+
 function reviewViewFor(
   facts: RepetitionFacts,
   caseFactsByCaseId: Map<string, CaseFactsForReport>,
   runData: Map<string, RunRecordsForReport>,
   originalSourceByKey: Map<string, FileAtCommit>,
+  sessionLogByKey: Map<string, string>,
 ): ReviewView | undefined {
   const caseFacts = caseFactsByCaseId.get(facts.caseId);
   if (caseFacts === undefined) return undefined;
@@ -468,7 +491,7 @@ function reviewViewFor(
   const defaultPair = defaultPairFor(facts.startsFrom);
 
   return {
-    id: `${facts.run}/${facts.caseId}/${facts.treatmentId}/${facts.repetition}`,
+    id: repetitionIdFor(facts),
     verdict: facts.verdict,
     whyThisVerdict: whyThisVerdictText(facts),
     entryFilename: caseFacts.entry,
@@ -476,6 +499,7 @@ function reviewViewFor(
     defaultBeforeName: defaultPair.before,
     defaultAfterName: defaultPair.after,
     ...(reference !== undefined ? { reference } : {}),
+    ...transcriptFieldsFor(facts, sessionLogByKey),
   };
 }
 
@@ -484,11 +508,12 @@ function repetitionViewOf(
   caseFactsByCaseId: Map<string, CaseFactsForReport>,
   runData: Map<string, RunRecordsForReport>,
   originalSourceByKey: Map<string, FileAtCommit>,
+  sessionLogByKey: Map<string, string>,
 ): RepetitionView {
-  const review = reviewViewFor(facts, caseFactsByCaseId, runData, originalSourceByKey);
+  const review = reviewViewFor(facts, caseFactsByCaseId, runData, originalSourceByKey, sessionLogByKey);
 
   return {
-    id: `${facts.run}/${facts.caseId}/${facts.treatmentId}/${facts.repetition}`,
+    id: repetitionIdFor(facts),
     caseId: facts.caseId,
     repetition: facts.repetition,
     verdict: facts.verdict,
@@ -538,6 +563,7 @@ function treatmentViewOf(
   caseFactsByCaseId: Map<string, CaseFactsForReport>,
   runData: Map<string, RunRecordsForReport>,
   originalSourceByKey: Map<string, FileAtCommit>,
+  sessionLogByKey: Map<string, string>,
 ): TreatmentView {
   return {
     treatmentId: treatment.treatmentId,
@@ -546,7 +572,7 @@ function treatmentViewOf(
     meanTurns: formatMean(meanOfDefined(facts.map((fact) => fact.turns))),
     meanTokensIn: formatMean(meanOfDefined(facts.map((fact) => fact.tokensIn))),
     meanNudgesPerRepetition: formatMean(meanOfDefined(facts.map((fact) => fact.nudgesTotal))),
-    repetitions: facts.map((fact) => repetitionViewOf(fact, caseFactsByCaseId, runData, originalSourceByKey)),
+    repetitions: facts.map((fact) => repetitionViewOf(fact, caseFactsByCaseId, runData, originalSourceByKey, sessionLogByKey)),
   };
 }
 
@@ -680,6 +706,7 @@ function experimentDetailFor(
   runData: Map<string, RunRecordsForReport>,
   caseFactsByCaseId: Map<string, CaseFactsForReport>,
   originalSourceByKey: Map<string, FileAtCommit>,
+  sessionLogByKey: Map<string, string>,
 ): ExperimentDetailView {
   const order = severityOrderFor(experiment.kind);
   const successVerdict = successVerdictFor(experiment.kind);
@@ -700,7 +727,7 @@ function experimentDetailFor(
     successVerdict,
     setupCheck: setupCheckFor(experiment, runData),
     treatments: treatmentsWithFacts.map(({ treatment, facts }) =>
-      treatmentViewOf(order, treatment, facts, caseFactsByCaseId, runData, originalSourceByKey),
+      treatmentViewOf(order, treatment, facts, caseFactsByCaseId, runData, originalSourceByKey, sessionLogByKey),
     ),
     perCase: perCaseRowsFor(
       order,
@@ -738,8 +765,11 @@ export function buildReportViewModel(
   caseFactsByCaseId: Map<string, CaseFactsForReport>,
   unclaimedRunFolders: string[],
   originalSourceByKey: Map<string, FileAtCommit> = new Map(),
+  sessionLogByKey: Map<string, string> = new Map(),
 ): ReportViewModel {
-  const experimentDetails = experiments.map((experiment) => experimentDetailFor(experiment, runData, caseFactsByCaseId, originalSourceByKey));
+  const experimentDetails = experiments.map((experiment) =>
+    experimentDetailFor(experiment, runData, caseFactsByCaseId, originalSourceByKey, sessionLogByKey),
+  );
   const identicalTreatmentsFlagById = new Map(experimentDetails.map((detail) => [detail.id, detail.setupCheck.identicalTreatments]));
 
   const milestones = groupByMilestone(experiments).map((group) => ({

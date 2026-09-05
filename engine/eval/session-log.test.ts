@@ -5,8 +5,18 @@ import { join } from "node:path";
 
 import { RULE } from "../contract.ts";
 import type { RuleName } from "../contract.ts";
-import { nudgeFiringsIn, toolCallCountsIn, firstEditTurnIn, retryCountIn, reasoningIsPresentIn } from "./session-log.ts";
-import { assistantSaid, assistantThought, nudgeFired, sessionLog, toolCall, turnStart } from "./run-doubles.ts";
+import { buildTranscriptView, nudgeFiringsIn, toolCallCountsIn, firstEditTurnIn, retryCountIn, reasoningIsPresentIn } from "./session-log.ts";
+import {
+  assistantMessage,
+  assistantSaid,
+  assistantThought,
+  nudgeFired,
+  sessionLog,
+  toolCall,
+  toolCallResult,
+  turnStart,
+  userSaid,
+} from "./run-doubles.ts";
 
 const COMMITTED_RUN_TRANSCRIPTS_DIR = join(import.meta.dirname, "runs", "numberless-prompt-v2-hard-flash", "transcripts");
 const GRID_ACCUMULATE_PROMPT_SESSION = "py-grid-accumulate.cc-delta-prompt.1.jsonl";
@@ -184,4 +194,104 @@ test("a real session that hits a mid-session rate-limit error and goes on to fin
   const log = realSessionLog(GRID_ACCUMULATE_SESSION_WITH_A_MIDWAY_RATE_LIMIT_ERROR);
 
   assert.equal(retryCountIn(log), 1);
+});
+
+test("each turn's transcript view lists the tool calls it made, in call order", () => {
+  const log = sessionLog([turnStart(), toolCall("read"), toolCall("bash")]);
+
+  const transcript = buildTranscriptView(log);
+
+  assert.deepEqual(transcript.turns[0]!.toolCalls, ["read", "bash"]);
+});
+
+test("a nudge fired during a turn's tool call is recorded on that turn, not the next one", () => {
+  const log = sessionLog([turnStart(), toolCall("edit"), nudgeFired(RULE.ccDelta), turnStart(), toolCall("bash")]);
+
+  const transcript = buildTranscriptView(log);
+
+  assert.deepEqual(
+    transcript.turns.map((turn) => turn.nudges),
+    [[RULE.ccDelta], []],
+  );
+});
+
+test("the user's opening message and the assistant's final text land on their own turn", () => {
+  const log = sessionLog([turnStart(), userSaid("fix the bug"), assistantMessage({ text: "done", stopReason: "stop" })]);
+
+  const transcript = buildTranscriptView(log);
+
+  assert.deepEqual(
+    { userText: transcript.turns[0]!.userText, assistantText: transcript.turns[0]!.assistantText, isFinal: transcript.turns[0]!.isFinal },
+    { userText: "fix the bug", assistantText: "done", isFinal: true },
+  );
+});
+
+test("per-turn input and output tokens come from that turn's own assistant message", () => {
+  const log = sessionLog([turnStart(), assistantMessage({ text: "looking", stopReason: "toolUse", tokensIn: 120, tokensOut: 40 })]);
+
+  const transcript = buildTranscriptView(log);
+
+  assert.deepEqual(
+    { tokensIn: transcript.turns[0]!.tokensIn, tokensOut: transcript.turns[0]!.tokensOut },
+    { tokensIn: 120, tokensOut: 40 },
+  );
+});
+
+test("an assistant message that errors marks its own turn as a retry failure", () => {
+  const log = sessionLog([turnStart(), assistantMessage({ stopReason: "error" })]);
+
+  const transcript = buildTranscriptView(log);
+
+  assert.equal(transcript.turns[0]!.isRetryFailure, true);
+});
+
+test("the transcript view carries reasoning-present the same way the aggregate fact does", () => {
+  const log = sessionLog([turnStart(), assistantThought("weighing the two shapes")]);
+
+  const transcript = buildTranscriptView(log);
+
+  assert.equal(transcript.reasoningPresent, true);
+});
+
+test("a tool result far longer than the display cap is truncated, but its true line count survives", () => {
+  const longResult = Array.from({ length: 500 }, (_, i) => `line ${i}`).join("\n");
+  const log = sessionLog([turnStart(), toolCall("bash"), toolCallResult("bash", longResult)]);
+
+  const transcript = buildTranscriptView(log);
+  const call = transcript.turns[0]!.toolCallDetails[0]!;
+
+  assert.deepEqual(
+    { truncated: call.resultTruncated, shorterThanOriginal: call.result!.length < longResult.length, trueLineCount: call.resultLineCount },
+    { truncated: true, shorterThanOriginal: true, trueLineCount: 500 },
+  );
+});
+
+test("an edit call's diff is captured for display", () => {
+  const log = sessionLog([turnStart(), toolCall("edit"), toolCallResult("edit", "Successfully replaced 1 block(s).", { diff: "-old\n+new" })]);
+
+  const transcript = buildTranscriptView(log);
+
+  assert.equal(transcript.turns[0]!.toolCallDetails[0]!.diff, "-old\n+new");
+});
+
+test("a failing tool call is marked as an error on its own call detail", () => {
+  const log = sessionLog([turnStart(), toolCall("bash"), toolCallResult("bash", "not found", { isError: true })]);
+
+  const transcript = buildTranscriptView(log);
+
+  assert.equal(transcript.turns[0]!.toolCallDetails[0]!.isError, true);
+});
+
+test("an empty log yields a transcript view with no turns and no reasoning present", () => {
+  assert.deepEqual(buildTranscriptView(""), { turns: [], reasoningPresent: false });
+});
+
+test("a real session's transcript view accounts for every tool call the tallies already know about", () => {
+  const log = realSessionLog(GRID_ACCUMULATE_PROMPT_SESSION);
+
+  const transcript = buildTranscriptView(log);
+  const totalToolCallsInTranscript = transcript.turns.reduce((sum, turn) => sum + turn.toolCalls.length, 0);
+  const totalToolCallsTallied = Object.values(toolCallCountsIn(log)).reduce((a, b) => a + b, 0);
+
+  assert.equal(totalToolCallsInTranscript, totalToolCallsTallied);
 });
