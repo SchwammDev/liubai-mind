@@ -18,7 +18,7 @@ const TREATMENT_ID = "cc-delta-numberless-prompt";
 const CASE_ID = "ts-flag-parser";
 
 const CASE_TASK = caseTask();
-const ARM_MESSAGE = armMessage();
+const TREATMENT_MESSAGE = treatmentMessage();
 
 interface CaseFacts {
   task: string;
@@ -34,7 +34,7 @@ function caseTask(): string {
   return caseFacts().task;
 }
 
-function armMessage(): string {
+function treatmentMessage(): string {
   const pack = JSON.parse(readFileSync(join(TREATMENTS_DIR, "packs", "cc-delta-numberless.json"), "utf8")) as { CC_DELTA_NUDGE: string };
   const facts = caseFacts();
   return formatCcDeltaNudge(pack.CC_DELTA_NUDGE, {
@@ -73,7 +73,7 @@ function recordingPiSpawner(): { spawner: PiSpawner; calls: RunSpec[] } {
   return { spawner, calls };
 }
 
-async function collectPromptCarriedArm(spawner: PiSpawner, repetitions: number): Promise<{ result: CollectResult; runDir: string }> {
+async function collectPromptCarriedTreatment(spawner: PiSpawner, repetitions: number): Promise<{ result: CollectResult; runDir: string }> {
   const opts = collectOpts({ spawner, repetitions });
   const result = await runCollect(opts);
   return { result, runDir: opts.runDir };
@@ -83,7 +83,7 @@ async function scoreRun(runDir: string): Promise<{ status: number; stdout: strin
   return runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir: TREATMENTS_DIR });
 }
 
-function stripTheArmMessageFromTheRecordedPrompt(runDir: string): void {
+function stripTheTreatmentMessageFromTheRecordedPrompt(runDir: string): void {
   const rawPath = join(runDir, "raw.jsonl");
   const rows = readFileSync(rawPath, "utf8").split("\n").filter((line) => line.length > 0);
   const tampered = rows.map((line) => {
@@ -98,11 +98,11 @@ function assertCollectSucceeded(result: CollectResult, repetitions: number): voi
   assert.equal(result.rowsWritten, repetitions);
 }
 
-function assertEveryRepetitionOpensWithTheCaseTaskAndTheArmMessage(calls: RunSpec[], repetitions: number): void {
+function assertEveryRepetitionOpensWithTheCaseTaskAndTheTreatmentMessage(calls: RunSpec[], repetitions: number): void {
   assert.equal(calls.length, repetitions);
   for (const spec of calls) {
     assert.ok(spec.task.includes(CASE_TASK), "opening prompt lost the case task");
-    assert.ok(spec.task.includes(ARM_MESSAGE), "opening prompt does not carry the arm message");
+    assert.ok(spec.task.includes(TREATMENT_MESSAGE), "opening prompt does not carry the treatment message");
   }
 }
 
@@ -124,7 +124,7 @@ function assertScoreRefuses(scored: { status: number; stdout: string }, violatio
   assert.match(scored.stdout, new RegExp(`\\[${violationKind}\\]`));
 }
 
-function assertArmSummaryRowPresent(stdout: string, treatmentId: string): void {
+function assertTreatmentSummaryRowPresent(stdout: string, treatmentId: string): void {
   assert.match(stdout, new RegExp(`\\| ${treatmentId} \\|`));
 }
 
@@ -136,28 +136,28 @@ function assertNoSummaryWritten(runDir: string): void {
   assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
 }
 
-test("a_prompt_carried_arm_opens_every_repetition_with_the_arm_message_and_scores_as_verified", async () => {
+test("a_prompt_carried_treatment_opens_every_repetition_with_the_treatment_message_and_scores_as_verified", async () => {
   const { spawner, calls } = recordingPiSpawner();
 
-  const { result, runDir } = await collectPromptCarriedArm(spawner, 2);
+  const { result, runDir } = await collectPromptCarriedTreatment(spawner, 2);
 
   assertCollectSucceeded(result, 2);
-  assertEveryRepetitionOpensWithTheCaseTaskAndTheArmMessage(calls, 2);
+  assertEveryRepetitionOpensWithTheCaseTaskAndTheTreatmentMessage(calls, 2);
   assertTheLiveRailIsClosedForEveryRepetition(calls);
 
   const scored = await scoreRun(runDir);
 
   assertScoreVerifiesPromptDelivery(scored);
   assertSummaryWritten(runDir);
-  assertArmSummaryRowPresent(scored.stdout, TREATMENT_ID);
+  assertTreatmentSummaryRowPresent(scored.stdout, TREATMENT_ID);
 });
 
-test("a_run_whose_recorded_prompt_lacks_the_arm_message_is_refused_by_score", async () => {
+test("a_run_whose_recorded_prompt_lacks_the_treatment_message_is_refused_by_score", async () => {
   const { spawner } = recordingPiSpawner();
-  const { result, runDir } = await collectPromptCarriedArm(spawner, 1);
+  const { result, runDir } = await collectPromptCarriedTreatment(spawner, 1);
   assertCollectSucceeded(result, 1);
 
-  stripTheArmMessageFromTheRecordedPrompt(runDir);
+  stripTheTreatmentMessageFromTheRecordedPrompt(runDir);
   const scored = await scoreRun(runDir);
 
   assertScoreRefuses(scored, "prompt-not-carried");

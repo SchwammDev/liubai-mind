@@ -1396,7 +1396,7 @@ test("runScore_warns_and_scores_normally_when_no_row_in_the_run_carries_a_delive
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });
 
-test("runScore_refuses_an_arm_whose_delivered_live_rules_never_fired", async () => {
+test("runScore_refuses_a_treatment_whose_delivered_live_rules_never_fired", async () => {
   const treatmentId = "live-silent";
   const treatmentsDir = writeTreatmentsDir({ [treatmentId]: {} });
   const row = rawRow(treatmentId, "case-a", { delivered: deliveredStamp({ liveRules: ["cc"] }), nudges: nudges() });
@@ -1411,7 +1411,7 @@ test("runScore_refuses_an_arm_whose_delivered_live_rules_never_fired", async () 
   assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
 });
 
-test("runScore_treats_a_silent_arm_as_valid_when_its_treatment_declares_expectedZeroNudges", async () => {
+test("runScore_treats_a_silent_treatment_as_valid_when_it_declares_expectedZeroNudges", async () => {
   const treatmentId = "rails-off-expected";
   const treatmentsDir = writeTreatmentsDir({ [treatmentId]: { expectedZeroNudges: true } });
   const packHash = "a".repeat(64);
@@ -1433,7 +1433,7 @@ test("runScore_treats_a_silent_arm_as_valid_when_its_treatment_declares_expected
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });
 
-test("runScore_refuses_an_arm_whose_delivered_shadow_rules_never_fired", async () => {
+test("runScore_refuses_a_treatment_whose_delivered_shadow_rules_never_fired", async () => {
   const treatmentId = "shadow-silent";
   const treatmentsDir = writeTreatmentsDir({ [treatmentId]: {} });
   const row = rawRow(treatmentId, "case-a", { delivered: deliveredStamp({ shadowRules: ["cc"] }), shadowNudges: nudges() });
@@ -1474,12 +1474,12 @@ test("runScore_writes_a_summary_and_prints_a_validity_block_for_a_fully_delivere
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });
 
-const PROMPT_ARM_MESSAGE = "collapse the tangle back into a dispatch a reader can see in one place.";
+const PROMPT_TREATMENT_MESSAGE = "collapse the tangle back into a dispatch a reader can see in one place.";
 
 function writePromptTreatmentsDir(promptTreatmentId: string, railTreatmentIds: string[] = []): string {
   const dir = mkdtempSync(join(tmpdir(), "eval-score-treatments-"));
   mkdirSync(join(dir, "packs"), { recursive: true });
-  writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_ARM_MESSAGE }));
+  writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_TREATMENT_MESSAGE }));
   writeFileSync(
     join(dir, `${promptTreatmentId}.json`),
     JSON.stringify({ id: promptTreatmentId, env: { LIUBAI_RAILS_OFF: "1" }, delivery: "prompt", phrasingPack: "packs/pack.json" }),
@@ -1491,10 +1491,10 @@ function writePromptTreatmentsDir(promptTreatmentId: string, railTreatmentIds: s
 }
 
 function promptCarriedTask(): string {
-  return `Improve parse_flags.ts. Keep the public function signature and behavior unchanged.\n\n${PROMPT_ARM_MESSAGE}`;
+  return `Improve parse_flags.ts. Keep the public function signature and behavior unchanged.\n\n${PROMPT_TREATMENT_MESSAGE}`;
 }
 
-test("runScore_scores_a_prompt_carried_arm_as_verified_with_no_stamp_or_nudge_checks", async () => {
+test("runScore_scores_a_prompt_carried_treatment_as_verified_with_no_stamp_or_nudge_checks", async () => {
   const treatmentId = "cc-delta-prompt";
   const treatmentsDir = writePromptTreatmentsDir(treatmentId);
   const row = tsFlagParserRow({}, { treatmentId, task: promptCarriedTask() });
@@ -1509,7 +1509,7 @@ test("runScore_scores_a_prompt_carried_arm_as_verified_with_no_stamp_or_nudge_ch
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });
 
-test("runScore_refuses_a_prompt_carried_row_whose_recorded_task_does_not_carry_the_arm_message", async () => {
+test("runScore_refuses_a_prompt_carried_row_whose_recorded_task_does_not_carry_the_treatment_message", async () => {
   const treatmentId = "cc-delta-prompt";
   const treatmentsDir = writePromptTreatmentsDir(treatmentId);
   const row = tsFlagParserRow({}, { treatmentId, task: "Improve parse_flags.ts. Keep the public function signature and behavior unchanged." });
@@ -1538,7 +1538,7 @@ test("runScore_refuses_a_prompt_carried_row_with_no_recorded_task", async () => 
   assert.equal(existsSync(join(runDir, "summary.jsonl")), false);
 });
 
-test("runScore_scores_a_mixed_run_applying_each_arms_own_delivery_checks", async () => {
+test("runScore_scores_a_mixed_run_applying_each_treatments_own_delivery_checks", async () => {
   const promptTreatmentId = "cc-delta-prompt";
   const railTreatmentId = "rails-verified-mixed";
   const treatmentsDir = writePromptTreatmentsDir(promptTreatmentId, [railTreatmentId]);
@@ -1565,7 +1565,7 @@ test("runScore_scores_a_mixed_run_applying_each_arms_own_delivery_checks", async
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });
 
-test("runScore_exempts_a_prompt_carried_arm_from_the_live_rules_nudge_floor", async () => {
+test("runScore_exempts_a_prompt_carried_treatment_from_the_live_rules_nudge_floor", async () => {
   const treatmentId = "cc-delta-prompt";
   const treatmentsDir = writePromptTreatmentsDir(treatmentId);
   const row = tsFlagParserRow(
@@ -1582,13 +1582,13 @@ test("runScore_exempts_a_prompt_carried_arm_from_the_live_rules_nudge_floor", as
   assert.ok(existsSync(join(runDir, "summary.jsonl")));
 });
 
-const PROMPT_ARM_TEMPLATE_WITH_PLACEHOLDERS = "{name} still carries {dpBefore} decision points, unchanged from {dpAfter}.";
-const PROMPT_ARM_FORMATTED_MESSAGE = "parseFlags still carries 24 decision points, unchanged from 24.";
+const PROMPT_TREATMENT_TEMPLATE_WITH_PLACEHOLDERS = "{name} still carries {dpBefore} decision points, unchanged from {dpAfter}.";
+const PROMPT_TREATMENT_FORMATTED_MESSAGE = "parseFlags still carries 24 decision points, unchanged from 24.";
 
 function writePlaceholderPromptTreatmentsDir(promptTreatmentId: string): string {
   const dir = mkdtempSync(join(tmpdir(), "eval-score-treatments-"));
   mkdirSync(join(dir, "packs"), { recursive: true });
-  writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_ARM_TEMPLATE_WITH_PLACEHOLDERS }));
+  writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_TREATMENT_TEMPLATE_WITH_PLACEHOLDERS }));
   writeFileSync(
     join(dir, `${promptTreatmentId}.json`),
     JSON.stringify({ id: promptTreatmentId, env: { LIUBAI_RAILS_OFF: "1" }, delivery: "prompt", phrasingPack: "packs/pack.json" }),
@@ -1599,7 +1599,7 @@ function writePlaceholderPromptTreatmentsDir(promptTreatmentId: string): string 
 test("runScore_verifies_a_prompt_carried_row_whose_task_carries_the_placeholders_filled_with_the_cases_own_facts", async () => {
   const treatmentId = "cc-delta-prompt-placeholders";
   const treatmentsDir = writePlaceholderPromptTreatmentsDir(treatmentId);
-  const task = `Improve parse_flags.ts. Keep the public function signature and behavior unchanged.\n\n${PROMPT_ARM_FORMATTED_MESSAGE}`;
+  const task = `Improve parse_flags.ts. Keep the public function signature and behavior unchanged.\n\n${PROMPT_TREATMENT_FORMATTED_MESSAGE}`;
   const row = tsFlagParserRow({}, { treatmentId, task });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
@@ -1613,7 +1613,7 @@ test("runScore_verifies_a_prompt_carried_row_whose_task_carries_the_placeholders
 test("runScore_refuses_a_prompt_carried_row_whose_task_still_carries_the_unfilled_placeholder_template", async () => {
   const treatmentId = "cc-delta-prompt-placeholders";
   const treatmentsDir = writePlaceholderPromptTreatmentsDir(treatmentId);
-  const task = `Improve parse_flags.ts. Keep the public function signature and behavior unchanged.\n\n${PROMPT_ARM_TEMPLATE_WITH_PLACEHOLDERS}`;
+  const task = `Improve parse_flags.ts. Keep the public function signature and behavior unchanged.\n\n${PROMPT_TREATMENT_TEMPLATE_WITH_PLACEHOLDERS}`;
   const row = tsFlagParserRow({}, { treatmentId, task });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);

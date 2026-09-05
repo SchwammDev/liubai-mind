@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { promptCarriedArmMessage } from "./prompt-carried-message.ts";
+import { promptCarriedTreatmentMessage } from "./prompt-carried-message.ts";
 import type { CaseManifest } from "./eval-contract.ts";
 
 const PLACEHOLDER_TEMPLATE = "{name} carries {dpBefore} decision points before and {dpAfter} after.";
@@ -20,24 +20,24 @@ function caseManifestFixture(entrySymbol: string, decisionPoints: number): CaseM
   };
 }
 
-test("promptCarriedArmMessage_fills_the_pack_templates_placeholders_with_the_cases_entry_symbol_and_decision_points", () => {
+test("promptCarriedTreatmentMessage_fills_the_pack_templates_placeholders_with_the_cases_entry_symbol_and_decision_points", () => {
   const kase = caseManifestFixture("parseFlags", 24);
   const packContent = JSON.stringify({ CC_DELTA_NUDGE: PLACEHOLDER_TEMPLATE });
 
-  const message = promptCarriedArmMessage(kase, packContent);
+  const message = promptCarriedTreatmentMessage(kase, packContent);
 
   assert.equal(message, "parseFlags carries 24 decision points before and 24 after.");
 });
 
-test("promptCarriedArmMessage_throws_instead_of_rendering_the_stock_template_when_the_pack_content_is_syntactically_invalid", () => {
+test("promptCarriedTreatmentMessage_throws_instead_of_rendering_the_stock_template_when_the_pack_content_is_syntactically_invalid", () => {
   const kase = caseManifestFixture("parseFlags", 24);
 
-  assert.throws(() => promptCarriedArmMessage(kase, "{ not json"));
+  assert.throws(() => promptCarriedTreatmentMessage(kase, "{ not json"));
 });
 
-test("promptCarriedArmMessage_throws_instead_of_rendering_the_stock_template_when_the_pack_content_is_semantically_invalid", () => {
+test("promptCarriedTreatmentMessage_throws_instead_of_rendering_the_stock_template_when_the_pack_content_is_semantically_invalid", () => {
   const kase = caseManifestFixture("parseFlags", 24);
   const packContent = JSON.stringify({ CC_DELTA_NUDGE: 42 });
 
-  assert.throws(() => promptCarriedArmMessage(kase, packContent));
+  assert.throws(() => promptCarriedTreatmentMessage(kase, packContent));
 });

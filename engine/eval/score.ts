@@ -9,7 +9,7 @@ import { decisionPoints, classifyVerdict } from "./judge.ts";
 import { countSilentHandlers } from "./silent-handlers.ts";
 import { loadCases, declaredFiles } from "./corpus.ts";
 import { loadTreatments } from "./treatments.ts";
-import { promptCarriedArmMessage } from "./prompt-carried-message.ts";
+import { promptCarriedTreatmentMessage } from "./prompt-carried-message.ts";
 import { runBehaviorChecks } from "./behavior-checks.ts";
 import { scanReferences } from "./references.ts";
 import { sourceParses } from "./parse-check.ts";
@@ -732,7 +732,7 @@ export interface DeliveryViolation {
   message: string;
 }
 
-export interface ArmDeliverySummary {
+export interface TreatmentDeliverySummary {
   treatmentId: string;
   repetitions: number;
   liveNudges: number;
@@ -743,7 +743,7 @@ export interface ArmDeliverySummary {
 export type DeliveryValidity =
   | { kind: "unstamped"; warning: string }
   | { kind: "invalid"; violations: DeliveryViolation[] }
-  | { kind: "valid"; arms: ArmDeliverySummary[] };
+  | { kind: "valid"; treatments: TreatmentDeliverySummary[] };
 
 const UNSTAMPED_DELIVERY_WARNING =
   "score: no row in this run carries a delivery stamp; delivery validity is unverifiable (the run predates stamping) — scoring proceeds without delivery checks";
@@ -790,7 +790,7 @@ function expectedPromptMessage(treatmentsDir: string, treatment: TreatmentManife
   if (packContent === undefined) {
     throw new Error(`treatment ${treatment.id}: delivery "prompt" carries no phrasing pack — treatments.ts validation should have rejected this at load time`);
   }
-  return promptCarriedArmMessage(kase, packContent);
+  return promptCarriedTreatmentMessage(kase, packContent);
 }
 
 function promptNotCarriedViolation(row: RawRow, message: string): DeliveryViolation {
@@ -819,21 +819,21 @@ function promptCarriedViolations(
     if (row.task !== undefined && row.task.includes(expected)) continue;
 
     violations.push(
-      promptNotCarriedViolation(row, `${rowLabel(row)}: opening prompt does not carry the arm's message — delivery: "prompt" requires the arm's phrasing inside the sent task`),
+      promptNotCarriedViolation(row, `${rowLabel(row)}: opening prompt does not carry the treatment's message — delivery: "prompt" requires the treatment's phrasing inside the sent task`),
     );
   }
 
   return violations;
 }
 
-function armRowsByTreatment(rows: RawRow[]): Map<string, RawRow[]> {
-  const arms = new Map<string, RawRow[]>();
+function rowsByTreatment(rows: RawRow[]): Map<string, RawRow[]> {
+  const groups = new Map<string, RawRow[]>();
   for (const row of rows) {
-    const armRows = arms.get(row.treatmentId);
-    if (armRows === undefined) arms.set(row.treatmentId, [row]);
-    else armRows.push(row);
+    const treatmentRows = groups.get(row.treatmentId);
+    if (treatmentRows === undefined) groups.set(row.treatmentId, [row]);
+    else treatmentRows.push(row);
   }
-  return arms;
+  return groups;
 }
 
 function unionDeliveredRules(rows: RawRow[], pick: (delivered: NonNullable<RawRow["delivered"]>) => string[]): string[] {
@@ -865,31 +865,31 @@ function nudgeFloorViolation(
   return { kind, treatmentId, message: `${treatmentId}: ${label} rules ${rules.join(", ")} were delivered but never fired across ${repetitions} rows` };
 }
 
-function nudgeFloorViolations(treatmentId: string, armRows: RawRow[], manifest: TreatmentManifest | undefined): DeliveryViolation[] {
+function nudgeFloorViolations(treatmentId: string, treatmentRows: RawRow[], manifest: TreatmentManifest | undefined): DeliveryViolation[] {
   if (manifest?.expectedZeroNudges === true) return [];
   if (manifest?.delivery === "prompt") return [];
 
   const violations: DeliveryViolation[] = [];
 
-  const liveRules = unionDeliveredRules(armRows, (d) => d.liveRules);
-  if (liveRules.length > 0 && sumNudges(armRows, (row) => row.nudges) === 0) {
-    violations.push(nudgeFloorViolation("live-rules-silent", treatmentId, liveRules, armRows.length));
+  const liveRules = unionDeliveredRules(treatmentRows, (d) => d.liveRules);
+  if (liveRules.length > 0 && sumNudges(treatmentRows, (row) => row.nudges) === 0) {
+    violations.push(nudgeFloorViolation("live-rules-silent", treatmentId, liveRules, treatmentRows.length));
   }
 
-  const shadowRules = unionDeliveredRules(armRows, (d) => d.shadowRules);
-  if (shadowRules.length > 0 && sumNudges(armRows, (row) => row.shadowNudges) === 0) {
-    violations.push(nudgeFloorViolation("shadow-rules-silent", treatmentId, shadowRules, armRows.length));
+  const shadowRules = unionDeliveredRules(treatmentRows, (d) => d.shadowRules);
+  if (shadowRules.length > 0 && sumNudges(treatmentRows, (row) => row.shadowNudges) === 0) {
+    violations.push(nudgeFloorViolation("shadow-rules-silent", treatmentId, shadowRules, treatmentRows.length));
   }
 
   return violations;
 }
 
-function armSummaryFor(treatmentId: string, armRows: RawRow[], manifest: TreatmentManifest | undefined): ArmDeliverySummary {
+function treatmentSummaryFor(treatmentId: string, treatmentRows: RawRow[], manifest: TreatmentManifest | undefined): TreatmentDeliverySummary {
   return {
     treatmentId,
-    repetitions: armRows.length,
-    liveNudges: sumNudges(armRows, (row) => row.nudges),
-    shadowNudges: sumNudges(armRows, (row) => row.shadowNudges),
+    repetitions: treatmentRows.length,
+    liveNudges: sumNudges(treatmentRows, (row) => row.nudges),
+    shadowNudges: sumNudges(treatmentRows, (row) => row.shadowNudges),
     promptCarried: manifest?.delivery === "prompt",
   };
 }
@@ -901,20 +901,20 @@ function checkDeliveryValidity(
   caseById: Map<string, CaseManifest>,
 ): DeliveryValidity {
   const treatmentById = new Map(treatments.map((c) => [c.id, c]));
-  const arms = [...armRowsByTreatment(rows)];
+  const treatmentRowGroups = [...rowsByTreatment(rows)];
 
   const violations = [
     ...notDeliveredViolations(rows),
     ...missingStampViolations(rows, treatmentById),
     ...promptCarriedViolations(rows, treatmentById, treatmentsDir, caseById),
-    ...arms.flatMap(([treatmentId, armRows]) => nudgeFloorViolations(treatmentId, armRows, treatmentById.get(treatmentId))),
+    ...treatmentRowGroups.flatMap(([treatmentId, treatmentRows]) => nudgeFloorViolations(treatmentId, treatmentRows, treatmentById.get(treatmentId))),
   ];
   if (violations.length > 0) return { kind: "invalid", violations };
 
-  const armSummaries = arms
-    .map(([treatmentId, armRows]) => armSummaryFor(treatmentId, armRows, treatmentById.get(treatmentId)))
+  const treatmentSummaries = treatmentRowGroups
+    .map(([treatmentId, treatmentRows]) => treatmentSummaryFor(treatmentId, treatmentRows, treatmentById.get(treatmentId)))
     .sort((a, b) => a.treatmentId.localeCompare(b.treatmentId));
-  return { kind: "valid", arms: armSummaries };
+  return { kind: "valid", treatments: treatmentSummaries };
 }
 
 function resolveDeliveryValidity(rows: RawRow[], treatmentsDir: string, corpusDir: string): { result: DeliveryValidity } | { error: string } {
@@ -938,8 +938,8 @@ function formatDeliveryViolations(violations: DeliveryViolation[]): string {
   return violations.map((v) => `score: delivery violation [${v.kind}] ${v.message}`).join("\n");
 }
 
-function formatDeliveryValidityBlock(arms: ArmDeliverySummary[]): string {
-  const lines = arms.map(
+function formatDeliveryValidityBlock(treatments: TreatmentDeliverySummary[]): string {
+  const lines = treatments.map(
     (a) => `  ${a.treatmentId}: repetitions=${a.repetitions} liveNudges=${a.liveNudges} shadowNudges=${a.shadowNudges} delivered=${a.promptCarried ? "prompt" : "ok"}`,
   );
   return [...lines, ""].join("\n");
@@ -947,7 +947,7 @@ function formatDeliveryValidityBlock(arms: ArmDeliverySummary[]): string {
 
 function deliveryStdoutPrefix(validity: Exclude<DeliveryValidity, { kind: "invalid" }>): string {
   if (validity.kind === "unstamped") return `${validity.warning}\n\n`;
-  return `delivery validity:\n${formatDeliveryValidityBlock(validity.arms)}\n`;
+  return `delivery validity:\n${formatDeliveryValidityBlock(validity.treatments)}\n`;
 }
 
 export async function runScore(opts: {
