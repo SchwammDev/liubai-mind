@@ -43,6 +43,32 @@ export function assistantThought(thinking: string): string {
   return JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking }] } });
 }
 
+export function userSaid(text: string): string {
+  return JSON.stringify({ type: "message_end", message: { role: "user", content: [{ type: "text", text }] } });
+}
+
+export function assistantMessage(over: { text?: string; thinking?: string; stopReason?: string; tokensIn?: number; tokensOut?: number } = {}): string {
+  const content: Record<string, unknown>[] = [];
+  if (over.text !== undefined) content.push({ type: "text", text: over.text });
+  if (over.thinking !== undefined) content.push({ type: "thinking", thinking: over.thinking });
+
+  return JSON.stringify({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content,
+      stopReason: over.stopReason ?? "stop",
+      usage: { input: over.tokensIn ?? 0, output: over.tokensOut ?? 0 },
+    },
+  });
+}
+
+export function toolCallResult(toolName: string, text: string, over: { isError?: boolean; diff?: string } = {}): string {
+  const result: Record<string, unknown> = { content: [{ type: "text", text }] };
+  if (over.diff !== undefined) result.details = { diff: over.diff };
+  return JSON.stringify({ type: "tool_execution_end", toolCallId: "t", toolName, result, isError: over.isError ?? false });
+}
+
 export function sessionLog(lines: string[]): string {
   return `${lines.join("\n")}\n`;
 }

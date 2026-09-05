@@ -12,6 +12,7 @@ import type {
   ReviewView,
   TreatmentView,
 } from "./report-view.ts";
+import type { TranscriptTurnView, TranscriptView } from "./session-log.ts";
 
 function viewModel(over: Partial<ReportViewModel>): ReportViewModel {
   return { milestones: [], unclaimedRunFolders: [], experimentDetails: [], ...over };
@@ -265,4 +266,133 @@ test("the note box renders disabled, since wiring it to serve mode is a later sl
   const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
 
   assert.equal(/<textarea[^>]*\bdisabled\b/.test(html), true);
+});
+
+function transcriptTurn(over: Partial<TranscriptTurnView> = {}): TranscriptTurnView {
+  return {
+    number: 1,
+    userText: null,
+    assistantText: null,
+    thinking: null,
+    isFinal: false,
+    isRetryFailure: false,
+    toolCalls: [],
+    toolCallDetails: [],
+    nudges: [],
+    tokensIn: null,
+    tokensOut: null,
+    ...over,
+  };
+}
+
+function transcript(over: Partial<TranscriptView> = {}): TranscriptView {
+  return { turns: [transcriptTurn()], reasoningPresent: false, ...over };
+}
+
+function pageWithOneReviewCarrying(over: Partial<ReviewView>): string {
+  const detail = experimentDetailView({ treatments: [treatmentView({ repetitions: [repetitionView({ review: review(over) })] })] });
+  return renderReportHtml(viewModel({ experimentDetails: [detail] }));
+}
+
+function bodyOnly(page: string): string {
+  return page.slice(0, page.indexOf("<script>"));
+}
+
+function transcriptIslandJson(page: string, id: string): unknown {
+  const opening = page.indexOf(`data-transcript="${id}"`);
+  assert.notEqual(opening, -1, `the page carries no data-transcript for ${id}`);
+  const start = page.indexOf(`data-transcript="`, opening);
+  const next = page.indexOf(`data-transcript="`, start + 1);
+  const island = page.slice(start, next === -1 ? page.length : next);
+  return JSON.parse(island.slice(island.indexOf(">") + 1, island.lastIndexOf("</script>")));
+}
+
+test("a review with a transcript offers an open-transcript control and a raw transcript file link", () => {
+  const html = bodyOnly(pageWithOneReviewCarrying({ transcript: transcript(), rawTranscriptHref: "run-a/transcripts/x.jsonl" }));
+
+  assert.deepEqual(
+    { hasOpenControl: html.includes("open transcript"), hasRawLink: html.includes('href="run-a/transcripts/x.jsonl"') },
+    { hasOpenControl: true, hasRawLink: true },
+  );
+});
+
+test("a review's transcript island parses back into the same turns it was given", () => {
+  const html = pageWithOneReviewCarrying({
+    id: "run-a/case-a/t1/1",
+    transcript: transcript({ turns: [transcriptTurn({ number: 1, toolCalls: ["bash"] }), transcriptTurn({ number: 2, toolCalls: ["edit"], nudges: ["cc-delta"] })] }),
+  });
+
+  const parsed = transcriptIslandJson(html, "run-a/case-a/t1/1") as TranscriptView;
+
+  assert.deepEqual(
+    parsed.turns.map((turn) => turn.toolCalls),
+    [["bash"], ["edit"]],
+  );
+});
+
+test("the last of several transcript islands on the page still parses cleanly, even with global scripts on the page", () => {
+  const detail = experimentDetailView({
+    treatments: [
+      treatmentView({
+        repetitions: [
+          repetitionView({ id: "run-a/case-a/t1/1", review: review({ id: "run-a/case-a/t1/1", transcript: transcript({ turns: [transcriptTurn({ toolCalls: ["read"] })] }) }) }),
+          repetitionView({
+            id: "run-a/case-a/t1/2",
+            repetition: 2,
+            review: review({ id: "run-a/case-a/t1/2", transcript: transcript({ turns: [transcriptTurn({ toolCalls: ["write"] })] }) }),
+          }),
+        ],
+      }),
+    ],
+  });
+
+  const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
+  const last = transcriptIslandJson(html, "run-a/case-a/t1/2") as TranscriptView;
+
+  assert.deepEqual(last.turns[0]!.toolCalls, ["write"]);
+});
+
+test("a review with no transcript offers no open-transcript control, but still names the reason", () => {
+  const html = bodyOnly(pageWithOneReviewCarrying({}));
+
+  assert.deepEqual(
+    { hasOpenControl: html.includes("open transcript"), mentionsNoTranscript: html.includes("no transcript recorded") },
+    { hasOpenControl: false, mentionsNoTranscript: true },
+  );
+});
+
+test("a review whose transcript file could not be read still offers the raw link, with a note instead of the viewer", () => {
+  const html = bodyOnly(pageWithOneReviewCarrying({ rawTranscriptHref: "run-a/transcripts/x.jsonl" }));
+
+  assert.deepEqual(
+    { hasOpenControl: html.includes("open transcript"), hasRawLink: html.includes('href="run-a/transcripts/x.jsonl"') },
+    { hasOpenControl: false, hasRawLink: true },
+  );
+});
+
+test("the thinking toggle is disabled and says not recorded when the transcript carries no reasoning", () => {
+  const html = pageWithOneReviewCarrying({ transcript: transcript({ reasoningPresent: false }) });
+
+  assert.deepEqual(
+    { toggleDisabled: /<button[^>]*disabled[^>]*>\s*thinking/.test(html), saysNotRecorded: html.includes("not recorded") },
+    { toggleDisabled: true, saysNotRecorded: true },
+  );
+});
+
+test("the thinking toggle is enabled when the transcript carries reasoning", () => {
+  const html = pageWithOneReviewCarrying({ transcript: transcript({ reasoningPresent: true }) });
+
+  const toggleIsEnabled = /<button[^>]*data-toggle-thinking[^>]*>/.test(html) && !/<button[^>]*data-toggle-thinking[^>]*disabled/.test(html);
+
+  assert.equal(toggleIsEnabled, true);
+});
+
+test("the transcript area tells a no-JavaScript reader it needs JavaScript, without hiding the raw-file link", () => {
+  const html = pageWithOneReviewCarrying({ transcript: transcript(), rawTranscriptHref: "run-a/transcripts/x.jsonl" });
+  const noscriptMatch = /<noscript>([\s\S]*?)<\/noscript>/.exec(html);
+
+  assert.deepEqual(
+    { hasNoscript: noscriptMatch !== null, mentionsJavaScript: (noscriptMatch?.[1] ?? "").toLowerCase().includes("javascript") },
+    { hasNoscript: true, mentionsJavaScript: true },
+  );
 });

@@ -153,3 +153,194 @@ export function reasoningIsPresentIn(log: string): boolean {
 
   return false;
 }
+
+const MAX_TOOL_TEXT_CHARS = 4000;
+
+export interface TranscriptToolCallView {
+  name: string;
+  args: string;
+  argsTruncated: boolean;
+  result: string | null;
+  resultTruncated: boolean;
+  resultLineCount: number;
+  isError: boolean;
+  diff: string | null;
+  diffTruncated: boolean;
+}
+
+export interface TranscriptTurnView {
+  number: number;
+  userText: string | null;
+  assistantText: string | null;
+  thinking: string | null;
+  isFinal: boolean;
+  isRetryFailure: boolean;
+  toolCalls: string[];
+  toolCallDetails: TranscriptToolCallView[];
+  nudges: string[];
+  tokensIn: number | null;
+  tokensOut: number | null;
+}
+
+export interface TranscriptView {
+  turns: TranscriptTurnView[];
+  reasoningPresent: boolean;
+}
+
+function capped(text: string): { text: string; truncated: boolean } {
+  if (text.length <= MAX_TOOL_TEXT_CHARS) return { text, truncated: false };
+  return { text: text.slice(0, MAX_TOOL_TEXT_CHARS), truncated: true };
+}
+
+function lineCountOf(text: string): number {
+  return text.length === 0 ? 0 : text.split("\n").length;
+}
+
+function emptyTurn(number: number): TranscriptTurnView {
+  return {
+    number,
+    userText: null,
+    assistantText: null,
+    thinking: null,
+    isFinal: false,
+    isRetryFailure: false,
+    toolCalls: [],
+    toolCallDetails: [],
+    nudges: [],
+    tokensIn: null,
+    tokensOut: null,
+  };
+}
+
+function joinedTextOf(content: unknown): string | null {
+  if (!Array.isArray(content)) return null;
+  const parts = content.map(textPartOf).filter((text): text is string => text !== undefined);
+  return parts.length === 0 ? null : parts.join("\n");
+}
+
+function thinkingPartOf(part: unknown): string | undefined {
+  if (typeof part !== "object" || part === null) return undefined;
+  const { type, thinking } = part as Record<string, unknown>;
+  return type === "thinking" && typeof thinking === "string" ? thinking : undefined;
+}
+
+function thinkingTextOf(content: unknown): string | null {
+  if (!Array.isArray(content)) return null;
+  const parts = content.map(thinkingPartOf).filter((thinking): thinking is string => thinking !== undefined);
+  return parts.length === 0 ? null : parts.join("\n");
+}
+
+function usageOf(message: Record<string, unknown>): { input: number | null; output: number | null } {
+  const usage = message.usage;
+  if (typeof usage !== "object" || usage === null) return { input: null, output: null };
+  const { input, output } = usage as Record<string, unknown>;
+  return { input: typeof input === "number" ? input : null, output: typeof output === "number" ? output : null };
+}
+
+function detailsDiffOf(result: unknown): string | undefined {
+  if (typeof result !== "object" || result === null) return undefined;
+  const details = (result as Record<string, unknown>).details;
+  if (typeof details !== "object" || details === null) return undefined;
+  const diff = (details as Record<string, unknown>).diff;
+  return typeof diff === "string" ? diff : undefined;
+}
+
+function applyToolExecutionStart(
+  turnView: TranscriptTurnView,
+  event: Record<string, unknown>,
+  pendingByCallId: Map<string, TranscriptToolCallView>,
+): void {
+  const toolCallId = event.toolCallId;
+  const toolName = event.toolName;
+  if (typeof toolCallId !== "string" || typeof toolName !== "string") return;
+
+  const args = capped(JSON.stringify(event.args ?? {}));
+  const detail: TranscriptToolCallView = {
+    name: toolName,
+    args: args.text,
+    argsTruncated: args.truncated,
+    result: null,
+    resultTruncated: false,
+    resultLineCount: 0,
+    isError: false,
+    diff: null,
+    diffTruncated: false,
+  };
+
+  turnView.toolCalls.push(toolName);
+  turnView.toolCallDetails.push(detail);
+  pendingByCallId.set(toolCallId, detail);
+}
+
+function applyToolExecutionEnd(
+  event: Record<string, unknown>,
+  pendingByCallId: Map<string, TranscriptToolCallView>,
+  onNudge: (rule: RuleName) => void,
+): void {
+  const toolCallId = event.toolCallId;
+  const detail = typeof toolCallId === "string" ? pendingByCallId.get(toolCallId) : undefined;
+  if (detail === undefined) return;
+
+  const resultText = toolResultTexts(event).join("\n");
+  const cappedResult = capped(resultText);
+  detail.result = cappedResult.text;
+  detail.resultTruncated = cappedResult.truncated;
+  detail.resultLineCount = lineCountOf(resultText);
+  detail.isError = event.isError === true;
+
+  const diff = detailsDiffOf(event.result);
+  if (diff !== undefined) {
+    const cappedDiff = capped(diff);
+    detail.diff = cappedDiff.text;
+    detail.diffTruncated = cappedDiff.truncated;
+  }
+
+  for (const rule of RULE_NAMES) {
+    const occurrences = ruleMarkerOccurrences(resultText, `[${rule}]`);
+    for (let i = 0; i < occurrences; i += 1) onNudge(rule);
+  }
+}
+
+function applyMessageEnd(turnView: TranscriptTurnView, event: Record<string, unknown>): void {
+  const message = event.message;
+  if (typeof message !== "object" || message === null) return;
+  const { role, content, stopReason } = message as Record<string, unknown>;
+
+  if (role === "user") {
+    turnView.userText = joinedTextOf(content);
+    return;
+  }
+  if (role !== "assistant") return;
+
+  turnView.assistantText = joinedTextOf(content);
+  turnView.thinking = thinkingTextOf(content);
+  turnView.isFinal = stopReason === "stop";
+  turnView.isRetryFailure = stopReason === "error";
+  const usage = usageOf(message as Record<string, unknown>);
+  turnView.tokensIn = usage.input;
+  turnView.tokensOut = usage.output;
+}
+
+export function buildTranscriptView(log: string): TranscriptView {
+  const turnsByNumber = new Map<number, TranscriptTurnView>();
+  const pendingByCallId = new Map<string, TranscriptToolCallView>();
+
+  function turnFor(number: number): TranscriptTurnView {
+    const existing = turnsByNumber.get(number);
+    if (existing !== undefined) return existing;
+    const created = emptyTurn(number);
+    turnsByNumber.set(number, created);
+    return created;
+  }
+
+  for (const { turn, event } of eventsWithTurnNumber(log)) {
+    if (turn === 0) continue;
+    const turnView = turnFor(turn);
+
+    if (event.type === "tool_execution_start") applyToolExecutionStart(turnView, event, pendingByCallId);
+    else if (event.type === "tool_execution_end") applyToolExecutionEnd(event, pendingByCallId, (rule) => turnView.nudges.push(rule));
+    else if (event.type === "message_end") applyMessageEnd(turnView, event);
+  }
+
+  return { turns: [...turnsByNumber.values()], reasoningPresent: reasoningIsPresentIn(log) };
+}
