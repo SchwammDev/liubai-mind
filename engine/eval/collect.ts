@@ -9,7 +9,7 @@ import { evaluateCanary } from "./canary.ts";
 import type { ProbeReport } from "./canary.ts";
 import { loadTreatments } from "./treatments.ts";
 import { loadCases, copyPlan } from "./corpus.ts";
-import { promptCarriedArmMessage } from "./prompt-carried-message.ts";
+import { promptCarriedTreatmentMessage } from "./prompt-carried-message.ts";
 import { buildProvenance } from "./provenance.ts";
 import { defaultPiSpawner, defaultProbeSpawner } from "./spawner.ts";
 import type { PiSpawner, ProbeSpawner, RunOutcome } from "./spawner.ts";
@@ -320,7 +320,7 @@ function requirePromptPackContent(packContent: string | undefined, treatment: Tr
 
 export function buildTask(kase: CaseManifest, treatment: TreatmentManifest, packContent: string | undefined): string {
   if (treatment.delivery !== "prompt") return kase.task;
-  return `${kase.task}\n\n${promptCarriedArmMessage(kase, requirePromptPackContent(packContent, treatment))}`;
+  return `${kase.task}\n\n${promptCarriedTreatmentMessage(kase, requirePromptPackContent(packContent, treatment))}`;
 }
 
 export function copyCaseFiles(corpusDir: string, kase: CaseManifest, workDir: string): { from: string; to: string }[] {

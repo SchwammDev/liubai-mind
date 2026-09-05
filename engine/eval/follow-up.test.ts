@@ -112,7 +112,7 @@ test("runFollowUp_never_seeds_from_a_timed_out_source_row", async () => {
   assert.deepEqual(identities, ["ts-flag-parser/rails-default/control", "ts-flag-parser/rails-default/from-repetition:2"]);
 });
 
-test("runFollowUp_derives_one_earlierResult_item_per_touched_non_errored_source_row_and_one_control_item_per_arm", async () => {
+test("runFollowUp_derives_one_earlierResult_item_per_touched_non_errored_source_row_and_one_control_item_per_treatment", async () => {
   const rows = [
     sourceRow({ treatmentId: "rails-default", repetition: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } }),
     sourceRow({ treatmentId: "rails-default", repetition: 2, agentError: "boom" }),

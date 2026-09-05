@@ -47,7 +47,7 @@ function validateDeliveryClosesLiveRail(
   if (delivery !== "prompt") return undefined;
   if (env.LIUBAI_RAILS_OFF !== undefined) return undefined;
   return {
-    error: `treatment ${id}: delivery: "prompt" requires env.LIUBAI_RAILS_OFF — a prompt-carried arm must close the live rail so the prompt is the only treatment channel`,
+    error: `treatment ${id}: delivery: "prompt" requires env.LIUBAI_RAILS_OFF — a prompt-carried treatment must close the live rail so the prompt is the only treatment channel`,
   };
 }
 
@@ -59,7 +59,7 @@ function validateDeliveryPinsPhrasingPack(
   if (delivery !== "prompt") return undefined;
   if (phrasingPack !== undefined) return undefined;
   return {
-    error: `treatment ${id}: delivery: "prompt" requires phrasingPack — a prompt-carried arm must pin its message in a pack so its meaning cannot drift with the production default wording`,
+    error: `treatment ${id}: delivery: "prompt" requires phrasingPack — a prompt-carried treatment must pin its message in a pack so its meaning cannot drift with the production default wording`,
   };
 }
 

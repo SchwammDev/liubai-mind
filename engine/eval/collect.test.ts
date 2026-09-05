@@ -218,12 +218,12 @@ function tempPackedTreatmentsDir(): string {
   return dir;
 }
 
-const PROMPT_ARM_MESSAGE = "Complexity moved, it did not leave.";
+const PROMPT_TREATMENT_MESSAGE = "Complexity moved, it did not leave.";
 
 function tempPromptTreatmentsDir(): string {
   const dir = tempDir("eval-treatments-");
   mkdirSync(join(dir, "packs"), { recursive: true });
-  writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_ARM_MESSAGE }));
+  writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_TREATMENT_MESSAGE }));
   writeFileSync(
     join(dir, "prompt-carried.json"),
     JSON.stringify({ id: "prompt-carried", delivery: "prompt", env: { LIUBAI_RAILS_OFF: "1" }, phrasingPack: "packs/pack.json" }),
@@ -349,7 +349,7 @@ test("runCollect_omits_the_phrasing_pack_var_for_packless_treatments", async () 
   assert.equal("LIUBAI_PHRASING_PACK" in (calls[0]?.env ?? {}), false);
 });
 
-test("runCollect_sends_the_case_task_followed_by_the_arm_message_for_a_prompt_delivery_treatment", async () => {
+test("runCollect_sends_the_case_task_followed_by_the_treatment_message_for_a_prompt_delivery_treatment", async () => {
   const treatmentsDir = tempPromptTreatmentsDir();
   const { spawner, calls } = recordingSpawner();
   const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["prompt-carried"], treatmentsDir, spawner });
@@ -357,15 +357,15 @@ test("runCollect_sends_the_case_task_followed_by_the_arm_message_for_a_prompt_de
   await runCollect(opts);
 
   const caseTask = readCaseTask(CORPUS_DIR, "ts-flag-parser");
-  assert.equal(calls[0]?.task, `${caseTask}\n\n${PROMPT_ARM_MESSAGE}`);
+  assert.equal(calls[0]?.task, `${caseTask}\n\n${PROMPT_TREATMENT_MESSAGE}`);
 });
 
-const PROMPT_ARM_TEMPLATE_WITH_PLACEHOLDERS = "{name} still carries {dpBefore} decision points, unchanged from {dpAfter}.";
+const PROMPT_TREATMENT_TEMPLATE_WITH_PLACEHOLDERS = "{name} still carries {dpBefore} decision points, unchanged from {dpAfter}.";
 
 function tempPlaceholderPromptTreatmentsDir(): string {
   const dir = tempDir("eval-treatments-");
   mkdirSync(join(dir, "packs"), { recursive: true });
-  writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_ARM_TEMPLATE_WITH_PLACEHOLDERS }));
+  writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_TREATMENT_TEMPLATE_WITH_PLACEHOLDERS }));
   writeFileSync(
     join(dir, "prompt-carried.json"),
     JSON.stringify({ id: "prompt-carried", delivery: "prompt", env: { LIUBAI_RAILS_OFF: "1" }, phrasingPack: "packs/pack.json" }),
@@ -373,7 +373,7 @@ function tempPlaceholderPromptTreatmentsDir(): string {
   return dir;
 }
 
-test("runCollect_fills_the_arm_messages_placeholders_with_the_cases_entry_symbol_and_decision_points", async () => {
+test("runCollect_fills_the_treatment_messages_placeholders_with_the_cases_entry_symbol_and_decision_points", async () => {
   const treatmentsDir = tempPlaceholderPromptTreatmentsDir();
   const { spawner, calls } = recordingSpawner();
   const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["prompt-carried"], treatmentsDir, spawner });
@@ -392,7 +392,7 @@ test("runCollect_records_the_sent_task_on_the_raw_row_for_a_prompt_delivery_trea
   await runCollect(opts);
 
   const caseTask = readCaseTask(CORPUS_DIR, "ts-flag-parser");
-  assert.equal(firstRow(opts.runDir).task, `${caseTask}\n\n${PROMPT_ARM_MESSAGE}`);
+  assert.equal(firstRow(opts.runDir).task, `${caseTask}\n\n${PROMPT_TREATMENT_MESSAGE}`);
 });
 
 test("runCollect_omits_task_from_the_raw_row_for_a_rail_delivery_treatment", async () => {
