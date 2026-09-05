@@ -92,6 +92,15 @@ const PAGE_STYLE = `
   .t-thinking { margin-top: 4px; white-space: pre-wrap; }
   .t-panel { border: 1px solid #ddd; border-radius: 4px; padding: 8px 12px; }
   .no-js-note { font-size: 13px; color: #555; margin-top: 6px; }
+  .top-no-js-note { font-size: 13px; color: #555; margin: 0 0 16px; }
+  .btn { display: inline-block; padding: 2px 10px; margin-right: 6px; border: 1px solid #888; border-radius: 10px; background: #fff; color: #1a1a1a; text-decoration: none; font-size: 13px; }
+  .btn[aria-disabled="true"] { color: #999; }
+  .review-toolbar { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+  .disclosure { font: inherit; border: none; background: none; cursor: pointer; padding: 0; }
+  .repetitions-panel { margin-top: 6px; }
+  .js-nav [data-view] { display: none; }
+  .js-nav [data-view].current { display: block; }
+  .js-nav .repetitions-panel:not(.expanded) { display: none; }
 `;
 
 function renderTreatments(treatmentIds: string[]): string {
@@ -104,7 +113,7 @@ function renderIdenticalTreatmentsFlag(flagged: boolean): string {
 
 function renderExperimentRow(experiment: ExperimentView): string {
   return `<tr data-experiment="${escapeHtml(experiment.id)}">
-      <td><a href="#experiment-${escapeHtml(experiment.id)}"><b>${escapeHtml(experiment.name)}</b></a><br><span class="kind">${escapeHtml(experiment.kindLabel)}</span></td>
+      <td><a href="${hrefFor(experimentViewId(experiment.id))}"><b>${escapeHtml(experiment.name)}</b></a><br><span class="kind">${escapeHtml(experiment.kindLabel)}</span></td>
       <td>${escapeHtml(experiment.question)}</td>
       <td>${renderTreatments(experiment.treatmentIds)}</td>
       <td>${escapeHtml(experiment.model)}<br>${escapeHtml(experiment.tierLabel)}</td>
@@ -133,6 +142,61 @@ function renderSetupCheck(setupCheck: SetupCheckView): string {
 
 function slug(key: string): string {
   return key.replace(/[^a-zA-Z0-9-]+/g, "-");
+}
+
+const EXPERIMENTS_VIEW_ID = "view-experiments";
+
+function experimentViewId(experimentId: string): string {
+  return `view-experiment-${slug(experimentId)}`;
+}
+
+function reviewViewId(reviewId: string): string {
+  return `view-review-${slug(reviewId)}`;
+}
+
+function transcriptViewId(reviewId: string): string {
+  return `view-transcript-${slug(reviewId)}`;
+}
+
+function hrefFor(viewId: string): string {
+  return `#${viewId}`;
+}
+
+function experimentCrumbLabel(detail: ExperimentDetailView): string {
+  return [detail.name, detail.tierLabel, detail.kindLabel].filter((part) => part.length > 0).join(" · ");
+}
+
+function crumbLink(viewId: string, label: string): string {
+  return `<a href="${hrefFor(viewId)}">${escapeHtml(label)}</a>`;
+}
+
+function crumbCurrent(label: string): string {
+  return `<b>${escapeHtml(label)}</b>`;
+}
+
+function repetitionCrumbLabel(repetition: RepetitionView): string {
+  return `${repetition.caseId} · repetition ${repetition.repetition}`;
+}
+
+function experimentsAndOwnExperimentCrumb(detail: ExperimentDetailView): string {
+  return `${crumbLink(EXPERIMENTS_VIEW_ID, "Experiments")} <span>›</span> ${crumbLink(experimentViewId(detail.id), experimentCrumbLabel(detail))} <span>›</span>`;
+}
+
+function reviewCrumb(detail: ExperimentDetailView, treatment: TreatmentView, repetition: RepetitionView): string {
+  return `<div class="crumb">
+    ${experimentsAndOwnExperimentCrumb(detail)}
+    <span>${escapeHtml(treatment.treatmentId)}</span> <span>›</span>
+    ${crumbCurrent(repetitionCrumbLabel(repetition))}
+  </div>`;
+}
+
+function transcriptCrumb(detail: ExperimentDetailView, treatment: TreatmentView, repetition: RepetitionView): string {
+  return `<div class="crumb">
+    ${experimentsAndOwnExperimentCrumb(detail)}
+    <span>${escapeHtml(treatment.treatmentId)}</span> <span>›</span>
+    ${crumbLink(reviewViewId(repetition.review!.id), repetitionCrumbLabel(repetition))} <span>›</span>
+    ${crumbCurrent("transcript")}
+  </div>`;
 }
 
 function stateByName(states: CodeStateView[], name: CodeStateName): CodeStateView | undefined {
@@ -286,28 +350,85 @@ function renderTranscriptBlock(review: ReviewView): string {
 }
 
 function renderReview(review: ReviewView, seenStateKeys: Set<string>): string {
-  return `<section id="review-${slug(review.id)}" data-review="${escapeHtml(review.id)}" class="review">
+  return `<section data-review="${escapeHtml(review.id)}" class="review">
     <h4><span class="chip">${escapeHtml(review.verdict)}</span></h4>
     ${renderStates(review, seenStateKeys)}
     ${renderCompareControls(review)}
     <div class="diff-holder">${renderDefaultDiff(review)}</div>
     ${renderWhyBox(review)}
     ${renderReferenceState(review, seenStateKeys)}
-    ${renderTranscriptBlock(review)}
     ${renderNoteBox(review)}
   </section>`;
 }
 
-function renderReviewRow(review: ReviewView | undefined, seenStateKeys: Set<string>): string {
-  if (review === undefined) return "";
-  return `<tr><td colspan="8">${renderReview(review, seenStateKeys)}</td></tr>`;
+interface RepetitionNeighbors {
+  previous: RepetitionView | undefined;
+  next: RepetitionView | undefined;
 }
 
-function renderRepetitionRow(detail: ExperimentDetailView, treatmentId: string, repetition: RepetitionView, seenStateKeys: Set<string>): string {
+function neighborsOf(repetitions: RepetitionView[], index: number): RepetitionNeighbors {
+  return { previous: repetitions[index - 1], next: repetitions[index + 1] };
+}
+
+function prevNextLink(neighbor: RepetitionView | undefined, label: string): string {
+  if (neighbor?.review === undefined) return `<span class="btn" aria-disabled="true">${escapeHtml(label)}</span>`;
+  return `<a class="btn" href="${hrefFor(reviewViewId(neighbor.review.id))}">${escapeHtml(label)}</a>`;
+}
+
+function renderReviewView(
+  detail: ExperimentDetailView,
+  treatment: TreatmentView,
+  repetition: RepetitionView,
+  review: ReviewView,
+  neighbors: RepetitionNeighbors,
+  seenStateKeys: Set<string>,
+): string {
+  return `<section data-view="review" id="${reviewViewId(review.id)}">
+    ${reviewCrumb(detail, treatment, repetition)}
+    <div class="review-toolbar">
+      ${prevNextLink(neighbors.previous, "‹ previous repetition")}
+      ${prevNextLink(neighbors.next, "next repetition ›")}
+      <a class="btn" href="${hrefFor(transcriptViewId(review.id))}">transcript</a>
+    </div>
+    ${renderReview(review, seenStateKeys)}
+  </section>`;
+}
+
+function renderTranscriptView(detail: ExperimentDetailView, treatment: TreatmentView, repetition: RepetitionView, review: ReviewView): string {
+  return `<section data-view="transcript" id="${transcriptViewId(review.id)}">
+    ${transcriptCrumb(detail, treatment, repetition)}
+    <div class="review-toolbar"><a class="btn" href="${hrefFor(reviewViewId(review.id))}">‹ review</a></div>
+    ${renderTranscriptBlock(review)}
+  </section>`;
+}
+
+interface ViewCollector {
+  reviewViews: string[];
+  transcriptViews: string[];
+}
+
+function reviewAndTranscriptLinks(review: ReviewView | undefined): string {
+  if (review === undefined) return "";
+  return ` · <a href="${hrefFor(reviewViewId(review.id))}">review</a> · <a href="${hrefFor(transcriptViewId(review.id))}">transcript</a>`;
+}
+
+function renderRepetitionRow(
+  detail: ExperimentDetailView,
+  treatment: TreatmentView,
+  repetition: RepetitionView,
+  index: number,
+  seenStateKeys: Set<string>,
+  collector: ViewCollector,
+): string {
   const successful = repetition.verdict === detail.successVerdict ? "1" : "0";
   const nudged = repetition.nudged ? "1" : "0";
-  const control = treatmentId === detail.controlTreatmentId ? "1" : "0";
-  const reviewLink = repetition.review === undefined ? "" : ` · <a href="#review-${slug(repetition.review.id)}">review</a>`;
+  const control = treatment.treatmentId === detail.controlTreatmentId ? "1" : "0";
+
+  if (repetition.review !== undefined) {
+    const neighbors = neighborsOf(treatment.repetitions, index);
+    collector.reviewViews.push(renderReviewView(detail, treatment, repetition, repetition.review, neighbors, seenStateKeys));
+    collector.transcriptViews.push(renderTranscriptView(detail, treatment, repetition, repetition.review));
+  }
 
   return `<tr data-repetition="${escapeHtml(repetition.id)}" data-successful="${successful}" data-nudged="${nudged}" data-control="${control}">
       <td class="mono">${escapeHtml(repetition.caseId)} · ${repetition.repetition}</td>
@@ -317,8 +438,8 @@ function renderRepetitionRow(detail: ExperimentDetailView, treatmentId: string, 
       <td class="mono">${escapeHtml(repetition.turns)}</td>
       <td class="mono">${escapeHtml(repetition.tokensIn)}</td>
       <td class="mono">${escapeHtml(repetition.nudges)}</td>
-      <td class="detail">${escapeHtml(repetition.detail)}${reviewLink}</td>
-    </tr>${renderReviewRow(repetition.review, seenStateKeys)}`;
+      <td class="detail">${escapeHtml(repetition.detail)}${reviewAndTranscriptLinks(repetition.review)}</td>
+    </tr>`;
 }
 
 const REPETITION_FILTERS: readonly { filter: string; label: string }[] = [
@@ -335,8 +456,16 @@ function renderFilterBar(repetitionCount: number): string {
   return `<div class="filter-bar"><span>${repetitionCount} repetitions, worst first</span><span class="filters">${buttons}</span></div>`;
 }
 
-function renderTreatmentRow(detail: ExperimentDetailView, treatment: TreatmentView, seenStateKeys: Set<string>): string {
+function renderTreatmentRow(detail: ExperimentDetailView, treatment: TreatmentView, seenStateKeys: Set<string>, collector: ViewCollector): string {
+  const panelId = `repetitions-${slug(treatment.run)}-${slug(treatment.treatmentId)}`;
+  const rows = treatment.repetitions
+    .map((repetition, index) => renderRepetitionRow(detail, treatment, repetition, index, seenStateKeys, collector))
+    .join("");
+
   return `<tr>
+      <td>
+        <button type="button" class="disclosure" data-toggle-repetitions aria-expanded="false" aria-controls="${panelId}">▸</button>
+      </td>
       <td><b>${escapeHtml(treatment.treatmentId)}</b><br><span class="kind mono">run folder ${escapeHtml(treatment.run)}</span></td>
       <td>${escapeHtml(treatment.verdictDistribution)}</td>
       <td class="mono">${escapeHtml(treatment.meanTurns)}</td>
@@ -344,20 +473,22 @@ function renderTreatmentRow(detail: ExperimentDetailView, treatment: TreatmentVi
       <td class="mono">${escapeHtml(treatment.meanNudgesPerRepetition)}</td>
     </tr>
     <tr>
-      <td colspan="5">
-        ${renderFilterBar(treatment.repetitions.length)}
-        <table class="repetitions">
-          <thead><tr><th>case · repetition</th><th>verdict</th><th>starts from</th><th>lines added / removed</th><th>turns</th><th>input tokens</th><th>nudges</th><th>detail</th></tr></thead>
-          <tbody>${treatment.repetitions.map((repetition) => renderRepetitionRow(detail, treatment.treatmentId, repetition, seenStateKeys)).join("")}</tbody>
-        </table>
+      <td colspan="6">
+        <div id="${panelId}" class="repetitions-panel">
+          ${renderFilterBar(treatment.repetitions.length)}
+          <table class="repetitions">
+            <thead><tr><th>case · repetition</th><th>verdict</th><th>starts from</th><th>lines added / removed</th><th>turns</th><th>input tokens</th><th>nudges</th><th>detail</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
       </td>
     </tr>`;
 }
 
-function renderTreatmentsTable(detail: ExperimentDetailView, seenStateKeys: Set<string>): string {
+function renderTreatmentsTable(detail: ExperimentDetailView, seenStateKeys: Set<string>, collector: ViewCollector): string {
   return `<table class="treatments">
-    <thead><tr><th>treatment</th><th>verdicts</th><th>mean turns</th><th>mean input tokens</th><th>mean nudges/repetition</th></tr></thead>
-    <tbody>${detail.treatments.map((treatment) => renderTreatmentRow(detail, treatment, seenStateKeys)).join("")}</tbody>
+    <thead><tr><th style="width: 24px;"></th><th>treatment</th><th>verdicts</th><th>mean turns</th><th>mean input tokens</th><th>mean nudges/repetition</th></tr></thead>
+    <tbody>${detail.treatments.map((treatment) => renderTreatmentRow(detail, treatment, seenStateKeys, collector)).join("")}</tbody>
   </table>`;
 }
 
@@ -376,15 +507,15 @@ function renderPerCaseTable(detail: ExperimentDetailView): string {
   </table>`;
 }
 
-function renderExperimentDetail(detail: ExperimentDetailView, seenStateKeys: Set<string>): string {
-  return `<section id="experiment-${escapeHtml(detail.id)}" class="experiment-detail">
-    <div class="crumb"><a href="#top">Experiments</a> › <b>${escapeHtml(detail.name)}</b></div>
+function renderExperimentDetail(detail: ExperimentDetailView, seenStateKeys: Set<string>, collector: ViewCollector): string {
+  return `<section data-view="experiment" id="${experimentViewId(detail.id)}" class="experiment-detail">
+    <div class="crumb">${crumbLink(EXPERIMENTS_VIEW_ID, "Experiments")} <span>›</span> ${crumbCurrent(experimentCrumbLabel(detail))}</div>
     <h2>${escapeHtml(detail.name)} <span class="kind">· ${escapeHtml(detail.kindLabel)}</span></h2>
     <p>${escapeHtml(detail.question)}</p>
     <div class="outcome-box"><span class="kind">outcome</span><br>${escapeHtml(detail.outcome)}</div>
     ${renderSetupCheck(detail.setupCheck)}
     <h3>Treatments</h3>
-    ${renderTreatmentsTable(detail, seenStateKeys)}
+    ${renderTreatmentsTable(detail, seenStateKeys, collector)}
     ${renderPerCaseTable(detail)}
   </section>`;
 }
@@ -409,6 +540,38 @@ document.querySelectorAll(".filter-bar").forEach(function (bar) {
     });
   });
 });
+</script>`;
+
+const DISCLOSURE_SCRIPT = `<script>
+document.querySelectorAll("[data-toggle-repetitions]").forEach(function (button) {
+  button.addEventListener("click", function () {
+    var panel = document.getElementById(button.getAttribute("aria-controls"));
+    var expanded = button.getAttribute("aria-expanded") === "true";
+    button.setAttribute("aria-expanded", String(!expanded));
+    panel.classList.toggle("expanded", !expanded);
+    button.textContent = expanded ? "▸" : "▾";
+  });
+});
+</script>`;
+
+const HIDE_VIEWS_BEFORE_PAINT_SCRIPT = `<script>document.documentElement.classList.add("js-nav");</script>`;
+
+const ROUTER_SCRIPT = `<script>
+(function () {
+  function applyRoute() {
+    var hash = location.hash.slice(1) || "${EXPERIMENTS_VIEW_ID}";
+    var matched = false;
+    document.querySelectorAll("[data-view]").forEach(function (section) {
+      var current = section.id === hash;
+      section.classList.toggle("current", current);
+      if (current) matched = true;
+    });
+    if (!matched) document.getElementById("${EXPERIMENTS_VIEW_ID}").classList.add("current");
+  }
+
+  window.addEventListener("hashchange", applyRoute);
+  applyRoute();
+})();
 </script>`;
 
 const REVIEW_SCRIPT = `<script>
@@ -626,7 +789,7 @@ const TRANSCRIPT_SCRIPT = `<script>
   }
 
   function toolCallHtml(call) {
-    var summary = escapeHtml(call.name) + (call.args && call.args !== "{}" ? " " + escapeHtml(call.args) : "");
+    var summary = escapeHtml(call.name) + (call.summary ? " " + escapeHtml(call.summary) : "");
     var body = "";
     if (call.diff !== null) {
       body = '<pre class="t-code">' + escapeHtml(call.diff) + (call.diffTruncated ? "\\n… see the raw transcript file for the rest" : "") + "</pre>";
@@ -693,11 +856,6 @@ const TRANSCRIPT_SCRIPT = `<script>
     return '<div class="t-panel"><div class="kind" style="font-size:13px;">tools used</div><div class="mono" style="font-size:12.5px; line-height:1.6;">' + (rows.length === 0 ? "none" : rows.join("<br>")) + "</div></div>";
   }
 
-  function writeCallPath(call) {
-    var match = /"path"\\s*:\\s*"([^"]+)"/.exec(call.args);
-    return match ? match[1] : null;
-  }
-
   function jumpPanelHtml(turns) {
     var firstEdit = null;
     var filesCreated = [];
@@ -709,8 +867,8 @@ const TRANSCRIPT_SCRIPT = `<script>
       turn.toolCallDetails.forEach(function (call) {
         if (firstEdit === null && (call.name === "edit" || call.name === "write")) firstEdit = turn.number;
         if (call.name === "write") {
-          var path = writeCallPath(call);
-          if (path !== null && !seenPaths[path]) {
+          var path = call.summary;
+          if (path && !seenPaths[path]) {
             seenPaths[path] = true;
             filesCreated.push({ path: path, turn: turn.number });
           }
@@ -790,8 +948,18 @@ function renderTranscriptIslands(islands: TranscriptIsland[]): string {
     .join("");
 }
 
+function renderExperimentsView(model: ReportViewModel): string {
+  return `<section data-view="experiments" id="${EXPERIMENTS_VIEW_ID}">
+    <h1>Experiments</h1>
+    ${model.milestones.map(renderMilestone).join("")}
+    ${renderUnclaimed(model.unclaimedRunFolders)}
+  </section>`;
+}
+
 export function renderReportHtml(model: ReportViewModel): string {
   const seenStateKeys = new Set<string>();
+  const collector: ViewCollector = { reviewViews: [], transcriptViews: [] };
+  const experimentSections = model.experimentDetails.map((detail) => renderExperimentDetail(detail, seenStateKeys, collector)).join("");
 
   return `<!doctype html>
 <html>
@@ -799,13 +967,17 @@ export function renderReportHtml(model: ReportViewModel): string {
 <meta charset="utf-8">
 <title>liubai eval report</title>
 <style>${PAGE_STYLE}</style>
+${HIDE_VIEWS_BEFORE_PAINT_SCRIPT}
 </head>
 <body>
-<h1 id="top">Experiments</h1>
-${model.milestones.map(renderMilestone).join("")}
-${renderUnclaimed(model.unclaimedRunFolders)}
-${model.experimentDetails.map((detail) => renderExperimentDetail(detail, seenStateKeys)).join("")}
+<noscript><div class="top-no-js-note">navigating between experiments, reviews and transcripts needs JavaScript; every section is shown below instead.</div></noscript>
+${renderExperimentsView(model)}
+${experimentSections}
+${collector.reviewViews.join("")}
+${collector.transcriptViews.join("")}
 ${FILTER_SCRIPT}
+${DISCLOSURE_SCRIPT}
+${ROUTER_SCRIPT}
 ${REVIEW_SCRIPT}
 ${TRANSCRIPT_SCRIPT}
 ${NOTE_SCRIPT}

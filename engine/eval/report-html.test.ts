@@ -50,6 +50,12 @@ test("an experiment's row carries its id as a data-experiment attribute and its 
   assert.deepEqual(experimentMarkers(html), { hasDataAttribute: true, nameIsEscaped: true });
 });
 
+test("the views are hidden before any of them reaches the page, so a load never paints every section first", () => {
+  const html = renderReportHtml(viewModel({ unclaimedRunFolders: ["dry-run"] }));
+
+  assert.equal(html.indexOf('classList.add("js-nav")') < html.indexOf("data-view="), true);
+});
+
 test("an unclaimed run folder is listed with a data-unclaimed-run attribute", () => {
   const html = renderReportHtml(viewModel({ unclaimedRunFolders: ["dry-run"] }));
 
@@ -117,6 +123,7 @@ function experimentDetailView(over: Partial<ExperimentDetailView> = {}): Experim
     id: "exp",
     name: "Exp",
     kindLabel: "single task",
+    tierLabel: "hard cases",
     question: "does it help?",
     outcome: "",
     treatmentIds: ["t1"],
@@ -334,7 +341,7 @@ function pageWithOneReviewCarrying(over: Partial<ReviewView>): string {
 }
 
 function bodyOnly(page: string): string {
-  return page.slice(0, page.indexOf("<script>"));
+  return page.replace(/<script[\s\S]*?<\/script>/g, "");
 }
 
 function transcriptIslandJson(page: string, id: string): unknown {
@@ -434,4 +441,116 @@ test("the transcript area tells a no-JavaScript reader it needs JavaScript, with
     { hasNoscript: noscriptMatch !== null, mentionsJavaScript: (noscriptMatch?.[1] ?? "").toLowerCase().includes("javascript") },
     { hasNoscript: true, mentionsJavaScript: true },
   );
+});
+
+function viewSectionsOfKind(html: string, kind: string): string[] {
+  const markers = [...html.matchAll(/data-view="([^"]+)"/g)];
+  return markers
+    .map((marker, index) => ({
+      kind: marker[1]!,
+      content: html.slice(marker.index!, index + 1 < markers.length ? markers[index + 1]!.index! : html.length),
+    }))
+    .filter((section) => section.kind === kind)
+    .map((section) => section.content);
+}
+
+test("the page renders each of the four views once a repetition carries a review and a transcript", () => {
+  const detail = experimentDetailView({ treatments: [treatmentView({ repetitions: [repetitionView({ review: review({ transcript: transcript() }) })] })] });
+  const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
+
+  assert.deepEqual(
+    ["experiments", "experiment", "review", "transcript"].map((kind) => viewSectionsOfKind(html, kind).length),
+    [1, 1, 1, 1],
+  );
+});
+
+function repetitionsPanelToggle(html: string): string {
+  const match = /<button[^>]*data-toggle-repetitions[^>]*>/.exec(html);
+  assert.notEqual(match, null, "no repetitions disclosure control found");
+  return match![0];
+}
+
+test("a treatment's repetitions sit behind a disclosure control that starts collapsed", () => {
+  const html = renderReportHtml(viewModel({ experimentDetails: [experimentDetailView()] }));
+
+  assert.equal(repetitionsPanelToggle(html).includes('aria-expanded="false"'), true);
+});
+
+function repetitionsTableOf(html: string): string {
+  const start = html.indexOf('class="repetitions"');
+  const end = html.indexOf("</table>", start);
+  return html.slice(start, end);
+}
+
+test("a repetition's review is reached by a link, not inlined under its row", () => {
+  const detail = experimentDetailView({ treatments: [treatmentView({ repetitions: [repetitionView({ review: review({ id: "run-a-case-a-t1-1" }) })] })] });
+  const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
+
+  assert.equal(repetitionsTableOf(html).includes("data-review="), false);
+});
+
+test("a repetition with a review offers links to its review view and its transcript view", () => {
+  const detail = experimentDetailView({ treatments: [treatmentView({ repetitions: [repetitionView({ review: review({ id: "run-a-case-a-t1-1" }) })] })] });
+  const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
+
+  const row = repetitionsTableOf(html);
+  assert.deepEqual(
+    { linksToReview: row.includes('href="#view-review-run-a-case-a-t1-1"'), linksToTranscript: row.includes('href="#view-transcript-run-a-case-a-t1-1"') },
+    { linksToReview: true, linksToTranscript: true },
+  );
+});
+
+test("a review's breadcrumb links back to the experiments list and to its own experiment", () => {
+  const detail = experimentDetailView({ id: "exp-1", treatments: [treatmentView({ repetitions: [repetitionView({ review: review() })] })] });
+  const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
+
+  const [reviewSection] = viewSectionsOfKind(html, "review");
+  assert.deepEqual(
+    { linksToExperiments: reviewSection!.includes('href="#view-experiments"'), linksToExperiment: reviewSection!.includes('href="#view-experiment-exp-1"') },
+    { linksToExperiments: true, linksToExperiment: true },
+  );
+});
+
+test("a transcript view links back to its review", () => {
+  const detail = experimentDetailView({ treatments: [treatmentView({ repetitions: [repetitionView({ review: review({ id: "run-a-case-a-t1-1" }) })] })] });
+  const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
+
+  const [transcriptSection] = viewSectionsOfKind(html, "transcript");
+  assert.equal(transcriptSection!.includes('href="#view-review-run-a-case-a-t1-1"'), true);
+});
+
+test("a review no longer embeds the transcript viewer inline; the transcript view carries it instead", () => {
+  const detail = experimentDetailView({ treatments: [treatmentView({ repetitions: [repetitionView({ review: review({ id: "r1", transcript: transcript() }) })] })] });
+  const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
+
+  const opening = html.indexOf('data-review="r1"');
+  const closing = html.indexOf("</section>", opening);
+  assert.equal(html.slice(opening, closing).includes("open transcript"), false);
+});
+
+test("a review view offers a link to the previous and next repetition, honoring the treatment's own order and its ends", () => {
+  const repetitions = [
+    repetitionView({ id: "run-a-case-a-t1-1", repetition: 1, review: review({ id: "run-a-case-a-t1-1" }) }),
+    repetitionView({ id: "run-a-case-a-t1-2", repetition: 2, review: review({ id: "run-a-case-a-t1-2" }) }),
+  ];
+  const detail = experimentDetailView({ treatments: [treatmentView({ repetitions })] });
+  const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
+
+  const [firstReview, secondReview] = viewSectionsOfKind(html, "review");
+  assert.deepEqual(
+    {
+      firstPreviousIsDisabled: firstReview!.includes('aria-disabled="true">‹ previous repetition<'),
+      firstLinksNext: firstReview!.includes('href="#view-review-run-a-case-a-t1-2"'),
+      secondLinksPrevious: secondReview!.includes('href="#view-review-run-a-case-a-t1-1"'),
+      secondNextIsDisabled: secondReview!.includes('aria-disabled="true">next repetition ›<'),
+    },
+    { firstPreviousIsDisabled: true, firstLinksNext: true, secondLinksPrevious: true, secondNextIsDisabled: true },
+  );
+});
+
+test("a no-JavaScript reader is told view navigation needs JavaScript", () => {
+  const html = renderReportHtml(viewModel({}));
+
+  const noscriptMatch = /<noscript>([\s\S]*?)<\/noscript>/.exec(html);
+  assert.equal((noscriptMatch?.[1] ?? "").toLowerCase().includes("javascript"), true);
 });

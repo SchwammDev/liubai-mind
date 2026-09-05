@@ -227,6 +227,16 @@ function experimentDetailFor(
   return buildReportViewModel([exp], runData(records), caseFactsByCaseId, [], originalSourceByKey, sessionLogByKey, notesByKey, live).experimentDetails[0]!;
 }
 
+test("an experiment's detail view carries the same difficulty tier label shown at the experiments list, for the breadcrumb", () => {
+  const exp = experiment({ treatments: [{ treatmentId: "t1", run: "run-a" }], controlTreatment: "t1" });
+  const records = { "run-a": { judged: [judgedRecord("case-hard", "t1", 1)], raw: [] } };
+  const caseFactsByCaseId = new Map<string, CaseFactsForReport>([["case-hard", caseFacts("entry.py", "hard")]]);
+
+  const detail = experimentDetailFor(exp, records, caseFactsByCaseId);
+
+  assert.equal(detail.tierLabel, "hard cases");
+});
+
 test("a treatment's repetitions are ordered worst first for a single-task experiment", () => {
   const exp = experiment({ treatments: [{ treatmentId: "t1", run: "run-a" }], controlTreatment: "t1", kind: "single-task" });
   const records = {

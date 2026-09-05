@@ -158,8 +158,8 @@ const MAX_TOOL_TEXT_CHARS = 4000;
 
 export interface TranscriptToolCallView {
   name: string;
-  args: string;
-  argsTruncated: boolean;
+  summary: string;
+  summaryTruncated: boolean;
   result: string | null;
   resultTruncated: boolean;
   resultLineCount: number;
@@ -245,6 +245,19 @@ function detailsDiffOf(result: unknown): string | undefined {
   return typeof diff === "string" ? diff : undefined;
 }
 
+const PATH_CARRYING_TOOLS = new Set(["read", "write", "edit"]);
+
+function argsObjectOf(event: Record<string, unknown>): Record<string, unknown> {
+  const args = event.args;
+  return typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
+}
+
+function toolCallSummary(toolName: string, args: Record<string, unknown>): string {
+  if (toolName === "bash" && typeof args.command === "string") return args.command;
+  if (PATH_CARRYING_TOOLS.has(toolName) && typeof args.path === "string") return args.path;
+  return JSON.stringify(args);
+}
+
 function applyToolExecutionStart(
   turnView: TranscriptTurnView,
   event: Record<string, unknown>,
@@ -254,11 +267,11 @@ function applyToolExecutionStart(
   const toolName = event.toolName;
   if (typeof toolCallId !== "string" || typeof toolName !== "string") return;
 
-  const args = capped(JSON.stringify(event.args ?? {}));
+  const summary = capped(toolCallSummary(toolName, argsObjectOf(event)));
   const detail: TranscriptToolCallView = {
     name: toolName,
-    args: args.text,
-    argsTruncated: args.truncated,
+    summary: summary.text,
+    summaryTruncated: summary.truncated,
     result: null,
     resultTruncated: false,
     resultLineCount: 0,

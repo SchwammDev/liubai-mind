@@ -274,6 +274,33 @@ test("an edit call's diff is captured for display", () => {
   assert.equal(transcript.turns[0]!.toolCallDetails[0]!.diff, "-old\n+new");
 });
 
+function summaryOfSoleToolCall(toolName: string, args: Record<string, unknown>): string {
+  const log = sessionLog([turnStart(), toolCall(toolName, args)]);
+  return buildTranscriptView(log).turns[0]!.toolCallDetails[0]!.summary;
+}
+
+test("a bash call's summary is the command it ran, not the raw arguments JSON", () => {
+  const summary = summaryOfSoleToolCall("bash", { command: "rg -n \"accumulate_grid\" ." });
+
+  assert.equal(summary, "rg -n \"accumulate_grid\" .");
+});
+
+test("a read, write or edit call's summary is the path it acted on", () => {
+  const summaries = {
+    read: summaryOfSoleToolCall("read", { path: "accumulate_grid.py" }),
+    write: summaryOfSoleToolCall("write", { path: "accumulate_grid.py", content: "def f(): pass" }),
+    edit: summaryOfSoleToolCall("edit", { path: "accumulate_grid.py", edits: [{ oldText: "a", newText: "b" }] }),
+  };
+
+  assert.deepEqual(summaries, { read: "accumulate_grid.py", write: "accumulate_grid.py", edit: "accumulate_grid.py" });
+});
+
+test("an unrecognized tool's summary falls back to a compact one-line rendering of its arguments", () => {
+  const summary = summaryOfSoleToolCall("grep_search", { pattern: "TODO", multiline: true });
+
+  assert.equal(summary, '{"pattern":"TODO","multiline":true}');
+});
+
 test("a failing tool call is marked as an error on its own call detail", () => {
   const log = sessionLog([turnStart(), toolCall("bash"), toolCallResult("bash", "not found", { isError: true })]);
 

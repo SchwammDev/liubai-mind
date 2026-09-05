@@ -140,6 +140,7 @@ export interface ExperimentDetailView {
   id: string;
   name: string;
   kindLabel: string;
+  tierLabel: string;
   question: string;
   outcome: string;
   treatmentIds: string[];
@@ -181,9 +182,9 @@ function modelLabelOf(rows: RawRowForReport[]): string {
   return distinctSorted(rows.map((row) => row.provenance.model)).join(", ");
 }
 
-function tierLabelOf(records: JudgedRecordForReport[], caseFactsByCaseId: Map<string, CaseFactsForReport>): string {
+function tierLabelOf(caseIds: string[], caseFactsByCaseId: Map<string, CaseFactsForReport>): string {
   const tiers = distinctSorted(
-    records.map((record) => caseFactsByCaseId.get(record.caseId)?.tier).filter((tier): tier is Tier => tier !== undefined),
+    caseIds.map((caseId) => caseFactsByCaseId.get(caseId)?.tier).filter((tier): tier is Tier => tier !== undefined),
   );
   return tiers.map((tier) => `${tier} cases`).join(", ");
 }
@@ -232,7 +233,7 @@ function experimentViewOf(
     question: experiment.question,
     treatmentIds: experiment.treatments.map((treatment) => treatment.treatmentId),
     model: modelLabelOf(rawRows),
-    tierLabel: tierLabelOf(records, caseFactsByCaseId),
+    tierLabel: tierLabelOf(records.map((record) => record.caseId), caseFactsByCaseId),
     size: sizeLabelOf(records),
     status: experiment.status,
     outcome: experiment.outcome,
@@ -733,6 +734,7 @@ function experimentDetailFor(
     id: experiment.id,
     name: experiment.name,
     kindLabel: KIND_LABELS[experiment.kind],
+    tierLabel: tierLabelOf(treatmentsWithFacts.flatMap(({ facts }) => facts.map((fact) => fact.caseId)), caseFactsByCaseId),
     question: experiment.question,
     outcome: experiment.outcome,
     treatmentIds: experiment.treatments.map((treatment) => treatment.treatmentId),
