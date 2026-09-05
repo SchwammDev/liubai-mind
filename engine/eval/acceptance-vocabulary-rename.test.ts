@@ -12,12 +12,16 @@ import { healthyProbeReporter } from "./probe-doubles.ts";
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const CORPUS_DIR = join(import.meta.dirname, "corpus");
 const RUN_NAME = "numberless-prompt-v2-hard-flash";
+const RUN_DIR = join(import.meta.dirname, "runs", RUN_NAME);
 const TREATMENT_ID = "control";
 const CASE_ID = "ts-flag-parser";
 
-const EXPECTED_SCORE_STATUS = 1;
-const EXPECTED_SCORE_STDOUT =
-  "score: delivery violation [missing-stamp] cc-delta-prompt/ts-order-fulfillment#7: no delivery stamp while other rows in this run carry one — rails likely never loaded for this repetition";
+const REPETITIONS_PER_TREATMENT = 48;
+const PRE_RENAME_VERDICT_COUNTS: Record<string, Record<string, number>> = {
+  "cc-delta-prompt": { "genuine-fix": 46, "bar-missed": 1, "timed-out": 1 },
+  "cc-delta-numberless-prompt": { "genuine-fix": 43, "bar-missed": 3, untouched: 1, "timed-out": 1 },
+  control: { "genuine-fix": 12, "bar-missed": 36 },
+};
 
 function tempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -42,27 +46,56 @@ function collectOptsForOneTreatmentAndOneRepetition(): CollectOpts {
   } as unknown as CollectOpts;
 }
 
-function rawRowsForCase(runDir: string, caseId: string): Record<string, unknown>[] {
-  const raw = readFileSync(join(runDir, "raw.jsonl"), "utf8");
-  return raw
+function jsonlRows(path: string): Record<string, unknown>[] {
+  return readFileSync(path, "utf8")
     .split("\n")
     .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as Record<string, unknown>)
-    .filter((row) => row["caseId"] === caseId);
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
-function assertRowUsesNewFieldNames(row: Record<string, unknown>): void {
+function rawRowsForCase(runDir: string, caseId: string): Record<string, unknown>[] {
+  return jsonlRows(join(runDir, "raw.jsonl")).filter((row) => row["caseId"] === caseId);
+}
+
+function wholeRunSummaryRow(treatmentId: string): Record<string, unknown> {
+  const rows = jsonlRows(join(RUN_DIR, "summary.jsonl")).filter(
+    (row) => row["treatmentId"] === treatmentId && row["caseId"] === null && row["tier"] === null,
+  );
+  assert.equal(rows.length, 1, `expected one whole-run summary row for ${treatmentId}`);
+  return rows[0]!;
+}
+
+function nonZeroVerdictCounts(row: Record<string, unknown>): Record<string, number> {
+  const counts = row["counts"] as Record<string, number>;
+  return Object.fromEntries(Object.entries(counts).filter(([, n]) => n > 0));
+}
+
+function assertTreatmentScoresAsBeforeTheRename(treatmentId: string): void {
+  const row = wholeRunSummaryRow(treatmentId);
+
+  assert.equal(row["total"], REPETITIONS_PER_TREATMENT, `${treatmentId}: repetitions scored`);
+  assert.deepEqual(nonZeroVerdictCounts(row), PRE_RENAME_VERDICT_COUNTS[treatmentId], `${treatmentId}: verdict counts`);
+}
+
+function assertSummaryRowUsesNewFieldNames(row: Record<string, unknown>): void {
+  assert.equal("meanNudges" in row, true);
+  assert.equal("conditionId" in row, false);
+  assert.equal("meanRailFirings" in row, false);
+}
+
+function assertRawRowUsesNewFieldNames(row: Record<string, unknown>): void {
   assert.equal(row["treatmentId"], TREATMENT_ID);
   assert.equal(row["repetition"], 1);
   assert.equal("conditionId" in row, false);
   assert.equal("rep" in row, false);
 }
 
-test("scoring the committed numberless-prompt-v2-hard-flash run is unchanged by the vocabulary rename", async () => {
+test("scoring the committed numberless-prompt-v2-hard-flash run reproduces the pre-rename verdict counts", async () => {
   const result = await runEval(["score", "--run", RUN_NAME]);
 
-  assert.equal(result.status, EXPECTED_SCORE_STATUS);
-  assert.equal(result.stdout, EXPECTED_SCORE_STDOUT);
+  assert.equal(result.status, 0, result.stdout);
+  for (const treatmentId of Object.keys(PRE_RENAME_VERDICT_COUNTS)) assertTreatmentScoresAsBeforeTheRename(treatmentId);
+  assertSummaryRowUsesNewFieldNames(wholeRunSummaryRow(TREATMENT_ID));
 });
 
 test("collect writes a raw row keyed by treatmentId and repetition, carrying no old field names", async () => {
@@ -73,7 +106,7 @@ test("collect writes a raw row keyed by treatmentId and repetition, carrying no 
   assert.equal(result.status, 0);
   const rows = rawRowsForCase(opts.runDir, CASE_ID);
   assert.equal(rows.length, 1);
-  assertRowUsesNewFieldNames(rows[0]!);
+  assertRawRowUsesNewFieldNames(rows[0]!);
 });
 
 function assertParses(argv: string[]): void {
