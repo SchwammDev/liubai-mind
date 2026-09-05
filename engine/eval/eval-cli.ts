@@ -4,6 +4,7 @@ import { runCollect } from "./collect.ts";
 import { runScore } from "./score.ts";
 import { runFollowUp } from "./follow-up.ts";
 import { routeScore } from "./follow-up-score.ts";
+import { runReport } from "./report.ts";
 import type { Tier } from "./eval-contract.ts";
 import { REASONING_LEVELS } from "./spawner.ts";
 
@@ -32,6 +33,7 @@ export type ParsedCli =
       reasoning?: string;
     }
   | { cmd: "score"; run: string; compare?: string }
+  | { cmd: "report"; out?: string }
   | { error: string };
 
 interface EvalRunResult {
@@ -48,6 +50,7 @@ const USAGE = [
   "  liubai eval collect --run <name> --model <provider/id> [--repetitions N] [--parallel N] [--timeout-ms N] [--case id]... [--treatment id]... [--tier <easy|hard>] [--reasoning <off|minimal|low|medium|high|xhigh|max>]",
   "  liubai eval follow-up --run <newRun> --source-run <existingRun> --model <provider/id> [--parallel N] [--timeout-ms N] [--case id]... [--treatment id]... [--reasoning <off|minimal|low|medium|high|xhigh|max>]",
   "  liubai eval score --run <name> [--compare <otherRunName>]",
+  "  liubai eval report [--out <path>]",
 ].join("\n");
 
 function usageError(detail: string): { error: string } {
@@ -80,6 +83,10 @@ interface FollowUpAccum {
 interface ScoreAccum {
   run?: string;
   compare?: string;
+}
+
+interface ReportAccum {
+  out?: string;
 }
 
 type FlagHandlers<T> = Record<string, (accum: T, value: string) => void>;
@@ -127,6 +134,12 @@ function scoreFlagHandlers(): FlagHandlers<ScoreAccum> {
   return {
     "--run": (a, v) => { a.run = v; },
     "--compare": (a, v) => { a.compare = v; },
+  };
+}
+
+function reportFlagHandlers(): FlagHandlers<ReportAccum> {
+  return {
+    "--out": (a, v) => { a.out = v; },
   };
 }
 
@@ -253,11 +266,20 @@ function parseScoreArgs(args: string[]): ParsedCli {
   return { cmd: "score", run: accum.run, ...(accum.compare !== undefined ? { compare: accum.compare } : {}) };
 }
 
+function parseReportArgs(args: string[]): ParsedCli {
+  const accum: ReportAccum = {};
+  const flagError = consumeFlags(args, reportFlagHandlers(), accum);
+  if (flagError !== undefined) return usageError(flagError.error);
+
+  return { cmd: "report", ...(accum.out !== undefined ? { out: accum.out } : {}) };
+}
+
 export function parseCliArgs(argv: string[]): ParsedCli {
   const [sub, ...rest] = argv;
   if (sub === "collect") return parseCollectArgs(rest);
   if (sub === "follow-up") return parseFollowUpArgs(rest);
   if (sub === "score") return parseScoreArgs(rest);
+  if (sub === "report") return parseReportArgs(rest);
   return usageError(`unknown subcommand: ${sub ?? ""}`);
 }
 
@@ -337,10 +359,43 @@ function autoDetectScore(runsRoot: string): typeof runScore {
   return (opts) => routeScore(opts, runsRoot);
 }
 
-export async function runEval(
-  argv: string[],
-  deps?: { collect?: typeof runCollect; followUp?: typeof runFollowUp; score?: typeof runScore },
+async function runReportCmd(
+  parsed: Extract<ParsedCli, { cmd: "report" }>,
+  report: typeof runReport,
+  repoRoot: string,
+  runsRoot: string,
 ): Promise<EvalRunResult> {
+  const result = await report({
+    runsDir: runsRoot,
+    experimentsPath: join(repoRoot, "engine", "eval", "experiments.json"),
+    corpusDir: join(repoRoot, "engine", "eval", "corpus"),
+    repoRoot,
+    outPath: parsed.out ?? join(runsRoot, "report.html"),
+  });
+
+  return { status: result.status, stdout: result.stdout, stderr: "" };
+}
+
+interface EvalDeps {
+  collect?: typeof runCollect;
+  followUp?: typeof runFollowUp;
+  score?: typeof runScore;
+  report?: typeof runReport;
+}
+
+function dispatchCmd(
+  parsed: Exclude<ParsedCli, { error: string }>,
+  deps: EvalDeps | undefined,
+  repoRoot: string,
+  runsRoot: string,
+): Promise<EvalRunResult> {
+  if (parsed.cmd === "collect") return runCollectCmd(parsed, deps?.collect ?? runCollect, repoRoot, runsRoot);
+  if (parsed.cmd === "follow-up") return runFollowUpCmd(parsed, deps?.followUp ?? runFollowUp, repoRoot, runsRoot);
+  if (parsed.cmd === "report") return runReportCmd(parsed, deps?.report ?? runReport, repoRoot, runsRoot);
+  return runScoreCmd(parsed, deps?.score ?? autoDetectScore(runsRoot), repoRoot, runsRoot);
+}
+
+export async function runEval(argv: string[], deps?: EvalDeps): Promise<EvalRunResult> {
   const parsed = parseCliArgs(argv);
   if ("error" in parsed) return { status: 1, stdout: "", stderr: `${parsed.error}\n` };
 
@@ -348,9 +403,7 @@ export async function runEval(
   const runsRoot = join(repoRoot, "engine", "eval", "runs");
 
   try {
-    if (parsed.cmd === "collect") return await runCollectCmd(parsed, deps?.collect ?? runCollect, repoRoot, runsRoot);
-    if (parsed.cmd === "follow-up") return await runFollowUpCmd(parsed, deps?.followUp ?? runFollowUp, repoRoot, runsRoot);
-    return await runScoreCmd(parsed, deps?.score ?? autoDetectScore(runsRoot), repoRoot, runsRoot);
+    return await dispatchCmd(parsed, deps, repoRoot, runsRoot);
   } catch (err) {
     return { status: 1, stdout: "", stderr: `${formatError(err)}\n` };
   }

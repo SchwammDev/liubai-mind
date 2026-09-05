@@ -7,11 +7,14 @@ import type { ParsedCli } from "./eval-cli.ts";
 import type { CollectOpts, CollectResult } from "./collect.ts";
 import type { runScore } from "./score.ts";
 import type { FollowUpOpts, FollowUpResult } from "./follow-up.ts";
+import type { runReport } from "./report.ts";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 
 type ScoreOpts = Parameters<typeof runScore>[0];
 type ScoreResult = Awaited<ReturnType<typeof runScore>>;
+type ReportOpts = Parameters<typeof runReport>[0];
+type ReportResult = Awaited<ReturnType<typeof runReport>>;
 
 function assertParsedCollect(parsed: ParsedCli, over: Partial<Extract<ParsedCli, { cmd: "collect" }>>): void {
   assert.deepEqual(parsed, {
@@ -48,6 +51,15 @@ function recordingScore(result: ScoreResult): { score: (opts: ScoreOpts) => Prom
     return result;
   };
   return { score, calls };
+}
+
+function recordingReport(result: ReportResult): { report: (opts: ReportOpts) => Promise<ReportResult>; calls: ReportOpts[] } {
+  const calls: ReportOpts[] = [];
+  const report = async (opts: ReportOpts): Promise<ReportResult> => {
+    calls.push(opts);
+    return result;
+  };
+  return { report, calls };
 }
 
 function throwingCollect(message: string): (opts: CollectOpts) => Promise<CollectResult> {
@@ -358,4 +370,46 @@ test("runEval_propagates_follow_up_stderr_and_nonzero_status", async () => {
 
   assert.equal(result.status, 1);
   assert.equal(result.stderr, "boom");
+});
+
+function reportArgv(...extra: string[]): string[] {
+  return ["report", ...extra];
+}
+
+test("parseCliArgs_parses_report_with_an_out_path", () => {
+  const parsed = parseCliArgs(reportArgv("--out", "custom/report.html"));
+
+  assert.deepEqual(parsed, { cmd: "report", out: "custom/report.html" });
+});
+
+test("parseCliArgs_parses_report_with_no_flags", () => {
+  const parsed = parseCliArgs(reportArgv());
+
+  assert.deepEqual(parsed, { cmd: "report" });
+});
+
+function resolvedReportPaths(calls: ReportOpts[]): { experimentsPath: string; corpusDir: string; runsDir: string; outPath: string } {
+  const call = calls[0]!;
+  return { experimentsPath: call.experimentsPath, corpusDir: call.corpusDir, runsDir: call.runsDir, outPath: call.outPath };
+}
+
+test("runEval_routes_report_to_the_report_dependency_with_the_default_experiments_corpus_and_out_paths", async () => {
+  const { report, calls } = recordingReport({ status: 0, stdout: "" });
+
+  await runEval(["report"], { report });
+
+  assert.deepEqual(resolvedReportPaths(calls), {
+    experimentsPath: join(REPO_ROOT, "engine", "eval", "experiments.json"),
+    corpusDir: join(REPO_ROOT, "engine", "eval", "corpus"),
+    runsDir: join(REPO_ROOT, "engine", "eval", "runs"),
+    outPath: join(REPO_ROOT, "engine", "eval", "runs", "report.html"),
+  });
+});
+
+test("runEval_passes_a_custom_out_path_through_to_the_report_dependency", async () => {
+  const { report, calls } = recordingReport({ status: 0, stdout: "" });
+
+  await runEval(["report", "--out", "custom/report.html"], { report });
+
+  assert.equal(calls[0]?.outPath, "custom/report.html");
 });
