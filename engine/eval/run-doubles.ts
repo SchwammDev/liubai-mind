@@ -26,8 +26,8 @@ export function turnStart(): string {
   return JSON.stringify({ type: "turn_start" });
 }
 
-export function toolCall(toolName: string): string {
-  return JSON.stringify({ type: "tool_execution_start", toolCallId: "t", toolName, args: {} });
+export function toolCall(toolName: string, args: Record<string, unknown> = {}): string {
+  return JSON.stringify({ type: "tool_execution_start", toolCallId: "t", toolName, args });
 }
 
 export function nudgeFired(rule: RuleName): string {
