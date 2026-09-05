@@ -1,14 +1,16 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 import { loadExperiments, loadTreatmentIdsByRun, unclaimedRunFolders, validateExperiments } from "./experiments.ts";
 import type { Experiment } from "./experiments.ts";
 import { loadCases } from "./corpus.ts";
-import type { RawRow, Tier } from "./eval-contract.ts";
+import type { RawRow } from "./eval-contract.ts";
 import type { RepetitionRecord } from "./repetition-record.ts";
 import { buildReportViewModel } from "./report-view.ts";
-import type { RunRecordsForReport } from "./report-view.ts";
+import type { CaseFactsForReport, RunRecordsForReport } from "./report-view.ts";
 import { renderReportHtml } from "./report-html.ts";
+import { showFileAtCommit } from "./provenance.ts";
+import type { FileAtCommit } from "./provenance.ts";
 
 const JUDGED_FILENAME = "judged.jsonl";
 const RAW_FILENAME = "raw.jsonl";
@@ -54,7 +56,9 @@ function loadRunData(runDir: string, run: string): { data: RunRecordsForReport }
 }
 
 function runFoldersClaimedByTreatments(experiments: Experiment[]): string[] {
-  return [...new Set(experiments.flatMap((experiment) => experiment.treatments.map((treatment) => treatment.run)))];
+  const treatmentRuns = experiments.flatMap((experiment) => experiment.treatments.map((treatment) => treatment.run));
+  const sourceRuns = experiments.map((experiment) => experiment.sourceRun).filter((run): run is string => run !== undefined);
+  return [...new Set([...treatmentRuns, ...sourceRuns])];
 }
 
 function loadRunDataByFolder(runsDir: string, runFolders: string[]): { runData: Map<string, RunRecordsForReport> } | { error: string } {
@@ -69,10 +73,45 @@ function loadRunDataByFolder(runsDir: string, runFolders: string[]): { runData: 
   return { runData };
 }
 
-function tierByCaseIdFrom(corpusDir: string): { map: Map<string, Tier> } | { error: string } {
+function caseFactsByCaseIdFrom(corpusDir: string): { map: Map<string, CaseFactsForReport> } | { error: string } {
   const cases = loadCases(corpusDir);
   if ("error" in cases) return { error: `report: failed to load corpus: ${cases.error}` };
-  return { map: new Map(cases.map((kase) => [kase.id, kase.tier])) };
+  return {
+    map: new Map(
+      cases.map((kase) => [
+        kase.id,
+        { tier: kase.tier, entry: kase.entry, ...(kase.reference !== undefined ? { reference: kase.reference } : {}) },
+      ]),
+    ),
+  };
+}
+
+function corpusPathFor(repoRoot: string, corpusDir: string, caseId: string, entry: string): string {
+  return join(relative(repoRoot, corpusDir), caseId, `${entry}.case`);
+}
+
+function originalSourceByKeyFrom(
+  repoRoot: string,
+  corpusDir: string,
+  caseFactsByCaseId: Map<string, CaseFactsForReport>,
+  runData: Map<string, RunRecordsForReport>,
+): Map<string, FileAtCommit> {
+  const resolved = new Map<string, FileAtCommit>();
+
+  for (const records of runData.values()) {
+    for (const row of records.raw) {
+      const caseFacts = caseFactsByCaseId.get(row.caseId);
+      if (caseFacts === undefined) continue;
+
+      const key = `${row.caseId}\0${row.provenance.liubaiSha}`;
+      if (resolved.has(key)) continue;
+
+      const path = corpusPathFor(repoRoot, corpusDir, row.caseId, caseFacts.entry);
+      resolved.set(key, showFileAtCommit(repoRoot, row.provenance.liubaiSha, path));
+    }
+  }
+
+  return resolved;
 }
 
 export async function runReport(opts: ReportOpts): Promise<ReportResult> {
@@ -82,15 +121,16 @@ export async function runReport(opts: ReportOpts): Promise<ReportResult> {
   const violations = validateExperiments(experiments, known);
   if (violations.length > 0) return { status: 1, stdout: violations.join("\n") };
 
-  const tierByCaseId = tierByCaseIdFrom(opts.corpusDir);
-  if ("error" in tierByCaseId) return { status: 1, stdout: tierByCaseId.error };
+  const caseFacts = caseFactsByCaseIdFrom(opts.corpusDir);
+  if ("error" in caseFacts) return { status: 1, stdout: caseFacts.error };
 
   const runData = loadRunDataByFolder(opts.runsDir, runFoldersClaimedByTreatments(experiments));
   if ("error" in runData) return { status: 1, stdout: runData.error };
 
   const unclaimed = unclaimedRunFolders(experiments, known);
+  const originalSourceByKey = originalSourceByKeyFrom(opts.repoRoot, opts.corpusDir, caseFacts.map, runData.runData);
 
-  const viewModel = buildReportViewModel(experiments, runData.runData, tierByCaseId.map, unclaimed);
+  const viewModel = buildReportViewModel(experiments, runData.runData, caseFacts.map, unclaimed, originalSourceByKey);
   writeFileSync(opts.outPath, renderReportHtml(viewModel));
 
   return { status: 0, stdout: `report written: ${opts.outPath}` };

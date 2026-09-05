@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { gitSha, buildProvenance } from "./provenance.ts";
+import { gitSha, buildProvenance, showFileAtCommit } from "./provenance.ts";
 import { packHash } from "../contract.ts";
 
 function tempGitRepo(): string {
@@ -105,6 +105,30 @@ function assertPassedThroughUnchanged(
     expected,
   );
 }
+
+test("showFileAtCommit_reads_a_file_as_it_stood_at_the_given_commit", () => {
+  const repo = tempGitRepo();
+
+  const result = showFileAtCommit(repo, gitSha(repo), "file.txt");
+
+  assert.deepEqual(result, { content: "hello\n" });
+});
+
+test("showFileAtCommit_reports_unavailable_for_a_sha_a_dirty_tree_recorded", () => {
+  const repo = tempGitRepo();
+
+  const result = showFileAtCommit(repo, "abc1234-dirty", "file.txt");
+
+  assert.deepEqual(result, { unavailable: true });
+});
+
+test("showFileAtCommit_reports_unavailable_rather_than_falling_back_to_the_working_tree_for_an_unresolvable_sha", () => {
+  const repo = tempGitRepo();
+
+  const result = showFileAtCommit(repo, "0000000", "file.txt");
+
+  assert.deepEqual(result, { unavailable: true });
+});
 
 test("buildProvenance_passes_model_treatment_timestamp_and_reasoning_through_unchanged", () => {
   const repo = tempGitRepo();
