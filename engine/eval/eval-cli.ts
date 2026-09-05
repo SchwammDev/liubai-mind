@@ -4,7 +4,7 @@ import { runCollect } from "./collect.ts";
 import { runScore } from "./score.ts";
 import { runFollowUp } from "./follow-up.ts";
 import { routeScore } from "./follow-up-score.ts";
-import { runReport } from "./report.ts";
+import { runReport, serveReport } from "./report.ts";
 import type { Tier } from "./eval-contract.ts";
 import { REASONING_LEVELS } from "./spawner.ts";
 
@@ -33,13 +33,14 @@ export type ParsedCli =
       reasoning?: string;
     }
   | { cmd: "score"; run: string; compare?: string }
-  | { cmd: "report"; out?: string }
+  | { cmd: "report"; out?: string; serve?: boolean; port?: number }
   | { error: string };
 
 interface EvalRunResult {
   status: number;
   stdout: string;
   stderr: string;
+  keepAlive?: boolean;
 }
 
 const DEFAULT_REPETITIONS = 5;
@@ -50,7 +51,7 @@ const USAGE = [
   "  liubai eval collect --run <name> --model <provider/id> [--repetitions N] [--parallel N] [--timeout-ms N] [--case id]... [--treatment id]... [--tier <easy|hard>] [--reasoning <off|minimal|low|medium|high|xhigh|max>]",
   "  liubai eval follow-up --run <newRun> --source-run <existingRun> --model <provider/id> [--parallel N] [--timeout-ms N] [--case id]... [--treatment id]... [--reasoning <off|minimal|low|medium|high|xhigh|max>]",
   "  liubai eval score --run <name> [--compare <otherRunName>]",
-  "  liubai eval report [--out <path>]",
+  "  liubai eval report [--out <path>] [--serve [--port N]]",
 ].join("\n");
 
 function usageError(detail: string): { error: string } {
@@ -87,6 +88,8 @@ interface ScoreAccum {
 
 interface ReportAccum {
   out?: string;
+  serve?: boolean;
+  portRaw?: string;
 }
 
 type FlagHandlers<T> = Record<string, (accum: T, value: string) => void>;
@@ -137,12 +140,6 @@ function scoreFlagHandlers(): FlagHandlers<ScoreAccum> {
   };
 }
 
-function reportFlagHandlers(): FlagHandlers<ReportAccum> {
-  return {
-    "--out": (a, v) => { a.out = v; },
-  };
-}
-
 function parseRepetitions(raw: string | undefined): { value: number } | { error: string } {
   if (raw === undefined) return { value: DEFAULT_REPETITIONS };
   const n = Number(raw);
@@ -167,6 +164,13 @@ function parseReasoning(raw: string | undefined): { value: string | undefined } 
   if (raw === undefined) return { value: undefined };
   if ((REASONING_LEVELS as readonly string[]).includes(raw)) return { value: raw };
   return { error: `--reasoning must be one of ${REASONING_LEVELS.join(", ")}, got: ${raw}` };
+}
+
+function parsePort(raw: string | undefined): { value: number | undefined } | { error: string } {
+  if (raw === undefined) return { value: undefined };
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) return { error: `--port must be a positive integer, got: ${raw}` };
+  return { value: n };
 }
 
 function collectOptionalFields(
@@ -266,12 +270,46 @@ function parseScoreArgs(args: string[]): ParsedCli {
   return { cmd: "score", run: accum.run, ...(accum.compare !== undefined ? { compare: accum.compare } : {}) };
 }
 
+function consumeReportFlags(args: string[], accum: ReportAccum): { error: string } | undefined {
+  let i = 0;
+  while (i < args.length) {
+    const flag = args[i];
+
+    if (flag === "--serve") {
+      accum.serve = true;
+      i += 1;
+      continue;
+    }
+
+    const value = args[i + 1];
+    if (value === undefined) return { error: `missing value for ${flag}` };
+
+    if (flag === "--out") {
+      accum.out = value;
+    } else if (flag === "--port") {
+      accum.portRaw = value;
+    } else {
+      return { error: `unknown flag: ${flag}` };
+    }
+    i += 2;
+  }
+  return undefined;
+}
+
 function parseReportArgs(args: string[]): ParsedCli {
   const accum: ReportAccum = {};
-  const flagError = consumeFlags(args, reportFlagHandlers(), accum);
+  const flagError = consumeReportFlags(args, accum);
   if (flagError !== undefined) return usageError(flagError.error);
 
-  return { cmd: "report", ...(accum.out !== undefined ? { out: accum.out } : {}) };
+  const port = parsePort(accum.portRaw);
+  if ("error" in port) return usageError(port.error);
+
+  return {
+    cmd: "report",
+    ...(accum.out !== undefined ? { out: accum.out } : {}),
+    ...(accum.serve === true ? { serve: true } : {}),
+    ...(port.value !== undefined ? { port: port.value } : {}),
+  };
 }
 
 export function parseCliArgs(argv: string[]): ParsedCli {
@@ -359,20 +397,34 @@ function autoDetectScore(runsRoot: string): typeof runScore {
   return (opts) => routeScore(opts, runsRoot);
 }
 
+function reportOptsFor(parsed: Extract<ParsedCli, { cmd: "report" }>, repoRoot: string, runsRoot: string): Parameters<typeof runReport>[0] {
+  return {
+    runsDir: runsRoot,
+    experimentsPath: join(repoRoot, "engine", "eval", "experiments.json"),
+    corpusDir: join(repoRoot, "engine", "eval", "corpus"),
+    repoRoot,
+    outPath: parsed.out ?? join(runsRoot, "report.html"),
+    ...(parsed.port !== undefined ? { port: parsed.port } : {}),
+  };
+}
+
+async function runReportServeCmd(
+  parsed: Extract<ParsedCli, { cmd: "report" }>,
+  serve: typeof serveReport,
+  repoRoot: string,
+  runsRoot: string,
+): Promise<EvalRunResult> {
+  const server = await serve(reportOptsFor(parsed, repoRoot, runsRoot));
+  return { status: 0, stdout: `serving report at ${server.url}`, stderr: "", keepAlive: true };
+}
+
 async function runReportCmd(
   parsed: Extract<ParsedCli, { cmd: "report" }>,
   report: typeof runReport,
   repoRoot: string,
   runsRoot: string,
 ): Promise<EvalRunResult> {
-  const result = await report({
-    runsDir: runsRoot,
-    experimentsPath: join(repoRoot, "engine", "eval", "experiments.json"),
-    corpusDir: join(repoRoot, "engine", "eval", "corpus"),
-    repoRoot,
-    outPath: parsed.out ?? join(runsRoot, "report.html"),
-  });
-
+  const result = await report(reportOptsFor(parsed, repoRoot, runsRoot));
   return { status: result.status, stdout: result.stdout, stderr: "" };
 }
 
@@ -381,6 +433,17 @@ interface EvalDeps {
   followUp?: typeof runFollowUp;
   score?: typeof runScore;
   report?: typeof runReport;
+  serve?: typeof serveReport;
+}
+
+function dispatchReportCmd(
+  parsed: Extract<ParsedCli, { cmd: "report" }>,
+  deps: EvalDeps | undefined,
+  repoRoot: string,
+  runsRoot: string,
+): Promise<EvalRunResult> {
+  if (parsed.serve === true) return runReportServeCmd(parsed, deps?.serve ?? serveReport, repoRoot, runsRoot);
+  return runReportCmd(parsed, deps?.report ?? runReport, repoRoot, runsRoot);
 }
 
 function dispatchCmd(
@@ -391,7 +454,7 @@ function dispatchCmd(
 ): Promise<EvalRunResult> {
   if (parsed.cmd === "collect") return runCollectCmd(parsed, deps?.collect ?? runCollect, repoRoot, runsRoot);
   if (parsed.cmd === "follow-up") return runFollowUpCmd(parsed, deps?.followUp ?? runFollowUp, repoRoot, runsRoot);
-  if (parsed.cmd === "report") return runReportCmd(parsed, deps?.report ?? runReport, repoRoot, runsRoot);
+  if (parsed.cmd === "report") return dispatchReportCmd(parsed, deps, repoRoot, runsRoot);
   return runScoreCmd(parsed, deps?.score ?? autoDetectScore(runsRoot), repoRoot, runsRoot);
 }
 
@@ -413,6 +476,7 @@ async function main(): Promise<void> {
   const res = await runEval(process.argv.slice(2));
   if (res.stdout) console.log(res.stdout);
   if (res.stderr) console.error(res.stderr);
+  if (res.keepAlive === true) return;
   process.exit(res.status);
 }
 

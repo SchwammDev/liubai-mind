@@ -221,8 +221,10 @@ function experimentDetailFor(
   caseFactsByCaseId: Map<string, CaseFactsForReport> = new Map(),
   originalSourceByKey: Map<string, FileAtCommit> = new Map(),
   sessionLogByKey: Map<string, string> = new Map(),
+  notesByKey: Map<string, string[]> = new Map(),
+  live = false,
 ): ReturnType<typeof buildReportViewModel>["experimentDetails"][number] {
-  return buildReportViewModel([exp], runData(records), caseFactsByCaseId, [], originalSourceByKey, sessionLogByKey).experimentDetails[0]!;
+  return buildReportViewModel([exp], runData(records), caseFactsByCaseId, [], originalSourceByKey, sessionLogByKey, notesByKey, live).experimentDetails[0]!;
 }
 
 test("a treatment's repetitions are ordered worst first for a single-task experiment", () => {
@@ -729,4 +731,39 @@ test("a repetition with no recorded transcript path offers no raw transcript lin
   const review = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId));
 
   assert.equal(review.rawTranscriptHref, undefined);
+});
+
+test("a review's notes come from the notesByKey map, keyed by its own repetition id", () => {
+  const records = {
+    "run-a": { judged: [judgedRecord("case-a", "t1", 1, {})], raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" } })] },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+  const notesByKey = new Map([["run-a/case-a/t1/1", ["the split is cosmetic, I agree with gamed"]]]);
+
+  const review = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId, new Map(), new Map(), notesByKey));
+
+  assert.deepEqual(review.notes, ["the split is cosmetic, I agree with gamed"]);
+});
+
+test("a review carries no notes when the run folder has none recorded for it", () => {
+  const records = {
+    "run-a": { judged: [judgedRecord("case-a", "t1", 1, {})], raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" } })] },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+
+  const review = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId));
+
+  assert.deepEqual(review.notes, []);
+});
+
+test("a review is marked live only when the view model was built in serve mode", () => {
+  const records = {
+    "run-a": { judged: [judgedRecord("case-a", "t1", 1, {})], raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" } })] },
+  };
+  const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);
+
+  const staticReview = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId));
+  const liveReview = reviewOf(experimentDetailFor(singleTaskExperiment(), records, caseFactsByCaseId, new Map(), new Map(), new Map(), true));
+
+  assert.deepEqual({ static: staticReview.live, live: liveReview.live }, { static: false, live: true });
 });

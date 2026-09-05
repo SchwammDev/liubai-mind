@@ -7,7 +7,7 @@ import type { ParsedCli } from "./eval-cli.ts";
 import type { CollectOpts, CollectResult } from "./collect.ts";
 import type { runScore } from "./score.ts";
 import type { FollowUpOpts, FollowUpResult } from "./follow-up.ts";
-import type { runReport } from "./report.ts";
+import type { runReport, serveReport } from "./report.ts";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 
@@ -15,6 +15,7 @@ type ScoreOpts = Parameters<typeof runScore>[0];
 type ScoreResult = Awaited<ReturnType<typeof runScore>>;
 type ReportOpts = Parameters<typeof runReport>[0];
 type ReportResult = Awaited<ReturnType<typeof runReport>>;
+type ServeResult = Awaited<ReturnType<typeof serveReport>>;
 
 function assertParsedCollect(parsed: ParsedCli, over: Partial<Extract<ParsedCli, { cmd: "collect" }>>): void {
   assert.deepEqual(parsed, {
@@ -388,6 +389,24 @@ test("parseCliArgs_parses_report_with_no_flags", () => {
   assert.deepEqual(parsed, { cmd: "report" });
 });
 
+test("parseCliArgs_parses_report_with_the_serve_flag", () => {
+  const parsed = parseCliArgs(reportArgv("--serve"));
+
+  assert.deepEqual(parsed, { cmd: "report", serve: true });
+});
+
+test("parseCliArgs_parses_report_serve_with_a_port", () => {
+  const parsed = parseCliArgs(reportArgv("--serve", "--port", "4000"));
+
+  assert.deepEqual(parsed, { cmd: "report", serve: true, port: 4000 });
+});
+
+test("parseCliArgs_reports_error_for_a_non_numeric_port", () => {
+  const parsed = parseCliArgs(reportArgv("--serve", "--port", "not-a-number"));
+
+  assert.equal("error" in parsed && parsed.error.includes("--port"), true);
+});
+
 function resolvedReportPaths(calls: ReportOpts[]): { experimentsPath: string; corpusDir: string; runsDir: string; outPath: string } {
   const call = calls[0]!;
   return { experimentsPath: call.experimentsPath, corpusDir: call.corpusDir, runsDir: call.runsDir, outPath: call.outPath };
@@ -412,4 +431,32 @@ test("runEval_passes_a_custom_out_path_through_to_the_report_dependency", async 
   await runEval(["report", "--out", "custom/report.html"], { report });
 
   assert.equal(calls[0]?.outPath, "custom/report.html");
+});
+
+function recordingServe(result: ServeResult): { serve: (opts: ReportOpts) => Promise<ServeResult>; calls: ReportOpts[] } {
+  const calls: ReportOpts[] = [];
+  const serve = async (opts: ReportOpts): Promise<ServeResult> => {
+    calls.push(opts);
+    return result;
+  };
+  return { serve, calls };
+}
+
+test("runEval_routes_report_serve_to_the_serve_dependency_and_names_its_url_in_stdout_without_asking_the_process_to_exit", async () => {
+  const { serve } = recordingServe({ url: "http://127.0.0.1:54321", close: async () => {} });
+
+  const result = await runEval(["report", "--serve"], { serve });
+
+  assert.deepEqual(
+    { stdoutMentionsUrl: result.stdout.includes("http://127.0.0.1:54321"), keepAlive: result.keepAlive },
+    { stdoutMentionsUrl: true, keepAlive: true },
+  );
+});
+
+test("runEval_passes_a_custom_port_through_to_the_serve_dependency", async () => {
+  const { serve, calls } = recordingServe({ url: "http://127.0.0.1:4000", close: async () => {} });
+
+  await runEval(["report", "--serve", "--port", "4000"], { serve });
+
+  assert.equal(calls[0]?.port, 4000);
 });
