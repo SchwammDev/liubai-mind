@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { runReport } from "./report.ts";
+import { runReport, serveReport } from "./report.ts";
 import type { Experiment } from "./experiments.ts";
 import type { RawRow } from "./eval-contract.ts";
 import { CORPUS_DIR, tempDir, writeRun } from "./run-doubles.ts";
@@ -211,4 +211,89 @@ test("a repetition whose transcript file has gone missing from disk still render
     { status: result.status, hasTranscriptIsland: readFileSync(join(runsRoot, "report.html"), "utf8").includes('<script type="application/json" data-transcript="') },
     { status: 0, hasTranscriptIsland: false },
   );
+});
+
+function servedRunOn(): { runsRoot: string; runDir: string } {
+  const runsRoot = tempDir("report-serve-");
+  const runDir = join(runsRoot, "served-run");
+  writeHandCraftedRun(
+    runDir,
+    [minimalJudgedRow({})],
+    [minimalRawRow(1, { [ENTRY_FILE]: "function processBatch() { return 1; }\n" })],
+  );
+  writeFileSync(join(runsRoot, "experiments.json"), JSON.stringify([experimentClaiming("served-run")]));
+  return { runsRoot, runDir };
+}
+
+function repetitionIdOf(run: string): string {
+  return `${run}/${CASE_ID}/${TREATMENT}/1`;
+}
+
+function notesWrittenIn(runDir: string): Record<string, unknown>[] {
+  try {
+    return readFileSync(join(runDir, "notes.jsonl"), "utf8")
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+  } catch {
+    return [];
+  }
+}
+
+test("serveReport binds to 127.0.0.1 on an ephemeral port and serves the generated page", async () => {
+  const { runsRoot } = servedRunOn();
+  const server = await serveReport(reportOn(runsRoot));
+
+  const page = await fetch(server.url);
+  await server.close();
+
+  assert.deepEqual(
+    { boundToLoopback: server.url.startsWith("http://127.0.0.1:"), status: page.status, isHtml: (await page.text()).includes("<!doctype html>") },
+    { boundToLoopback: true, status: 200, isHtml: true },
+  );
+});
+
+test("saving a note for a known repetition writes it beside that run's judged file", async () => {
+  const { runsRoot, runDir } = servedRunOn();
+  const server = await serveReport(reportOn(runsRoot));
+
+  const saved = await fetch(`${server.url}/note`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ repetition: repetitionIdOf("served-run"), text: "worth a second look" }),
+  });
+  await server.close();
+
+  assert.deepEqual(
+    { status: saved.status, notes: notesWrittenIn(runDir).map((note) => ({ caseId: note["caseId"], treatmentId: note["treatmentId"], repetition: note["repetition"], text: note["text"] })) },
+    { status: 200, notes: [{ caseId: CASE_ID, treatmentId: TREATMENT, repetition: 1, text: "worth a second look" }] },
+  );
+});
+
+test("a note posted with an unknown repetition id is rejected and writes nothing", async () => {
+  const { runsRoot, runDir } = servedRunOn();
+  const server = await serveReport(reportOn(runsRoot));
+
+  const rejected = await fetch(`${server.url}/note`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ repetition: "no-such-run/no-such-case/no-such-treatment/1", text: "should not land" }),
+  });
+  await server.close();
+
+  assert.deepEqual({ isClientError: rejected.status >= 400 && rejected.status < 500, notes: notesWrittenIn(runDir) }, { isClientError: true, notes: [] });
+});
+
+test("a malformed note body is rejected and writes nothing", async () => {
+  const { runsRoot, runDir } = servedRunOn();
+  const server = await serveReport(reportOn(runsRoot));
+
+  const rejected = await fetch(`${server.url}/note`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text: "missing the repetition field" }),
+  });
+  await server.close();
+
+  assert.deepEqual({ isClientError: rejected.status >= 400 && rejected.status < 500, notes: notesWrittenIn(runDir) }, { isClientError: true, notes: [] });
 });

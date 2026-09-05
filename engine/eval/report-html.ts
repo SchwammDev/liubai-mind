@@ -73,6 +73,7 @@ const PAGE_STYLE = `
   .diff-col .code .skip { color: #999; font-style: italic; }
   .note-box { border: 1px dashed #bbb; border-radius: 4px; padding: 8px 12px; margin: 8px 0; }
   .note-box textarea { width: 100%; font: inherit; margin-top: 6px; resize: vertical; }
+  .note-box ul.note-list { margin: 4px 0; padding-left: 18px; font-size: 13px; }
   .transcript-block { border: 1px solid #ddd; border-radius: 4px; padding: 10px 14px; margin: 8px 0; }
   .transcript-block button { font: inherit; padding: 2px 10px; border: 1px solid #888; border-radius: 10px; background: #fff; cursor: pointer; }
   .transcript-block button[disabled] { color: #999; cursor: default; }
@@ -221,12 +222,31 @@ function renderCompareControls(review: ReviewView): string {
   </div>`;
 }
 
-function renderNoteBox(): string {
+function renderNoteList(notes: string[]): string {
+  if (notes.length === 0) return "";
+  return `<ul class="note-list" data-note-list>${notes.map((note) => `<li>${escapeHtml(note)}</li>`).join("")}</ul>`;
+}
+
+function renderLiveNoteBox(review: ReviewView): string {
+  return `<div class="note-box" data-note-box="${escapeHtml(review.id)}">
+    <div class="label">note</div>
+    ${renderNoteList(review.notes)}
+    <textarea placeholder="agree or disagree with the automatic verdict, one line"></textarea>
+    <button type="button" data-save-note>save</button>
+  </div>`;
+}
+
+function renderStaticNoteBox(review: ReviewView): string {
   return `<div class="note-box">
     <div class="label">note · saved once the report runs in serve mode</div>
+    ${renderNoteList(review.notes)}
     <textarea disabled placeholder="agree or disagree with the automatic verdict, one line"></textarea>
     <button type="button" disabled>save</button>
   </div>`;
+}
+
+function renderNoteBox(review: ReviewView): string {
+  return review.live ? renderLiveNoteBox(review) : renderStaticNoteBox(review);
 }
 
 function renderReferenceState(review: ReviewView, seenStateKeys: Set<string>): string {
@@ -274,7 +294,7 @@ function renderReview(review: ReviewView, seenStateKeys: Set<string>): string {
     ${renderWhyBox(review)}
     ${renderReferenceState(review, seenStateKeys)}
     ${renderTranscriptBlock(review)}
-    ${renderNoteBox()}
+    ${renderNoteBox(review)}
   </section>`;
 }
 
@@ -559,6 +579,38 @@ const REVIEW_SCRIPT = `<script>
 })();
 </script>`;
 
+const NOTE_SCRIPT = `<script>
+document.querySelectorAll("[data-note-box]").forEach(function (box) {
+  var button = box.querySelector("[data-save-note]");
+  var textarea = box.querySelector("textarea");
+  var list = box.querySelector("[data-note-list]");
+  if (!button || !textarea) return;
+
+  button.addEventListener("click", function () {
+    var text = textarea.value.trim();
+    if (text.length === 0) return;
+
+    fetch("/note", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ repetition: box.dataset.noteBox, text: text }),
+    }).then(function (response) {
+      if (!response.ok) return;
+      if (!list) {
+        list = document.createElement("ul");
+        list.className = "note-list";
+        list.dataset.noteList = "";
+        box.insertBefore(list, textarea);
+      }
+      var item = document.createElement("li");
+      item.textContent = text;
+      list.appendChild(item);
+      textarea.value = "";
+    });
+  });
+});
+</script>`;
+
 const TRANSCRIPT_SCRIPT = `<script>
 (function () {
   function escapeHtml(value) {
@@ -756,6 +808,7 @@ ${model.experimentDetails.map((detail) => renderExperimentDetail(detail, seenSta
 ${FILTER_SCRIPT}
 ${REVIEW_SCRIPT}
 ${TRANSCRIPT_SCRIPT}
+${NOTE_SCRIPT}
 ${renderTranscriptIslands(collectTranscriptIslands(model))}
 </body>
 </html>

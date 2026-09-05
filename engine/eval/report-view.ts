@@ -77,6 +77,8 @@ export interface ReviewView {
   reference?: ReferenceFixView;
   transcript?: TranscriptView;
   rawTranscriptHref?: string;
+  notes: string[];
+  live: boolean;
 }
 
 export interface ExperimentView {
@@ -478,6 +480,8 @@ function reviewViewFor(
   runData: Map<string, RunRecordsForReport>,
   originalSourceByKey: Map<string, FileAtCommit>,
   sessionLogByKey: Map<string, string>,
+  notesByKey: Map<string, string[]>,
+  live: boolean,
 ): ReviewView | undefined {
   const caseFacts = caseFactsByCaseId.get(facts.caseId);
   if (caseFacts === undefined) return undefined;
@@ -489,15 +493,18 @@ function reviewViewFor(
       : codeStatesForEarlierResult(facts, facts.startsFrom, caseFacts.entry, runData, ownRow, originalSourceByKey);
   const reference = referenceFixFor(facts.caseId, caseFacts);
   const defaultPair = defaultPairFor(facts.startsFrom);
+  const id = repetitionIdFor(facts);
 
   return {
-    id: repetitionIdFor(facts),
+    id,
     verdict: facts.verdict,
     whyThisVerdict: whyThisVerdictText(facts),
     entryFilename: caseFacts.entry,
     codeStates,
     defaultBeforeName: defaultPair.before,
     defaultAfterName: defaultPair.after,
+    notes: notesByKey.get(id) ?? [],
+    live,
     ...(reference !== undefined ? { reference } : {}),
     ...transcriptFieldsFor(facts, sessionLogByKey),
   };
@@ -509,8 +516,10 @@ function repetitionViewOf(
   runData: Map<string, RunRecordsForReport>,
   originalSourceByKey: Map<string, FileAtCommit>,
   sessionLogByKey: Map<string, string>,
+  notesByKey: Map<string, string[]>,
+  live: boolean,
 ): RepetitionView {
-  const review = reviewViewFor(facts, caseFactsByCaseId, runData, originalSourceByKey, sessionLogByKey);
+  const review = reviewViewFor(facts, caseFactsByCaseId, runData, originalSourceByKey, sessionLogByKey, notesByKey, live);
 
   return {
     id: repetitionIdFor(facts),
@@ -564,6 +573,8 @@ function treatmentViewOf(
   runData: Map<string, RunRecordsForReport>,
   originalSourceByKey: Map<string, FileAtCommit>,
   sessionLogByKey: Map<string, string>,
+  notesByKey: Map<string, string[]>,
+  live: boolean,
 ): TreatmentView {
   return {
     treatmentId: treatment.treatmentId,
@@ -572,7 +583,7 @@ function treatmentViewOf(
     meanTurns: formatMean(meanOfDefined(facts.map((fact) => fact.turns))),
     meanTokensIn: formatMean(meanOfDefined(facts.map((fact) => fact.tokensIn))),
     meanNudgesPerRepetition: formatMean(meanOfDefined(facts.map((fact) => fact.nudgesTotal))),
-    repetitions: facts.map((fact) => repetitionViewOf(fact, caseFactsByCaseId, runData, originalSourceByKey, sessionLogByKey)),
+    repetitions: facts.map((fact) => repetitionViewOf(fact, caseFactsByCaseId, runData, originalSourceByKey, sessionLogByKey, notesByKey, live)),
   };
 }
 
@@ -707,6 +718,8 @@ function experimentDetailFor(
   caseFactsByCaseId: Map<string, CaseFactsForReport>,
   originalSourceByKey: Map<string, FileAtCommit>,
   sessionLogByKey: Map<string, string>,
+  notesByKey: Map<string, string[]>,
+  live: boolean,
 ): ExperimentDetailView {
   const order = severityOrderFor(experiment.kind);
   const successVerdict = successVerdictFor(experiment.kind);
@@ -727,7 +740,7 @@ function experimentDetailFor(
     successVerdict,
     setupCheck: setupCheckFor(experiment, runData),
     treatments: treatmentsWithFacts.map(({ treatment, facts }) =>
-      treatmentViewOf(order, treatment, facts, caseFactsByCaseId, runData, originalSourceByKey, sessionLogByKey),
+      treatmentViewOf(order, treatment, facts, caseFactsByCaseId, runData, originalSourceByKey, sessionLogByKey, notesByKey, live),
     ),
     perCase: perCaseRowsFor(
       order,
@@ -766,9 +779,11 @@ export function buildReportViewModel(
   unclaimedRunFolders: string[],
   originalSourceByKey: Map<string, FileAtCommit> = new Map(),
   sessionLogByKey: Map<string, string> = new Map(),
+  notesByKey: Map<string, string[]> = new Map(),
+  live = false,
 ): ReportViewModel {
   const experimentDetails = experiments.map((experiment) =>
-    experimentDetailFor(experiment, runData, caseFactsByCaseId, originalSourceByKey, sessionLogByKey),
+    experimentDetailFor(experiment, runData, caseFactsByCaseId, originalSourceByKey, sessionLogByKey, notesByKey, live),
   );
   const identicalTreatmentsFlagById = new Map(experimentDetails.map((detail) => [detail.id, detail.setupCheck.identicalTreatments]));
 

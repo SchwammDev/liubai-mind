@@ -75,6 +75,8 @@ function review(over: Partial<ReviewView> = {}): ReviewView {
     codeStates: [codeState("original"), codeState("change")],
     defaultBeforeName: "original",
     defaultAfterName: "change",
+    notes: [],
+    live: false,
     ...over,
   };
 }
@@ -260,12 +262,49 @@ test("the reference-fix control is offered only when the review carries a refere
   );
 });
 
-test("the note box renders disabled, since wiring it to serve mode is a later slice", () => {
+test("the note box renders disabled when the review is not live", () => {
   const detail = experimentDetailView({ treatments: [treatmentView({ repetitions: [repetitionView()] })] });
 
   const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
 
   assert.equal(/<textarea[^>]*\bdisabled\b/.test(html), true);
+});
+
+test("a live review's note box offers a save control instead of the disabled placeholder", () => {
+  const detail = experimentDetailView({
+    treatments: [treatmentView({ repetitions: [repetitionView({ review: review({ live: true }) })] })],
+  });
+
+  const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
+
+  assert.deepEqual(
+    { hasSaveControl: html.includes("data-save-note"), textareaDisabled: /<textarea[^>]*\bdisabled\b/.test(html) },
+    { hasSaveControl: true, textareaDisabled: false },
+  );
+});
+
+test("a live note box carries its own repetition id so the client posts to the right place", () => {
+  const detail = experimentDetailView({
+    treatments: [treatmentView({ repetitions: [repetitionView({ review: review({ id: "run-a/case-a/t1/9", live: true }) })] })],
+  });
+
+  const html = renderReportHtml(viewModel({ experimentDetails: [detail] }));
+
+  assert.equal(html.includes('data-note-box="run-a/case-a/t1/9"'), true);
+});
+
+test("a saved note appears in the note box, escaped, whether or not the review is live", () => {
+  const staticHtml = renderReportHtml(
+    viewModel({ experimentDetails: [experimentDetailView({ treatments: [treatmentView({ repetitions: [repetitionView({ review: review({ notes: ["<script>bad</script>"] }) })] })] })] }),
+  );
+  const liveHtml = renderReportHtml(
+    viewModel({ experimentDetails: [experimentDetailView({ treatments: [treatmentView({ repetitions: [repetitionView({ review: review({ notes: ["<script>bad</script>"], live: true }) })] })] })] }),
+  );
+
+  assert.deepEqual(
+    { staticEscaped: staticHtml.includes("&lt;script&gt;bad&lt;/script&gt;"), liveEscaped: liveHtml.includes("&lt;script&gt;bad&lt;/script&gt;") },
+    { staticEscaped: true, liveEscaped: true },
+  );
 });
 
 function transcriptTurn(over: Partial<TranscriptTurnView> = {}): TranscriptTurnView {
