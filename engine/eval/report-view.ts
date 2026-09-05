@@ -58,9 +58,11 @@ export interface RunRecordsForReport {
 export interface CaseFactsForReport {
   tier: Tier;
   entry: string;
+  task: string;
   reference?: Record<string, string>;
   behaviorChecksTotal?: number;
   extensionBehaviorChecksTotal?: number;
+  extensionTask?: string;
 }
 
 export type CodeStateName = "original" | "change" | "earlier-change" | "follow-up-change";
@@ -460,15 +462,8 @@ function changeDedupeKeyFor(name: Extract<CodeStateName, "change" | "follow-up-c
   return [name, facts.run, facts.caseId, facts.treatmentId, facts.repetition].join("\0");
 }
 
-const TASK_TRUNCATE_LENGTH = 60;
-
-function truncateTask(text: string): string {
-  const oneLine = text.split("\n")[0]!.trim();
-  return oneLine.length <= TASK_TRUNCATE_LENGTH ? oneLine : `${oneLine.slice(0, TASK_TRUNCATE_LENGTH).trimEnd()}…`;
-}
-
-function taskTextFor(row: RawRowForReport | undefined): string | undefined {
-  return row?.task === undefined ? undefined : truncateTask(row.task);
+function taskTextFor(row: RawRowForReport | undefined, fallbackTask: string | undefined): string | undefined {
+  return row?.task ?? fallbackTask;
 }
 
 function complexityLine(before: number, after: number): string {
@@ -504,8 +499,9 @@ function changeCardFor(
   checksTotal: number | undefined,
   source: ChecksSource & { decisionPointsBefore: number; decisionPointsAfter: number },
   row: RawRowForReport | undefined,
+  fallbackTask: string | undefined,
 ): ReviewStateCardView {
-  const taskText = taskTextFor(row);
+  const taskText = taskTextFor(row, fallbackTask);
   return {
     name,
     stateNumber,
@@ -529,12 +525,13 @@ function codeStatesForOriginalSource(
   const original = originalCodeState(facts.caseId, sha, entry, originalSourceByKey);
   const change = ownFilesCodeState("change", "change", ownRow, entry, changeCaptionFor(facts), changeDedupeKeyFor("change", facts));
   const checksTotal = kind === "single-task" ? caseFacts.behaviorChecksTotal : caseFacts.extensionBehaviorChecksTotal;
+  const fallbackTask = kind === "single-task" ? caseFacts.task : caseFacts.extensionTask;
 
   return {
     codeStates: [original, change],
     cards: [
       originalCard(original.dedupeKey, original.caption, facts.decisionPointsBefore),
-      changeCardFor("change", 1, "state 1 · change · this repetition", change.dedupeKey, checksTotal, facts, ownRow),
+      changeCardFor("change", 1, "state 1 · change · this repetition", change.dedupeKey, checksTotal, facts, ownRow, fallbackTask),
     ],
   };
 }
@@ -561,7 +558,7 @@ function codeStatesForEarlierResult(
   const earlierTitle = `state 1 · earlier change · run folder ${startsFrom.sourceRun}, repetition ${startsFrom.sourceRepetition}`;
   const cards: ReviewStateCardView[] = [originalCard(original.dedupeKey, original.caption, facts.decisionPointsBefore)];
   if (sourceRecord !== undefined) {
-    cards.push(changeCardFor("earlier-change", 1, earlierTitle, earlierChange.dedupeKey, caseFacts.behaviorChecksTotal, sourceRecord, sourceRow));
+    cards.push(changeCardFor("earlier-change", 1, earlierTitle, earlierChange.dedupeKey, caseFacts.behaviorChecksTotal, sourceRecord, sourceRow, caseFacts.task));
   }
   cards.push(
     changeCardFor(
@@ -572,6 +569,7 @@ function codeStatesForEarlierResult(
       caseFacts.extensionBehaviorChecksTotal,
       facts,
       ownRow,
+      caseFacts.extensionTask,
     ),
   );
 

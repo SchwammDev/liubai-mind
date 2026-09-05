@@ -1008,14 +1008,25 @@ const TRANSCRIPT_SCRIPT = `<script>
     });
   });
 
-  document.querySelectorAll("[data-transcript-block]").forEach(function (block) {
+  function renderTranscriptBlockOnce(block) {
+    if (block.dataset.rendered === "1") return;
     var id = block.getAttribute("data-transcript-block");
     var viewer = block.querySelector(".transcript-viewer");
     var island = document.querySelector('script[data-transcript="' + id + '"]');
     if (!viewer || !island) return;
-    var transcript = JSON.parse(island.textContent);
-    renderTranscript(viewer, transcript);
-  });
+    renderTranscript(viewer, JSON.parse(island.textContent));
+    block.dataset.rendered = "1";
+  }
+
+  function renderTranscriptForCurrentRoute() {
+    var section = document.getElementById(location.hash.slice(1));
+    if (!section || section.getAttribute("data-view") !== "transcript") return;
+    var block = section.querySelector("[data-transcript-block]");
+    if (block) renderTranscriptBlockOnce(block);
+  }
+
+  window.addEventListener("hashchange", renderTranscriptForCurrentRoute);
+  renderTranscriptForCurrentRoute();
 })();
 </script>`;
 
@@ -1071,6 +1082,7 @@ ${experimentSections}
 ${collector.reviewViews.join("")}
 ${collector.transcriptViews.join("")}
 ${collector.stateTexts.join("")}
+${renderTranscriptIslands(collectTranscriptIslands(model))}
 ${FILTER_SCRIPT}
 ${DISCLOSURE_SCRIPT}
 ${ROW_CLICK_SCRIPT}
@@ -1078,7 +1090,6 @@ ${ROUTER_SCRIPT}
 ${REVIEW_SCRIPT}
 ${TRANSCRIPT_SCRIPT}
 ${NOTE_SCRIPT}
-${renderTranscriptIslands(collectTranscriptIslands(model))}
 </body>
 </html>
 `;
