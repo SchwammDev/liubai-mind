@@ -600,7 +600,7 @@ test("aggregateFollowUp_stamps_every_row_as_follow_up", () => {
 
   const summary = aggregateFollowUp(judged);
 
-  assert.ok(summary.every((row) => row.touch === "second"));
+  assert.ok(summary.every((row) => row.touch === "follow-up"));
 });
 
 test("formatFollowUpMarkdown_renders_a_dash_for_null_cost_fields_never_a_zero", () => {
@@ -650,13 +650,13 @@ function writeRawJsonl(dir: string, rows: RawRow[]): void {
 test("touchKindOf_reports_single_task_when_no_row_carries_followUp", () => {
   const kind = touchKindOf([sourceRow("case-a")]);
 
-  assert.deepEqual(kind, { kind: "first" });
+  assert.deepEqual(kind, { kind: "single-task" });
 });
 
 test("touchKindOf_reports_follow_up_and_the_shared_source_run_when_every_row_carries_followUp", () => {
   const kind = touchKindOf([earlierResultRow("case-a"), controlRow("case-a")]);
 
-  assert.deepEqual(kind, { kind: "second", sourceRun: "source-run" });
+  assert.deepEqual(kind, { kind: "follow-up", sourceRun: "source-run" });
 });
 
 test("touchKindOf_errors_when_a_run_mixes_single_task_and_follow_up_rows", () => {
@@ -708,7 +708,7 @@ test("routeScore_routes_a_follow_up_run_to_follow_up_scoring", async () => {
 
   const summary = readFileSync(join(runDir, "summary.jsonl"), "utf8");
   assert.equal(result.status, 0);
-  assert.ok(summary.includes('"touch":"second"'));
+  assert.ok(summary.includes('"touch":"follow-up"'));
 });
 
 test("routeScore_fails_a_run_that_mixes_single_task_and_follow_up_rows", async () => {

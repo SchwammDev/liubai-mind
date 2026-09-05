@@ -24,7 +24,7 @@ export interface JudgedFollowUpRow {
 }
 
 export interface FollowUpSummaryRow {
-  touch: "second";
+  touch: "follow-up";
   treatmentId: string;
   caseId: string | null;
   stratum: string | null;
@@ -265,7 +265,7 @@ function extensionSuccessRateOf(counts: Record<FollowUpVerdict, number>, total: 
 
 function finalizeRow(treatmentId: string, caseId: string | null, stratum: string | null, acc: FollowUpAccumulator): FollowUpSummaryRow {
   return {
-    touch: "second",
+    touch: "follow-up",
     treatmentId,
     caseId,
     stratum,
@@ -377,11 +377,11 @@ export async function runFollowUpScore(opts: FollowUpScoreOpts): Promise<{ statu
   return { status: 0, stdout: formatFollowUpMarkdown(summary) };
 }
 
-export type TouchKind = { kind: "first" } | { kind: "second"; sourceRun: string } | { error: string };
+export type TouchKind = { kind: "single-task" } | { kind: "follow-up"; sourceRun: string } | { error: string };
 
 export function touchKindOf(rows: RawRow[]): TouchKind {
   const withFollowUp = rows.filter((row) => row.followUp !== undefined);
-  if (withFollowUp.length === 0) return { kind: "first" };
+  if (withFollowUp.length === 0) return { kind: "single-task" };
   if (withFollowUp.length !== rows.length) {
     return { error: "score: run mixes single-task and follow-up rows; run follow-up scoring or single-task scoring, not both" };
   }
@@ -391,7 +391,7 @@ export function touchKindOf(rows: RawRow[]): TouchKind {
     return { error: `score: follow-up run mixes multiple source runs: ${[...sourceRuns].sort().join(", ")}` };
   }
 
-  return { kind: "second", sourceRun: [...sourceRuns][0]! };
+  return { kind: "follow-up", sourceRun: [...sourceRuns][0]! };
 }
 
 type RunScoreOpts = Parameters<typeof runScore>[0];
@@ -403,7 +403,7 @@ export async function routeScore(opts: RunScoreOpts, runsRoot: string): Promise<
 
   const kind = touchKindOf(parsedRaw.rows);
   if ("error" in kind) return { status: 1, stdout: kind.error };
-  if (kind.kind === "first") return runScore(opts);
+  if (kind.kind === "single-task") return runScore(opts);
 
   if (opts.compareRunDir !== undefined) {
     return { status: 1, stdout: "follow-up-score: --compare is not supported for follow-up runs" };
