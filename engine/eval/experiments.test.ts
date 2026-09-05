@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { validateExperiments, loadExperiments, loadTreatmentIdsByRun } from "./experiments.ts";
+import { validateExperiments, unclaimedRunFolders, loadExperiments, loadTreatmentIdsByRun } from "./experiments.ts";
 import type { Experiment } from "./experiments.ts";
 
 function singleTaskExperiment(overrides: Partial<Experiment> = {}): Experiment {
@@ -123,4 +123,56 @@ test("validateExperiments_finds_no_violations_in_the_committed_experiments_json_
   const violations = validateExperiments(experiments, known);
 
   assertNoViolations(violations);
+});
+
+function assertNoUnclaimedRunFolders(unclaimed: string[]): void {
+  assert.deepEqual(
+    unclaimed,
+    [],
+    `run folder(s) not recorded in experiments.json: ${unclaimed.join(", ")} — add them to an experiment's treatments or sourceRun before committing, or don't commit them`,
+  );
+}
+
+test("unclaimedRunFolders_returns_a_run_folder_that_no_experiment_refers_to", () => {
+  const known = knownNames({ treatmentIdsByRun: { "run-1": ["control"], "run-2": ["control"] } });
+  const experiments = [singleTaskExperiment({ treatments: [{ treatmentId: "control", run: "run-1" }] })];
+
+  const unclaimed = unclaimedRunFolders(experiments, known);
+
+  assert.deepEqual(unclaimed, ["run-2"]);
+});
+
+test("unclaimedRunFolders_excludes_a_run_folder_named_by_a_treatment", () => {
+  const known = knownNames();
+  const experiments = [singleTaskExperiment()];
+
+  const unclaimed = unclaimedRunFolders(experiments, known);
+
+  assertNoUnclaimedRunFolders(unclaimed);
+});
+
+test("unclaimedRunFolders_excludes_a_run_folder_named_only_as_a_sourceRun", () => {
+  const known = knownNames({ treatmentIdsByRun: { "run-1": ["control"], "source-run": ["control"] } });
+  const experiments = [followUpExperiment({ sourceRun: "source-run" })];
+
+  const unclaimed = unclaimedRunFolders(experiments, known);
+
+  assertNoUnclaimedRunFolders(unclaimed);
+});
+
+test("unclaimedRunFolders_sorts_the_names_when_more_than_one_is_unclaimed", () => {
+  const known = knownNames({ treatmentIdsByRun: { zebra: ["control"], apple: ["control"] } });
+
+  const unclaimed = unclaimedRunFolders([], known);
+
+  assert.deepEqual(unclaimed, ["apple", "zebra"]);
+});
+
+test("unclaimedRunFolders_finds_none_among_the_repo's_committed_run_folders", () => {
+  const experiments = loadExperiments();
+  const known = { treatmentIdsByRun: loadTreatmentIdsByRun() };
+
+  const unclaimed = unclaimedRunFolders(experiments, known);
+
+  assertNoUnclaimedRunFolders(unclaimed);
 });
