@@ -758,6 +758,7 @@ const REVIEW_SCRIPT = `<script>
   }
 
   var VIEW_MODE_STORAGE_KEY = "liubai-eval-report:diff-view-mode";
+  var DEFAULT_VIEW_MODE = "side-by-side";
 
   function storedViewMode() {
     try {
@@ -775,14 +776,21 @@ const REVIEW_SCRIPT = `<script>
     }
   }
 
-  document.querySelectorAll(".review").forEach(function (section) {
+  function effectiveViewMode() {
+    return storedViewMode() || DEFAULT_VIEW_MODE;
+  }
+
+  function setUpReview(section) {
+    if (section.dataset.reviewSetUp === "1") return;
+    section.dataset.reviewSetUp = "1";
+
     var holder = section.querySelector(".diff-holder");
     var pairButtons = section.querySelectorAll("button[data-pair-before]");
     var sourceButtons = section.querySelectorAll("button[data-before-source]");
     var viewButtons = section.querySelectorAll("button[data-view-mode]");
     if (!holder || pairButtons.length === 0) return;
 
-    var state = { before: null, after: null, useReference: false, view: "unified" };
+    var state = { before: null, after: null, useReference: false, view: effectiveViewMode() };
     pairButtons.forEach(function (button) {
       if (button.classList.contains("active")) {
         state.before = button.dataset.pairBefore;
@@ -790,16 +798,8 @@ const REVIEW_SCRIPT = `<script>
       }
     });
     viewButtons.forEach(function (button) {
-      if (button.classList.contains("active")) state.view = button.dataset.viewMode;
+      button.classList.toggle("active", button.dataset.viewMode === state.view);
     });
-
-    var remembered = storedViewMode();
-    if (remembered && remembered !== state.view) {
-      state.view = remembered;
-      viewButtons.forEach(function (button) {
-        button.classList.toggle("active", button.dataset.viewMode === remembered);
-      });
-    }
 
     function render() {
       var beforeInfo = state.useReference ? { text: referenceTextFor(section), label: "case reference" } : stateTextAndLabel(section, state.before);
@@ -809,7 +809,7 @@ const REVIEW_SCRIPT = `<script>
       holder.innerHTML = state.view === "unified" ? unifiedHtml(beforeInfo.label, afterInfo.label, ops) : sideBySideHtml(beforeInfo.label, afterInfo.label, ops);
     }
 
-    if (remembered && remembered !== "unified") render();
+    render();
 
     pairButtons.forEach(function (button) {
       button.addEventListener("click", function () {
@@ -840,7 +840,17 @@ const REVIEW_SCRIPT = `<script>
         render();
       });
     });
-  });
+  }
+
+  function setUpReviewForCurrentRoute() {
+    var routeSection = document.getElementById(location.hash.slice(1));
+    if (!routeSection || routeSection.getAttribute("data-view") !== "review") return;
+    var review = routeSection.querySelector(".review");
+    if (review) setUpReview(review);
+  }
+
+  window.addEventListener("hashchange", setUpReviewForCurrentRoute);
+  setUpReviewForCurrentRoute();
 })();
 </script>`;
 
