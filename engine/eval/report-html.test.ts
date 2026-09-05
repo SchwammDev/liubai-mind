@@ -5,7 +5,7 @@ import { renderReportHtml } from "./report-html.ts";
 import type { ExperimentView, ReportViewModel } from "./report-view.ts";
 
 function viewModel(over: Partial<ReportViewModel>): ReportViewModel {
-  return { milestones: [], unclaimedRunFolders: [], ...over };
+  return { milestones: [], unclaimedRunFolders: [], experimentDetails: [], ...over };
 }
 
 function experimentView(over: Partial<ExperimentView>): ExperimentView {
@@ -20,6 +20,7 @@ function experimentView(over: Partial<ExperimentView>): ExperimentView {
     size: "1 case × 3 repetitions per treatment",
     status: "concluded",
     outcome: "it worked",
+    identicalTreatmentsFlag: false,
     ...over,
   };
 }

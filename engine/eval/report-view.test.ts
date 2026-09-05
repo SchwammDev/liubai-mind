@@ -5,6 +5,8 @@ import { buildReportViewModel } from "./report-view.ts";
 import type { JudgedRecordForReport, RawRowForReport, RunRecordsForReport } from "./report-view.ts";
 import type { Experiment } from "./experiments.ts";
 import type { Tier } from "./eval-contract.ts";
+import { RULE } from "../contract.ts";
+import type { RuleName } from "../contract.ts";
 
 function experiment(over: Partial<Experiment>): Experiment {
   return {
@@ -22,12 +24,40 @@ function experiment(over: Partial<Experiment>): Experiment {
   };
 }
 
-function judgedRecord(caseId: string, treatmentId: string, repetition: number): JudgedRecordForReport {
-  return { caseId, treatmentId, repetition };
+function judgedRecord(caseId: string, treatmentId: string, repetition: number, over: Partial<JudgedRecordForReport> = {}): JudgedRecordForReport {
+  return {
+    caseId,
+    treatmentId,
+    repetition,
+    verdict: "genuine-fix",
+    startsFrom: { kind: "original-source" },
+    linesAdded: 0,
+    linesRemoved: 0,
+    turns: null,
+    tokensIn: null,
+    nudges: null,
+    functionsBefore: 1,
+    functionsAfter: 1,
+    gamedReason: null,
+    failedBehaviorChecks: [],
+    ending: "final-text",
+    ...over,
+  };
 }
 
-function rawRow(treatmentId: string, model: string): RawRowForReport {
-  return { treatmentId, provenance: { model } };
+function rawRow(treatmentId: string, model: string, over: Partial<RawRowForReport> = {}): RawRowForReport {
+  return { treatmentId, provenance: { model, liubaiSha: "sha1", phrasingPackHash: null }, ...over };
+}
+
+function noFirings(): Record<RuleName, { count: number; turns: number[] }> {
+  const entries: [RuleName, { count: number; turns: number[] }][] = (Object.values(RULE) as RuleName[]).map((rule) => [rule, { count: 0, turns: [] }]);
+  return Object.fromEntries(entries) as Record<RuleName, { count: number; turns: number[] }>;
+}
+
+function firingsOn(rule: RuleName, turns: number[]): Record<RuleName, { count: number; turns: number[] }> {
+  const firings = noFirings();
+  firings[rule] = { count: turns.length, turns };
+  return firings;
 }
 
 function runData(entries: Record<string, RunRecordsForReport>): Map<string, RunRecordsForReport> {
@@ -164,4 +194,302 @@ test("run folders no experiment claims are listed sorted, regardless of input or
   const view = buildReportViewModel([], runData({}), new Map(), ["zzz-run", "aaa-run"]);
 
   assert.deepEqual(view.unclaimedRunFolders, ["aaa-run", "zzz-run"]);
+});
+
+function experimentDetailFor(exp: Experiment, records: Record<string, RunRecordsForReport>): ReturnType<typeof buildReportViewModel>["experimentDetails"][number] {
+  return buildReportViewModel([exp], runData(records), new Map(), []).experimentDetails[0]!;
+}
+
+test("a treatment's repetitions are ordered worst first for a single-task experiment", () => {
+  const exp = experiment({ treatments: [{ treatmentId: "t1", run: "run-a" }], controlTreatment: "t1", kind: "single-task" });
+  const records = {
+    "run-a": {
+      judged: [
+        judgedRecord("case-a", "t1", 1, { verdict: "untouched" }),
+        judgedRecord("case-a", "t1", 2, { verdict: "broken" }),
+        judgedRecord("case-a", "t1", 3, { verdict: "genuine-fix" }),
+      ],
+      raw: [],
+    },
+  };
+
+  const detail = experimentDetailFor(exp, records);
+
+  assert.deepEqual(
+    detail.treatments[0]!.repetitions.map((r) => r.verdict),
+    ["broken", "untouched", "genuine-fix"],
+  );
+});
+
+test("a treatment's repetitions are ordered worst first for a with-follow-up-tasks experiment", () => {
+  const exp = experiment({ treatments: [{ treatmentId: "t1", run: "run-a" }], controlTreatment: "t1", kind: "with-follow-up-tasks" });
+  const records = {
+    "run-a": {
+      judged: [
+        judgedRecord("case-a", "t1", 1, { verdict: "untouched" }),
+        judgedRecord("case-a", "t1", 2, { verdict: "regressed" }),
+        judgedRecord("case-a", "t1", 3, { verdict: "extended" }),
+      ],
+      raw: [],
+    },
+  };
+
+  const detail = experimentDetailFor(exp, records);
+
+  assert.deepEqual(
+    detail.treatments[0]!.repetitions.map((r) => r.verdict),
+    ["regressed", "untouched", "extended"],
+  );
+});
+
+test("the setup check says the setup is unverifiable when no row carries a delivery stamp or task text", () => {
+  const exp = experiment({
+    treatments: [
+      { treatmentId: "t1", run: "run-a" },
+      { treatmentId: "t2", run: "run-a" },
+    ],
+    controlTreatment: "t1",
+  });
+  const records = { "run-a": { judged: [], raw: [rawRow("t1", "model-a"), rawRow("t2", "model-a")] } };
+
+  const detail = experimentDetailFor(exp, records);
+
+  assert.deepEqual(
+    { unverifiable: detail.setupCheck.summary.includes("unverifiable"), flagged: detail.setupCheck.identicalTreatments },
+    { unverifiable: true, flagged: false },
+  );
+});
+
+test("the setup check flags identical treatments when their delivered text is byte-identical", () => {
+  const exp = experiment({
+    treatments: [
+      { treatmentId: "t1", run: "run-a" },
+      { treatmentId: "t2", run: "run-a" },
+    ],
+    controlTreatment: "t1",
+  });
+  const records = {
+    "run-a": {
+      judged: [],
+      raw: [rawRow("t1", "model-a", { task: "fix the thing" }), rawRow("t2", "model-a", { task: "fix the thing" })],
+    },
+  };
+
+  const detail = experimentDetailFor(exp, records);
+
+  assert.equal(detail.setupCheck.identicalTreatments, true);
+});
+
+test("the setup check does not flag treatments whose delivered text differs", () => {
+  const exp = experiment({
+    treatments: [
+      { treatmentId: "t1", run: "run-a" },
+      { treatmentId: "t2", run: "run-a" },
+    ],
+    controlTreatment: "t1",
+  });
+  const records = {
+    "run-a": {
+      judged: [],
+      raw: [rawRow("t1", "model-a", { task: "fix the thing" }), rawRow("t2", "model-a", { task: "fix the other thing" })],
+    },
+  };
+
+  const detail = experimentDetailFor(exp, records);
+
+  assert.equal(detail.setupCheck.identicalTreatments, false);
+});
+
+test("the experiments list row carries the same identical-treatments flag the setup check raised", () => {
+  const exp = experiment({
+    id: "exp-flagged",
+    treatments: [
+      { treatmentId: "t1", run: "run-a" },
+      { treatmentId: "t2", run: "run-a" },
+    ],
+    controlTreatment: "t1",
+  });
+  const records = {
+    "run-a": {
+      judged: [],
+      raw: [rawRow("t1", "model-a", { task: "same text" }), rawRow("t2", "model-a", { task: "same text" })],
+    },
+  };
+
+  const view = buildReportViewModel([exp], runData(records), new Map(), []);
+
+  assert.equal(view.milestones[0]!.experiments[0]!.identicalTreatmentsFlag, true);
+});
+
+test("a case's row names no divergence when every treatment reaches the same verdicts and nothing ends abnormally", () => {
+  const exp = experiment({
+    treatments: [
+      { treatmentId: "t1", run: "run-a" },
+      { treatmentId: "t2", run: "run-a" },
+    ],
+    controlTreatment: "t1",
+    kind: "single-task",
+  });
+  const records = {
+    "run-a": {
+      judged: [judgedRecord("case-a", "t1", 1, { verdict: "genuine-fix" }), judgedRecord("case-a", "t2", 1, { verdict: "genuine-fix" })],
+      raw: [],
+    },
+  };
+
+  const detail = experimentDetailFor(exp, records);
+
+  assert.equal(detail.perCase[0]!.wherePart, "");
+});
+
+test("a case's row names the treatment, repetition and verdict where a treatment's result parts from the rest", () => {
+  const exp = experiment({
+    treatments: [
+      { treatmentId: "coaching-v1", run: "run-a" },
+      { treatmentId: "bare-metric-v1", run: "run-a" },
+    ],
+    controlTreatment: "coaching-v1",
+    kind: "with-follow-up-tasks",
+  });
+  const records = {
+    "run-a": {
+      judged: [
+        judgedRecord("case-a", "coaching-v1", 1, { verdict: "extended" }),
+        judgedRecord("case-a", "bare-metric-v1", 3, { verdict: "regressed", failedBehaviorChecks: [{ index: 0, reason: "helper split" }] }),
+      ],
+      raw: [],
+    },
+  };
+
+  const detail = experimentDetailFor(exp, records);
+
+  assert.equal(detail.perCase[0]!.wherePart, "bare-metric-v1 · repetition 3 · regressed · helper split");
+});
+
+test("the detail cell names only the facts no other column carries", () => {
+  const exp = experiment({ treatments: [{ treatmentId: "t1", run: "run-a" }], controlTreatment: "t1", kind: "single-task" });
+  const records = {
+    "run-a": {
+      judged: [
+        judgedRecord("case-a", "t1", 1, {
+          verdict: "gamed",
+          gamedReason: "helper-split",
+          functionsBefore: 2,
+          functionsAfter: 5,
+          nudges: firingsOn(RULE.ccDelta, [2, 4]),
+        }),
+      ],
+      raw: [],
+    },
+  };
+
+  const detail = experimentDetailFor(exp, records);
+
+  assert.equal(detail.treatments[0]!.repetitions[0]!.detail, "helper split · 3 functions added · nudges at turns 2, 4");
+});
+
+test("a gamed reason appears as words, not the raw slug, in the where-they-part cell too", () => {
+  const exp = experiment({
+    treatments: [
+      { treatmentId: "t1", run: "run-a" },
+      { treatmentId: "t2", run: "run-a" },
+    ],
+    controlTreatment: "t1",
+    kind: "single-task",
+  });
+  const records = {
+    "run-a": {
+      judged: [
+        judgedRecord("case-a", "t1", 1, { verdict: "genuine-fix" }),
+        judgedRecord("case-a", "t2", 2, { verdict: "gamed", gamedReason: "helper-split" }),
+      ],
+      raw: [],
+    },
+  };
+
+  const detail = experimentDetailFor(exp, records);
+
+  assert.equal(detail.perCase[0]!.wherePart, "t2 · repetition 2 · gamed · helper split");
+});
+
+test("a repetition's nudged flag reflects whether any nudge fired, independent of how the count is displayed", () => {
+  const exp = experiment({ treatments: [{ treatmentId: "t1", run: "run-a" }], controlTreatment: "t1", kind: "single-task" });
+  const records = {
+    "run-a": {
+      judged: [
+        judgedRecord("case-a", "t1", 1, { nudges: firingsOn(RULE.ccDelta, [2]) }),
+        judgedRecord("case-a", "t1", 2, { nudges: null }),
+      ],
+      raw: [],
+    },
+  };
+
+  const detail = experimentDetailFor(exp, records);
+
+  assert.deepEqual(
+    detail.treatments[0]!.repetitions.map((r) => r.nudged),
+    [true, false],
+  );
+});
+
+test("the setup check names which treatments carry evidence when only one does, instead of an empty summary", () => {
+  const exp = experiment({
+    treatments: [
+      { treatmentId: "t1", run: "run-a" },
+      { treatmentId: "t2", run: "run-a" },
+    ],
+    controlTreatment: "t1",
+  });
+  const records = { "run-a": { judged: [], raw: [rawRow("t1", "model-a", { task: "fix the thing" })] } };
+
+  const detail = experimentDetailFor(exp, records);
+
+  assert.equal(detail.setupCheck.summary, "t1 carries a delivery stamp or task text; t2 carries none");
+});
+
+test("the setup check reports when delivered text differs across treatments, without printing the text itself", () => {
+  const exp = experiment({
+    treatments: [
+      { treatmentId: "t1", run: "run-a" },
+      { treatmentId: "t2", run: "run-a" },
+    ],
+    controlTreatment: "t1",
+  });
+  const records = {
+    "run-a": {
+      judged: [],
+      raw: [rawRow("t1", "model-a", { task: "fix the thing" }), rawRow("t2", "model-a", { task: "fix the other thing" })],
+    },
+  };
+
+  const detail = experimentDetailFor(exp, records);
+
+  assert.deepEqual(
+    { summary: detail.setupCheck.summary, leaksDeliveredText: detail.setupCheck.summary.includes("fix the") },
+    { summary: "same liubai commit: sha1 · same model: model-a · same wording pack: none · delivered text differs", leaksDeliveredText: false },
+  );
+});
+
+test("a treatment's means are computed only from repetitions that carry cost data", () => {
+  const exp = experiment({ treatments: [{ treatmentId: "t1", run: "run-a" }], controlTreatment: "t1", kind: "single-task" });
+  const records = {
+    "run-a": {
+      judged: [
+        judgedRecord("case-a", "t1", 1, { turns: 10, tokensIn: 100, nudges: firingsOn(RULE.ccDelta, [1]) }),
+        judgedRecord("case-a", "t1", 2, { turns: null, tokensIn: null, nudges: null }),
+      ],
+      raw: [],
+    },
+  };
+
+  const detail = experimentDetailFor(exp, records);
+
+  assert.deepEqual(
+    {
+      meanTurns: detail.treatments[0]!.meanTurns,
+      meanTokensIn: detail.treatments[0]!.meanTokensIn,
+      meanNudges: detail.treatments[0]!.meanNudgesPerRepetition,
+    },
+    { meanTurns: "10.0", meanTokensIn: "100.0", meanNudges: "1.0" },
+  );
 });
