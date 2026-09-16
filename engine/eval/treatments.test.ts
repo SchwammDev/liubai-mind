@@ -30,7 +30,7 @@ test("loadTreatments_loads_all_committed_treatments", () => {
 
   assertLoaded(result);
   const ids = result.map((c) => c.id).sort();
-  assert.deepEqual(ids, ["bare-metric-v1", "cc-delta-numbered-prompt", "cc-delta-numberless", "cc-delta-numberless-prompt", "cc-delta-off", "cc-delta-shadow", "coaching-v1", "control", "rails-default"]);
+  assert.deepEqual(ids, ["bare-metric-v1", "cc-delta-numbered-prompt", "cc-delta-numberless", "cc-delta-numberless-prompt", "cc-delta-off", "cc-delta-shadow", "coaching-v1", "control", "minimal-numberless-v1", "rails-default"]);
 });
 
 test("loadTreatments_reads_control_env_from_its_manifest", () => {
