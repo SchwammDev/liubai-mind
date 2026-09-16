@@ -258,29 +258,29 @@ export function loadExistingKeys(rawPath: string, keyOfRow: (row: RawRow) => str
   return new Set(lines.map((line) => keyOfRow(JSON.parse(line) as RawRow)));
 }
 
-export function packAbsolutePath(treatmentsDir: string, treatment: TreatmentManifest): string | undefined {
-  return treatment.phrasingPack === undefined ? undefined : join(treatmentsDir, treatment.phrasingPack);
+export function nudgePhrasingPath(treatmentsDir: string, treatment: TreatmentManifest): string | undefined {
+  return treatment.nudgePhrasingFile === undefined ? undefined : join(treatmentsDir, treatment.nudgePhrasingFile);
 }
 
-export function readPackContent(packPath: string | undefined): string | undefined {
-  return packPath === undefined ? undefined : readFileSync(packPath, "utf8");
+export function readNudgePhrasing(nudgePhrasingPath: string | undefined): string | undefined {
+  return nudgePhrasingPath === undefined ? undefined : readFileSync(nudgePhrasingPath, "utf8");
 }
 
-export function buildEnv(treatment: TreatmentManifest, packContent: string | undefined): Record<string, string> {
+export function buildEnv(treatment: TreatmentManifest, nudgePhrasing: string | undefined): Record<string, string> {
   const base = { ...treatment.env, LIUBAI_EVAL: "1" };
-  return packContent === undefined ? base : { ...base, LIUBAI_PHRASING_PACK: packContent };
+  return nudgePhrasing === undefined ? base : { ...base, LIUBAI_NUDGE_PHRASING: nudgePhrasing };
 }
 
-function requirePromptPackContent(packContent: string | undefined, treatment: TreatmentManifest): string {
-  if (packContent === undefined) {
-    throw new Error(`treatment ${treatment.id}: delivery "prompt" carries no phrasing pack — treatments.ts validation should have rejected this at load time`);
+function requirePromptNudgePhrasing(nudgePhrasing: string | undefined, treatment: TreatmentManifest): string {
+  if (nudgePhrasing === undefined) {
+    throw new Error(`treatment ${treatment.id}: delivery "prompt" carries no nudge phrasing — treatments.ts validation should have rejected this at load time`);
   }
-  return packContent;
+  return nudgePhrasing;
 }
 
-export function buildTask(kase: CaseManifest, treatment: TreatmentManifest, packContent: string | undefined): string {
+export function buildTask(kase: CaseManifest, treatment: TreatmentManifest, nudgePhrasing: string | undefined): string {
   if (treatment.delivery !== "prompt") return kase.task;
-  return `${kase.task}\n\n${promptCarriedTreatmentMessage(kase, requirePromptPackContent(packContent, treatment))}`;
+  return `${kase.task}\n\n${promptCarriedTreatmentMessage(kase, requirePromptNudgePhrasing(nudgePhrasing, treatment))}`;
 }
 
 export function copyCaseFiles(corpusDir: string, kase: CaseManifest, workDir: string): { from: string; to: string }[] {
@@ -350,7 +350,7 @@ export function readDelivered(workDir: string): RawRow["delivered"] {
 export function buildRawRowCore(
   ctx: CollectContext,
   treatmentId: string,
-  packContent: string | undefined,
+  nudgePhrasing: string | undefined,
   outcome: RunOutcome,
   durationMs: number,
   snapshot: WorkDirSnapshot,
@@ -358,10 +358,10 @@ export function buildRawRowCore(
   delivered?: RawRow["delivered"],
   sentTask?: string,
 ): Omit<RawRow, "caseId" | "treatmentId" | "repetition"> {
-  const packBytes = packContent === undefined ? null : packContent;
+  const nudgePhrasingBytes = nudgePhrasing === undefined ? null : nudgePhrasing;
   const provenance = buildProvenance({
     treatmentId,
-    packBytes,
+    nudgePhrasingBytes,
     repoRoot: ctx.repoRoot,
     model: ctx.model,
     now: ctx.now(),
@@ -401,7 +401,7 @@ function deathEvidence(outcome: RunOutcome): Pick<RawRow, "signal" | "stderrTail
 function buildRawRow(
   ctx: CollectContext,
   item: WorkItem,
-  packContent: string | undefined,
+  nudgePhrasing: string | undefined,
   outcome: RunOutcome,
   durationMs: number,
   snapshot: WorkDirSnapshot,
@@ -413,17 +413,17 @@ function buildRawRow(
     caseId: item.kase.id,
     treatmentId: item.treatment.id,
     repetition: item.repetition,
-    ...buildRawRowCore(ctx, item.treatment.id, packContent, outcome, durationMs, snapshot, shadowNudges, delivered, sentTask),
+    ...buildRawRowCore(ctx, item.treatment.id, nudgePhrasing, outcome, durationMs, snapshot, shadowNudges, delivered, sentTask),
   };
 }
 
 async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult> {
   const workDir = mkdtempSync(join(ctx.workRoot, "eval-work-"));
   const plan = copyCaseFiles(ctx.corpusDir, item.kase, workDir);
-  const packPath = packAbsolutePath(ctx.treatmentsDir, item.treatment);
-  const packContent = readPackContent(packPath);
-  const env = buildEnv(item.treatment, packContent);
-  const task = buildTask(item.kase, item.treatment, packContent);
+  const phrasingPath = nudgePhrasingPath(ctx.treatmentsDir, item.treatment);
+  const nudgePhrasing = readNudgePhrasing(phrasingPath);
+  const env = buildEnv(item.treatment, nudgePhrasing);
+  const task = buildTask(item.kase, item.treatment, nudgePhrasing);
 
   try {
     const { outcome, durationMs } = await spawnForItem(ctx, task, workDir, env);
@@ -431,7 +431,7 @@ async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult>
     const shadowNudges = readShadowNudges(workDir);
     const delivered = readDelivered(workDir);
     const sentTask = item.treatment.delivery === "prompt" ? task : undefined;
-    const row = buildRawRow(ctx, item, packContent, outcome, durationMs, snapshot, shadowNudges, delivered, sentTask);
+    const row = buildRawRow(ctx, item, nudgePhrasing, outcome, durationMs, snapshot, shadowNudges, delivered, sentTask);
     return { row, stdoutJsonl: outcome.stdoutJsonl };
   } catch (err) {
     return { failure: failureMessage(item, err) };
@@ -602,14 +602,14 @@ async function runCanaryChecks(ctx: CollectContext, treatments: TreatmentManifes
 
   for (const treatment of treatments) {
     const workDir = mkdtempSync(join(ctx.workRoot, "eval-canary-"));
-    const packPath = packAbsolutePath(ctx.treatmentsDir, treatment);
-    const packContent = readPackContent(packPath);
-    const env = buildEnv(treatment, packContent);
+    const phrasingPath = nudgePhrasingPath(ctx.treatmentsDir, treatment);
+    const nudgePhrasing = readNudgePhrasing(phrasingPath);
+    const env = buildEnv(treatment, nudgePhrasing);
 
     const outcome = await ctx.probeSpawner({ cwd: workDir, env });
     const verdict = evaluateCanary({
       treatment,
-      packContent,
+      nudgePhrasing,
       exitCode: outcome.exitCode,
       stdout: outcome.stdout,
       stderr: outcome.stderr,

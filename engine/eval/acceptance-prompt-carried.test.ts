@@ -35,9 +35,9 @@ function caseTask(): string {
 }
 
 function treatmentMessage(): string {
-  const pack = JSON.parse(readFileSync(join(TREATMENTS_DIR, "packs", "cc-delta-numberless.json"), "utf8")) as { CC_DELTA_NUDGE: string };
+  const phrasing = JSON.parse(readFileSync(join(TREATMENTS_DIR, "phrasings", "cc-delta-numberless.json"), "utf8")) as { CC_DELTA_NUDGE: string };
   const facts = caseFacts();
-  return formatCcDeltaNudge(pack.CC_DELTA_NUDGE, {
+  return formatCcDeltaNudge(phrasing.CC_DELTA_NUDGE, {
     name: facts.entrySymbol,
     dpBefore: facts.baseline.decisionPoints,
     dpAfter: facts.baseline.decisionPoints,

@@ -8,7 +8,7 @@ import { PROBE_FIXTURES } from "../delivery-probe.ts";
 import type { FixtureLang } from "../delivery-probe.ts";
 import { CC_DELTA_NUDGE, CC_NUDGE, formatCcNudge } from "../messages.ts";
 import { DEFAULT_POLICY } from "../policy.ts";
-import { RULE, packHash } from "../contract.ts";
+import { RULE, nudgePhrasingHash } from "../contract.ts";
 import type { TreatmentManifest } from "./eval-contract.ts";
 
 function fixtureFor(lang: FixtureLang) {
@@ -30,7 +30,7 @@ function defaultNudgeText(lang: FixtureLang): string {
 
 function reportWithNudges(overrides: Partial<ProbeReport> = {}): ProbeReport {
   return {
-    packHash: null,
+    nudgePhrasingHash: null,
     nudges: { python: [defaultNudgeText("python")], typescript: [defaultNudgeText("typescript")] },
     errors: [],
     ccNudge: CC_NUDGE,
@@ -39,7 +39,7 @@ function reportWithNudges(overrides: Partial<ProbeReport> = {}): ProbeReport {
   };
 }
 
-const PACK_CONTENT = JSON.stringify({
+const NUDGE_PHRASING_CONTENT = JSON.stringify({
   CC_NUDGE: {
     python: { first: "{name} python-first ({cc}/{threshold})", rest: "{name} python-rest" },
     typescript: { first: "{name} ts-first ({cc}/{threshold})", rest: "{name} ts-rest" },
@@ -47,9 +47,9 @@ const PACK_CONTENT = JSON.stringify({
   CC_DELTA_NUDGE: "custom delta text",
 });
 
-function packedReport(): ProbeReport {
+function phrasedReport(): ProbeReport {
   return {
-    packHash: packHash(PACK_CONTENT),
+    nudgePhrasingHash: nudgePhrasingHash(NUDGE_PHRASING_CONTENT),
     nudges: {
       python: [formatCcNudge("{name} python-first ({cc}/{threshold})", { name: fixtureFor("python").functionName, cc: fixtureFor("python").cyclomaticComplexity, threshold: thresholdFor("python") })],
       typescript: [formatCcNudge("{name} ts-first ({cc}/{threshold})", { name: fixtureFor("typescript").functionName, cc: fixtureFor("typescript").cyclomaticComplexity, threshold: thresholdFor("typescript") })],
@@ -71,7 +71,7 @@ function treatment(overrides: Partial<TreatmentManifest> = {}): TreatmentManifes
 function input(overrides: Partial<EvaluateCanaryInput> = {}): EvaluateCanaryInput {
   return {
     treatment: treatment(),
-    packContent: undefined,
+    nudgePhrasing: undefined,
     exitCode: 0,
     stdout: `${JSON.stringify(reportWithNudges())}\n`,
     stderr: "",
@@ -88,7 +88,7 @@ function assertCanaryFails(result: CanaryResult, pattern: RegExp): void {
   if (!result.ok) assert.match(result.reason, pattern);
 }
 
-test("evaluateCanary_passes_when_the_probe_confirms_default_phrasing_and_no_pack", () => {
+test("evaluateCanary_passes_when_the_probe_confirms_default_phrasing_and_no_nudge_phrasing", () => {
   const result = evaluateCanary(input());
 
   assertCanaryPasses(result);
@@ -115,11 +115,11 @@ test("evaluateCanary_fails_when_the_probe_reported_analyze_errors", () => {
   assertCanaryFails(result, /extract:python/);
 });
 
-test("evaluateCanary_fails_when_a_packless_treatment_reports_a_nonnull_packHash", () => {
-  const report = reportWithNudges({ packHash: "deadbeef" });
+test("evaluateCanary_fails_when_a_phrasingless_treatment_reports_a_nonnull_nudgePhrasingHash", () => {
+  const report = reportWithNudges({ nudgePhrasingHash: "deadbeef" });
   const result = evaluateCanary(input({ stdout: `${JSON.stringify(report)}\n` }));
 
-  assertCanaryFails(result, /packHash mismatch/);
+  assertCanaryFails(result, /nudgePhrasingHash mismatch/);
 });
 
 test("evaluateCanary_fails_when_the_default_cc_phrasing_never_reaches_the_produced_nudge", () => {
@@ -129,34 +129,34 @@ test("evaluateCanary_fails_when_the_default_cc_phrasing_never_reaches_the_produc
   assertCanaryFails(result, /python/);
 });
 
-test("evaluateCanary_passes_when_a_packed_treatment_delivers_the_overridden_cc_phrasing", () => {
+test("evaluateCanary_passes_when_a_treatment_with_a_nudge_phrasing_delivers_the_overridden_cc_phrasing", () => {
   const result = evaluateCanary(input({
-    treatment: treatment({ phrasingPack: "packs/x.json" }),
-    packContent: PACK_CONTENT,
-    stdout: `${JSON.stringify(packedReport())}\n`,
+    treatment: treatment({ nudgePhrasingFile: "phrasings/x.json" }),
+    nudgePhrasing: NUDGE_PHRASING_CONTENT,
+    stdout: `${JSON.stringify(phrasedReport())}\n`,
   }));
 
   assertCanaryPasses(result);
 });
 
-test("evaluateCanary_fails_when_a_packed_treatments_override_text_never_reaches_the_produced_nudge", () => {
-  const report = packedReport();
+test("evaluateCanary_fails_when_a_nudge_phrasings_override_text_never_reaches_the_produced_nudge", () => {
+  const report = phrasedReport();
   report.nudges.python = ["unrelated text"];
   const result = evaluateCanary(input({
-    treatment: treatment({ phrasingPack: "packs/x.json" }),
-    packContent: PACK_CONTENT,
+    treatment: treatment({ nudgePhrasingFile: "phrasings/x.json" }),
+    nudgePhrasing: NUDGE_PHRASING_CONTENT,
     stdout: `${JSON.stringify(report)}\n`,
   }));
 
   assertCanaryFails(result, /python/);
 });
 
-test("evaluateCanary_fails_when_the_resolved_CC_DELTA_NUDGE_does_not_match_the_pack", () => {
-  const report = packedReport();
+test("evaluateCanary_fails_when_the_resolved_CC_DELTA_NUDGE_does_not_match_the_nudge_phrasing", () => {
+  const report = phrasedReport();
   report.ccDeltaNudge = "something else";
   const result = evaluateCanary(input({
-    treatment: treatment({ phrasingPack: "packs/x.json" }),
-    packContent: PACK_CONTENT,
+    treatment: treatment({ nudgePhrasingFile: "phrasings/x.json" }),
+    nudgePhrasing: NUDGE_PHRASING_CONTENT,
     stdout: `${JSON.stringify(report)}\n`,
   }));
 
@@ -164,11 +164,11 @@ test("evaluateCanary_fails_when_the_resolved_CC_DELTA_NUDGE_does_not_match_the_p
 });
 
 test("evaluateCanary_on_a_rails_off_treatment_checks_resolved_constants_and_ignores_produced_nudges", () => {
-  const report = packedReport();
+  const report = phrasedReport();
   report.nudges = { python: [], typescript: [] };
   const result = evaluateCanary(input({
-    treatment: treatment({ env: { LIUBAI_RAILS_OFF: "1" }, phrasingPack: "packs/x.json" }),
-    packContent: PACK_CONTENT,
+    treatment: treatment({ env: { LIUBAI_RAILS_OFF: "1" }, nudgePhrasingFile: "phrasings/x.json" }),
+    nudgePhrasing: NUDGE_PHRASING_CONTENT,
     stdout: `${JSON.stringify(report)}\n`,
   }));
 
@@ -176,12 +176,12 @@ test("evaluateCanary_on_a_rails_off_treatment_checks_resolved_constants_and_igno
 });
 
 test("evaluateCanary_on_a_rails_off_treatment_still_catches_a_stale_resolved_CC_NUDGE_constant", () => {
-  const report = packedReport();
+  const report = phrasedReport();
   report.nudges = { python: [], typescript: [] };
   report.ccNudge = { ...report.ccNudge, python: { ...report.ccNudge.python, first: "stale text" } };
   const result = evaluateCanary(input({
-    treatment: treatment({ env: { LIUBAI_RAILS_OFF: "1" }, phrasingPack: "packs/x.json" }),
-    packContent: PACK_CONTENT,
+    treatment: treatment({ env: { LIUBAI_RAILS_OFF: "1" }, nudgePhrasingFile: "phrasings/x.json" }),
+    nudgePhrasing: NUDGE_PHRASING_CONTENT,
     stdout: `${JSON.stringify(report)}\n`,
   }));
 

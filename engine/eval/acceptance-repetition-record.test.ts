@@ -122,7 +122,7 @@ function collectedRow(over: Partial<RawRow> = {}): RawRow {
     repetition: ONLY_REPETITION,
     provenance: {
       treatmentId: TREATMENT_ID,
-      phrasingPackHash: null,
+      nudgePhrasingHash: null,
       liubaiSha: "3250ea4",
       model: "aqueduct/deepseek-v4-flash-284b",
       collectedAt: "2026-09-05T00:00:00.000Z",

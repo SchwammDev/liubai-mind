@@ -90,7 +90,7 @@ export type RuleConfig = {
   exemptions?: Exemption[];
 };
 
-export function packHash(bytes: string | null): string | null {
+export function nudgePhrasingHash(bytes: string | null): string | null {
   if (bytes === null) return null;
   return createHash("sha256").update(bytes).digest("hex");
 }

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { CC_DELTA_NUDGE, formatBlockReason, formatCcDeltaNudge, formatCcNudge, readPack, resolveCcDeltaNudge, resolveCcNudge } from "./messages.ts";
+import { CC_DELTA_NUDGE, formatBlockReason, formatCcDeltaNudge, formatCcNudge, readNudgePhrasing, resolveCcDeltaNudge, resolveCcNudge } from "./messages.ts";
 import type { CcNudgePhrasing } from "./messages.ts";
 import type { Lang, Nudge } from "./contract.ts";
 
@@ -20,16 +20,16 @@ const DEFAULTS: Record<Lang, CcNudgePhrasing> = {
   cpp: phrasing("cpp first {name}", "cpp rest {name}"),
 };
 
-test("resolveCcNudge returns the defaults unchanged when the pack is empty", () => {
+test("resolveCcNudge returns the defaults unchanged when the nudge phrasing is empty", () => {
   const result = resolveCcNudge(DEFAULTS, {});
 
   assert.deepEqual(result, DEFAULTS);
 });
 
-test("resolveCcNudge overrides only the langs present in the pack", () => {
-  const pack = { CC_NUDGE: { python: phrasing("coached first", "coached rest") } };
+test("resolveCcNudge overrides only the langs present in the nudge phrasing", () => {
+  const nudgePhrasing = { CC_NUDGE: { python: phrasing("coached first", "coached rest") } };
 
-  const result = resolveCcNudge(DEFAULTS, pack);
+  const result = resolveCcNudge(DEFAULTS, nudgePhrasing);
 
   assert.deepEqual(result.python, phrasing("coached first", "coached rest"));
   assert.deepEqual(result.typescript, DEFAULTS.typescript);
@@ -37,36 +37,36 @@ test("resolveCcNudge overrides only the langs present in the pack", () => {
 });
 
 test("resolveCcNudge ignores a lang entry that is not an object", () => {
-  const pack = { CC_NUDGE: { python: "not an object" } };
+  const nudgePhrasing = { CC_NUDGE: { python: "not an object" } };
 
-  const result = resolveCcNudge(DEFAULTS, pack);
+  const result = resolveCcNudge(DEFAULTS, nudgePhrasing);
 
   assert.deepEqual(result.python, DEFAULTS.python);
 });
 
 test("resolveCcNudge ignores a lang entry with non-string templates", () => {
-  const pack = { CC_NUDGE: { python: { first: 42, rest: 43 } } };
+  const nudgePhrasing = { CC_NUDGE: { python: { first: 42, rest: 43 } } };
 
-  const result = resolveCcNudge(DEFAULTS, pack);
+  const result = resolveCcNudge(DEFAULTS, nudgePhrasing);
 
   assert.deepEqual(result.python, DEFAULTS.python);
 });
 
 test("resolveCcNudge ignores an unknown lang key", () => {
-  const pack = { CC_NUDGE: { klingon: phrasing("f", "r") } };
+  const nudgePhrasing = { CC_NUDGE: { klingon: phrasing("f", "r") } };
 
-  const result = resolveCcNudge(DEFAULTS, pack);
+  const result = resolveCcNudge(DEFAULTS, nudgePhrasing);
 
   assert.deepEqual(result, DEFAULTS);
 });
 
-test("resolveCcNudge ignores a pack with no CC_NUDGE key", () => {
+test("resolveCcNudge ignores a nudge phrasing with no CC_NUDGE key", () => {
   const result = resolveCcNudge(DEFAULTS, { somethingElse: true });
 
   assert.deepEqual(result, DEFAULTS);
 });
 
-test("resolveCcNudge ignores a pack that is not an object", () => {
+test("resolveCcNudge ignores a nudge phrasing that is not an object", () => {
   const result = resolveCcNudge(DEFAULTS, "not an object");
 
   assert.deepEqual(result, DEFAULTS);
@@ -125,13 +125,13 @@ test("the default cc-delta nudge mentions no numbers once formatted with a name 
 
 const DEFAULT_DELTA_TEXT = "default delta text for {name}";
 
-test("resolveCcDeltaNudge returns the default when the pack has no CC_DELTA_NUDGE key", () => {
+test("resolveCcDeltaNudge returns the default when the nudge phrasing has no CC_DELTA_NUDGE key", () => {
   const result = resolveCcDeltaNudge(DEFAULT_DELTA_TEXT, {});
 
   assert.equal(result, DEFAULT_DELTA_TEXT);
 });
 
-test("resolveCcDeltaNudge returns the pack's string when present", () => {
+test("resolveCcDeltaNudge returns the nudge phrasing's string when present", () => {
   const result = resolveCcDeltaNudge(DEFAULT_DELTA_TEXT, { CC_DELTA_NUDGE: "overridden delta text" });
 
   assert.equal(result, "overridden delta text");
@@ -143,30 +143,30 @@ test("resolveCcDeltaNudge falls back to the default when CC_DELTA_NUDGE is not a
   assert.equal(result, DEFAULT_DELTA_TEXT);
 });
 
-test("resolveCcDeltaNudge falls back to the default when the pack is not an object", () => {
+test("resolveCcDeltaNudge falls back to the default when the nudge phrasing is not an object", () => {
   const result = resolveCcDeltaNudge(DEFAULT_DELTA_TEXT, "not an object");
 
   assert.equal(result, DEFAULT_DELTA_TEXT);
 });
 
-test("readPack yields an empty object when the content is undefined", () => {
-  const result = readPack(undefined);
+test("readNudgePhrasing yields an empty object when the content is undefined", () => {
+  const result = readNudgePhrasing(undefined);
 
   assert.deepEqual(result, {});
 });
 
-test("readPack yields an empty object when the content is an empty string", () => {
-  const result = readPack("");
+test("readNudgePhrasing yields an empty object when the content is an empty string", () => {
+  const result = readNudgePhrasing("");
 
   assert.deepEqual(result, {});
 });
 
-test("readPack throws naming LIUBAI_PHRASING_PACK when the content is malformed json", () => {
-  assert.throws(() => readPack("{ not json"), /LIUBAI_PHRASING_PACK/);
+test("readNudgePhrasing throws naming LIUBAI_NUDGE_PHRASING when the content is malformed json", () => {
+  assert.throws(() => readNudgePhrasing("{ not json"), /LIUBAI_NUDGE_PHRASING/);
 });
 
-test("readPack yields the parsed pack when the content is valid json", () => {
-  const result = readPack('{"CC_NUDGE":{"python":{"first":"f","rest":"r"}}}');
+test("readNudgePhrasing yields the parsed nudge phrasing when the content is valid json", () => {
+  const result = readNudgePhrasing('{"CC_NUDGE":{"python":{"first":"f","rest":"r"}}}');
 
   assert.deepEqual(result, { CC_NUDGE: { python: { first: "f", rest: "r" } } });
 });
@@ -231,7 +231,7 @@ function scriptPrintingCcNudges(): string {
 }
 
 function inTempDir<T>(fn: (dir: string) => T): T {
-  const dir = mkdtempSync(join(tmpdir(), "phrasing-pack-"));
+  const dir = mkdtempSync(join(tmpdir(), "nudge-phrasing-"));
   try {
     return fn(dir);
   } finally {
@@ -249,7 +249,7 @@ function runScript(source: string, env: NodeJS.ProcessEnv): string {
   });
 }
 
-function packContent(ccNudge: object): string {
+function nudgePhrasing(ccNudge: object): string {
   return JSON.stringify({ CC_NUDGE: ccNudge });
 }
 
@@ -259,35 +259,35 @@ function envWithout(name: string): NodeJS.ProcessEnv {
   return env;
 }
 
-function ccNudgeMsgsWithPack(ccNudge: object): string[] {
-  const stdout = runScript(scriptPrintingCcNudges(), { ...process.env, LIUBAI_PHRASING_PACK: packContent(ccNudge) });
+function ccNudgeMsgsWithPhrasing(ccNudge: object): string[] {
+  const stdout = runScript(scriptPrintingCcNudges(), { ...process.env, LIUBAI_NUDGE_PHRASING: nudgePhrasing(ccNudge) });
   return JSON.parse(stdout) as string[];
 }
 
-function blockReasonWithAndWithoutPack(): { withoutPack: string; withPack: string } {
+function blockReasonWithAndWithoutPhrasing(): { withoutPhrasing: string; withPhrasing: string } {
   const overridden = phrasing("OVERRIDDEN_CC_NUDGE", "OVERRIDDEN_CC_NUDGE");
-  const content = packContent({ python: overridden, typescript: overridden, cpp: overridden });
+  const content = nudgePhrasing({ python: overridden, typescript: overridden, cpp: overridden });
   return {
-    withoutPack: runScript(scriptPrintingBlockReason(), envWithout("LIUBAI_PHRASING_PACK")),
-    withPack: runScript(scriptPrintingBlockReason(), { ...process.env, LIUBAI_PHRASING_PACK: content }),
+    withoutPhrasing: runScript(scriptPrintingBlockReason(), envWithout("LIUBAI_NUDGE_PHRASING")),
+    withPhrasing: runScript(scriptPrintingBlockReason(), { ...process.env, LIUBAI_NUDGE_PHRASING: content }),
   };
 }
 
-test("formatBlockReason output is byte-identical whether or not a phrasing pack overrode CC_NUDGE", () => {
-  const { withoutPack, withPack } = blockReasonWithAndWithoutPack();
+test("formatBlockReason output is byte-identical whether or not a nudge phrasing overrode CC_NUDGE", () => {
+  const { withoutPhrasing, withPhrasing } = blockReasonWithAndWithoutPhrasing();
 
-  assert.equal(withoutPack, withPack);
-  assert.doesNotMatch(withPack, /OVERRIDDEN_CC_NUDGE/);
+  assert.equal(withoutPhrasing, withPhrasing);
+  assert.doesNotMatch(withPhrasing, /OVERRIDDEN_CC_NUDGE/);
 });
 
-test("a phrasing pack gives the first flagged function the full guide and later ones the short form", () => {
-  const msgs = ccNudgeMsgsWithPack({ python: phrasing("GUIDE for {name} (cc {cc}, bar {threshold})", "{name}: SAME") });
+test("a nudge phrasing gives the first flagged function the full guide and later ones the short form", () => {
+  const msgs = ccNudgeMsgsWithPhrasing({ python: phrasing("GUIDE for {name} (cc {cc}, bar {threshold})", "{name}: SAME") });
 
   assert.deepEqual(msgs, ["GUIDE for alpha (cc 9, bar 8)", "beta: SAME"]);
 });
 
-test("without a pack the first flagged function gets the coaching guide and later ones the short form", () => {
-  const stdout = runScript(scriptPrintingCcNudges(), envWithout("LIUBAI_PHRASING_PACK"));
+test("without a nudge phrasing the first flagged function gets the coaching guide and later ones the short form", () => {
+  const stdout = runScript(scriptPrintingCcNudges(), envWithout("LIUBAI_NUDGE_PHRASING"));
 
   const msgs = JSON.parse(stdout) as string[];
   assert.equal(msgs.length, 2);
@@ -297,7 +297,7 @@ test("without a pack the first flagged function gets the coaching guide and late
 });
 
 test("the default cc nudge never mentions the count or the threshold", () => {
-  const stdout = runScript(scriptPrintingCcNudges(), envWithout("LIUBAI_PHRASING_PACK"));
+  const stdout = runScript(scriptPrintingCcNudges(), envWithout("LIUBAI_NUDGE_PHRASING"));
 
   for (const msg of JSON.parse(stdout) as string[]) {
     assert.doesNotMatch(msg, /CC=|[Tt]hreshold|\b9\b|\b8\b/);
@@ -316,20 +316,20 @@ function scriptPrintingCcDeltaNudge(): string {
   ].join("\n");
 }
 
-function deltaPackContent(ccDeltaNudge: string): string {
+function deltaNudgePhrasing(ccDeltaNudge: string): string {
   return JSON.stringify({ CC_DELTA_NUDGE: ccDeltaNudge });
 }
 
-test("a phrasing pack overrides the cc-delta nudge text at rail runtime", () => {
-  const content = deltaPackContent("{name} custom delta text ({dpBefore}->{dpAfter})");
-  const stdout = runScript(scriptPrintingCcDeltaNudge(), { ...process.env, LIUBAI_PHRASING_PACK: content });
+test("a nudge phrasing overrides the cc-delta nudge text at rail runtime", () => {
+  const content = deltaNudgePhrasing("{name} custom delta text ({dpBefore}->{dpAfter})");
+  const stdout = runScript(scriptPrintingCcDeltaNudge(), { ...process.env, LIUBAI_NUDGE_PHRASING: content });
   const msgs = JSON.parse(stdout) as string[];
 
   assert.deepEqual(msgs, ["handleRequest custom delta text (11->11)"]);
 });
 
-test("without a pack the cc-delta rule keeps its default text", () => {
-  const stdout = runScript(scriptPrintingCcDeltaNudge(), envWithout("LIUBAI_PHRASING_PACK"));
+test("without a nudge phrasing the cc-delta rule keeps its default text", () => {
+  const stdout = runScript(scriptPrintingCcDeltaNudge(), envWithout("LIUBAI_NUDGE_PHRASING"));
 
   const msgs = JSON.parse(stdout) as string[];
   assert.deepEqual(msgs, [formatCcDeltaNudge(CC_DELTA_NUDGE, { name: "handleRequest", dpBefore: 11, dpAfter: 11 })]);

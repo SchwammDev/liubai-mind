@@ -4,7 +4,7 @@ import type { BehaviorCheckFailure } from "./behavior-checks.ts";
 export interface TreatmentManifest {
   id: string;
   env: Record<string, string>;
-  phrasingPack?: string;
+  nudgePhrasingFile?: string;
   expectedZeroNudges?: boolean;
   delivery?: "prompt" | "rail";
 }
@@ -64,7 +64,7 @@ export interface JudgeResult {
 
 export interface Provenance {
   treatmentId: string;
-  phrasingPackHash: string | null;
+  nudgePhrasingHash: string | null;
   liubaiSha: string;
   model: string;
   collectedAt: string;
@@ -96,7 +96,7 @@ export interface RawRow {
   cacheReadTokens?: number;
   nudges?: Record<RuleName, number>;
   shadowNudges?: Record<RuleName, number>;
-  delivered?: { packHash: string | null; liveRules: string[]; shadowRules: string[] };
+  delivered?: { nudgePhrasingHash: string | null; liveRules: string[]; shadowRules: string[] };
   agentError?: string;
   followUp?: FollowUpInfo;
 }

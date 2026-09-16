@@ -918,7 +918,7 @@ test(
 function minimalReferenceProvenance(): Provenance {
   return {
     treatmentId: "reference",
-    phrasingPackHash: null,
+    nudgePhrasingHash: null,
     liubaiSha: "0000000",
     model: "reference-fix",
     collectedAt: "2026-01-01T00:00:00.000Z",

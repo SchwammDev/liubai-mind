@@ -8,38 +8,38 @@ import { runCollect, detectAgentError, countTurns, sumTokenUsage, countNudges, c
 import type { CollectOpts } from "./collect.ts";
 import type { RunSpec, RunOutcome, PiSpawner, ProbeOutcome, ProbeSpawner } from "./spawner.ts";
 import { gitSha } from "./provenance.ts";
-import { RULE, packHash, EVAL_ABORT_EXIT_CODE } from "../contract.ts";
+import { RULE, nudgePhrasingHash, EVAL_ABORT_EXIT_CODE } from "../contract.ts";
 import { CC_DELTA_NUDGE, CC_NUDGE, formatCcNudge } from "../messages.ts";
 import { DEFAULT_POLICY } from "../policy.ts";
 import { PROBE_FIXTURES } from "../delivery-probe.ts";
 import type { ProbeReport } from "./canary.ts";
-import { validatePack } from "./phrasing.ts";
+import { validateNudgePhrasing } from "./phrasing.ts";
 import { SNAPSHOT_FILE_CAP_BYTES } from "./snapshot.ts";
 import type { RawRow, Tier } from "./eval-contract.ts";
 
 function passingProbeSpawner(): ProbeSpawner {
   return async (spec) => {
-    const packContent = spec.env.LIUBAI_PHRASING_PACK;
-    const validated = packContent === undefined ? undefined : validatePack(packContent);
-    const pack = validated !== undefined && "pack" in validated ? validated.pack : {};
+    const nudgePhrasing = spec.env.LIUBAI_NUDGE_PHRASING;
+    const validated = nudgePhrasing === undefined ? undefined : validateNudgePhrasing(nudgePhrasing);
+    const phrasing = validated !== undefined && "phrasing" in validated ? validated.phrasing : {};
 
     const nudges: Partial<Record<"python" | "typescript", string[]>> = {};
     for (const fixture of PROBE_FIXTURES) {
-      const entry = pack.CC_NUDGE?.[fixture.lang] ?? CC_NUDGE[fixture.lang];
+      const entry = phrasing.CC_NUDGE?.[fixture.lang] ?? CC_NUDGE[fixture.lang];
       const threshold = DEFAULT_POLICY[RULE.cc].threshold?.[fixture.lang] ?? 8;
       nudges[fixture.lang] = [formatCcNudge(entry.first, { name: fixture.functionName, cc: fixture.cyclomaticComplexity, threshold })];
     }
 
     const report: ProbeReport = {
-      packHash: packHash(packContent ?? null),
+      nudgePhrasingHash: nudgePhrasingHash(nudgePhrasing ?? null),
       nudges,
       errors: [],
       ccNudge: {
-        python: pack.CC_NUDGE?.python ?? CC_NUDGE.python,
-        typescript: pack.CC_NUDGE?.typescript ?? CC_NUDGE.typescript,
-        cpp: pack.CC_NUDGE?.cpp ?? CC_NUDGE.cpp,
+        python: phrasing.CC_NUDGE?.python ?? CC_NUDGE.python,
+        typescript: phrasing.CC_NUDGE?.typescript ?? CC_NUDGE.typescript,
+        cpp: phrasing.CC_NUDGE?.cpp ?? CC_NUDGE.cpp,
       },
-      ccDeltaNudge: pack.CC_DELTA_NUDGE ?? CC_DELTA_NUDGE,
+      ccDeltaNudge: phrasing.CC_DELTA_NUDGE ?? CC_DELTA_NUDGE,
     };
 
     return { exitCode: 0, stdout: `${JSON.stringify(report)}\n`, stderr: "" };
@@ -210,11 +210,11 @@ function rejectFirstThenMutate(): PiSpawner {
   };
 }
 
-function tempPackedTreatmentsDir(): string {
+function tempPhrasedTreatmentsDir(): string {
   const dir = tempDir("eval-treatments-");
-  mkdirSync(join(dir, "packs"), { recursive: true });
-  writeFileSync(join(dir, "packs", "pack.json"), '{"CC_NUDGE":{"typescript":{"first":"advice","rest":"advice"}}}');
-  writeFileSync(join(dir, "packed.json"), JSON.stringify({ id: "packed", env: {}, phrasingPack: "packs/pack.json" }));
+  mkdirSync(join(dir, "phrasings"), { recursive: true });
+  writeFileSync(join(dir, "phrasings", "phrasing.json"), '{"CC_NUDGE":{"typescript":{"first":"advice","rest":"advice"}}}');
+  writeFileSync(join(dir, "phrased.json"), JSON.stringify({ id: "phrased", env: {}, nudgePhrasingFile: "phrasings/phrasing.json" }));
   return dir;
 }
 
@@ -222,11 +222,11 @@ const PROMPT_TREATMENT_MESSAGE = "Complexity moved, it did not leave.";
 
 function tempPromptTreatmentsDir(): string {
   const dir = tempDir("eval-treatments-");
-  mkdirSync(join(dir, "packs"), { recursive: true });
-  writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_TREATMENT_MESSAGE }));
+  mkdirSync(join(dir, "phrasings"), { recursive: true });
+  writeFileSync(join(dir, "phrasings", "phrasing.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_TREATMENT_MESSAGE }));
   writeFileSync(
     join(dir, "prompt-carried.json"),
-    JSON.stringify({ id: "prompt-carried", delivery: "prompt", env: { LIUBAI_RAILS_OFF: "1" }, phrasingPack: "packs/pack.json" }),
+    JSON.stringify({ id: "prompt-carried", delivery: "prompt", env: { LIUBAI_RAILS_OFF: "1" }, nudgePhrasingFile: "phrasings/phrasing.json" }),
   );
   return dir;
 }
@@ -272,7 +272,7 @@ function twoTierCorpusDir(): string {
 
 function assertProvenanceStamped(row: RawRow, now: string): void {
   assert.equal(row.provenance.treatmentId, "control");
-  assert.equal(row.provenance.phrasingPackHash, null);
+  assert.equal(row.provenance.nudgePhrasingHash, null);
   assert.equal(row.provenance.model, "claude-test-model");
   assert.equal(row.provenance.collectedAt, now);
   assert.equal(row.provenance.liubaiSha, gitSha(REPO_ROOT));
@@ -318,35 +318,35 @@ test("runCollect_passes_control_treatment_env_to_the_spawner", async () => {
   assert.equal(calls[0]?.env.LIUBAI_RAILS_OFF, "1");
 });
 
-test("runCollect_passes_the_phrasing_pack_content_only_for_pack_treatments", async () => {
-  const treatmentsDir = tempPackedTreatmentsDir();
+test("runCollect_passes_the_nudge_phrasing_content_only_to_treatments_that_carry_one", async () => {
+  const treatmentsDir = tempPhrasedTreatmentsDir();
   const { spawner, calls } = recordingSpawner();
-  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["packed"], treatmentsDir, spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["phrased"], treatmentsDir, spawner });
 
   await runCollect(opts);
 
-  const packContent = readFileSync(join(treatmentsDir, "packs", "pack.json"), "utf8");
-  assert.equal(calls[0]?.env.LIUBAI_PHRASING_PACK, packContent);
+  const nudgePhrasing = readFileSync(join(treatmentsDir, "phrasings", "phrasing.json"), "utf8");
+  assert.equal(calls[0]?.env.LIUBAI_NUDGE_PHRASING, nudgePhrasing);
 });
 
-test("runCollect_stamps_the_phrasing_pack_hash_from_the_content_delivered_to_the_agent", async () => {
-  const treatmentsDir = tempPackedTreatmentsDir();
+test("runCollect_stamps_the_nudge_phrasing_hash_from_the_content_delivered_to_the_agent", async () => {
+  const treatmentsDir = tempPhrasedTreatmentsDir();
   const { spawner, calls } = recordingSpawner();
-  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["packed"], treatmentsDir, spawner });
+  const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["phrased"], treatmentsDir, spawner });
 
   await runCollect(opts);
 
   const row = firstRow(opts.runDir);
-  assert.equal(row.provenance.phrasingPackHash, packHash(calls[0]?.env.LIUBAI_PHRASING_PACK ?? null));
+  assert.equal(row.provenance.nudgePhrasingHash, nudgePhrasingHash(calls[0]?.env.LIUBAI_NUDGE_PHRASING ?? null));
 });
 
-test("runCollect_omits_the_phrasing_pack_var_for_packless_treatments", async () => {
+test("runCollect_omits_the_nudge_phrasing_var_for_treatments_without_one", async () => {
   const { spawner, calls } = recordingSpawner();
   const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
-  assert.equal("LIUBAI_PHRASING_PACK" in (calls[0]?.env ?? {}), false);
+  assert.equal("LIUBAI_NUDGE_PHRASING" in (calls[0]?.env ?? {}), false);
 });
 
 test("runCollect_sends_the_case_task_followed_by_the_treatment_message_for_a_prompt_delivery_treatment", async () => {
@@ -364,11 +364,11 @@ const PROMPT_TREATMENT_TEMPLATE_WITH_PLACEHOLDERS = "{name} still carries {dpBef
 
 function tempPlaceholderPromptTreatmentsDir(): string {
   const dir = tempDir("eval-treatments-");
-  mkdirSync(join(dir, "packs"), { recursive: true });
-  writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_TREATMENT_TEMPLATE_WITH_PLACEHOLDERS }));
+  mkdirSync(join(dir, "phrasings"), { recursive: true });
+  writeFileSync(join(dir, "phrasings", "phrasing.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_TREATMENT_TEMPLATE_WITH_PLACEHOLDERS }));
   writeFileSync(
     join(dir, "prompt-carried.json"),
-    JSON.stringify({ id: "prompt-carried", delivery: "prompt", env: { LIUBAI_RAILS_OFF: "1" }, phrasingPack: "packs/pack.json" }),
+    JSON.stringify({ id: "prompt-carried", delivery: "prompt", env: { LIUBAI_RAILS_OFF: "1" }, nudgePhrasingFile: "phrasings/phrasing.json" }),
   );
   return dir;
 }
@@ -850,7 +850,7 @@ function deliveredStampSpawner(delivered: unknown): PiSpawner {
 test("readDelivered_parses_the_workdirs_delivered_stamp", () => {
   const workDir = tempDir("eval-delivered-");
   mkdirSync(join(workDir, ".liubai"), { recursive: true });
-  const delivered = { packHash: "abc123", liveRules: ["cc"], shadowRules: [] };
+  const delivered = { nudgePhrasingHash: "abc123", liveRules: ["cc"], shadowRules: [] };
   writeFileSync(join(workDir, ".liubai", "delivered.json"), JSON.stringify(delivered));
 
   assert.deepEqual(readDelivered(workDir), delivered);
@@ -871,7 +871,7 @@ test("readDelivered_is_undefined_when_the_stamp_is_unparseable_json", () => {
 });
 
 test("runCollect_stamps_delivered_from_the_workdirs_delivered_json_onto_the_raw_row", async () => {
-  const delivered = { packHash: null, liveRules: ["cc", "cc-delta"], shadowRules: [] };
+  const delivered = { nudgePhrasingHash: null, liveRules: ["cc", "cc-delta"], shadowRules: [] };
   const spawner = deliveredStampSpawner(delivered);
   const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 

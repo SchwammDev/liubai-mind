@@ -35,13 +35,13 @@ function isLang(value: string): value is Lang {
   return (KNOWN_LANGS as readonly string[]).includes(value);
 }
 
-export function readPack(content: string | undefined): unknown {
+export function readNudgePhrasing(content: string | undefined): unknown {
   if (content === undefined || content === "") return {};
   try {
     return JSON.parse(content);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    throw new Error(`LIUBAI_PHRASING_PACK is set but is not valid JSON: ${reason}`);
+    throw new Error(`LIUBAI_NUDGE_PHRASING is set but is not valid JSON: ${reason}`);
   }
 }
 
@@ -54,12 +54,12 @@ function asPhrasing(entry: unknown): CcNudgePhrasing | undefined {
 
 export function resolveCcNudge(
   defaults: Record<Lang, CcNudgePhrasing>,
-  pack: unknown,
+  nudgePhrasing: unknown,
 ): Record<Lang, CcNudgePhrasing> {
   const resolved = { ...defaults };
-  if (typeof pack !== "object" || pack === null) return resolved;
+  if (typeof nudgePhrasing !== "object" || nudgePhrasing === null) return resolved;
 
-  const ccNudge = (pack as Record<string, unknown>).CC_NUDGE;
+  const ccNudge = (nudgePhrasing as Record<string, unknown>).CC_NUDGE;
   if (typeof ccNudge !== "object" || ccNudge === null) return resolved;
 
   for (const [lang, entry] of Object.entries(ccNudge as Record<string, unknown>)) {
@@ -81,10 +81,10 @@ export function formatCcNudge(template: string, facts: { name: string; cc: numbe
 const DEFAULT_CC_DELTA_NUDGE =
   "{name} dropped below the complexity threshold, but the file still carries the same decisions — the complexity moved, it did not leave. Splitting a tangle into helpers relocates branches without removing any; a reader now chases the same decisions across more functions. Go back to the shape: collapse branches that repeat a pattern into a dispatch/lookup, delete branches the function's one-sentence job does not need, and only keep helpers that stand for a genuinely separate job.";
 
-export function resolveCcDeltaNudge(defaultText: string, pack: unknown): string {
-  if (typeof pack !== "object" || pack === null) return defaultText;
+export function resolveCcDeltaNudge(defaultText: string, nudgePhrasing: unknown): string {
+  if (typeof nudgePhrasing !== "object" || nudgePhrasing === null) return defaultText;
 
-  const ccDeltaNudge = (pack as Record<string, unknown>).CC_DELTA_NUDGE;
+  const ccDeltaNudge = (nudgePhrasing as Record<string, unknown>).CC_DELTA_NUDGE;
   return typeof ccDeltaNudge === "string" ? ccDeltaNudge : defaultText;
 }
 
@@ -95,11 +95,11 @@ export function formatCcDeltaNudge(template: string, facts: { name: string; dpBe
     .replaceAll("{dpAfter}", String(facts.dpAfter));
 }
 
-const PARSED_PACK: unknown = readPack(process.env.LIUBAI_PHRASING_PACK);
+const PARSED_NUDGE_PHRASING: unknown = readNudgePhrasing(process.env.LIUBAI_NUDGE_PHRASING);
 
-export const CC_NUDGE: Record<Lang, CcNudgePhrasing> = resolveCcNudge(DEFAULT_CC_NUDGE, PARSED_PACK);
+export const CC_NUDGE: Record<Lang, CcNudgePhrasing> = resolveCcNudge(DEFAULT_CC_NUDGE, PARSED_NUDGE_PHRASING);
 
-export const CC_DELTA_NUDGE: string = resolveCcDeltaNudge(DEFAULT_CC_DELTA_NUDGE, PARSED_PACK);
+export const CC_DELTA_NUDGE: string = resolveCcDeltaNudge(DEFAULT_CC_DELTA_NUDGE, PARSED_NUDGE_PHRASING);
 
 export const DOC_COMMENT_FORM: Record<Lang, string> = {
   python: "Remove docstrings too, not just '#' lines.",

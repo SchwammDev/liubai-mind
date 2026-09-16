@@ -21,7 +21,7 @@ function tempDir(prefix: string): string {
 function baseProvenance(over: Partial<Provenance> = {}): Provenance {
   return {
     treatmentId: "rails-default",
-    phrasingPackHash: null,
+    nudgePhrasingHash: null,
     liubaiSha: "abc1234",
     model: "aqueduct/deepseek-v4-flash-284b",
     collectedAt: "2026-08-29T00:00:00.000Z",

@@ -1,18 +1,18 @@
 import type { Lang, RailError } from "../contract.ts";
-import { RULE, packHash } from "../contract.ts";
+import { RULE, nudgePhrasingHash } from "../contract.ts";
 import { CC_DELTA_NUDGE as DEFAULT_CC_DELTA_NUDGE, CC_NUDGE as DEFAULT_CC_NUDGE, formatCcNudge } from "../messages.ts";
 import { DEFAULT_POLICY } from "../policy.ts";
 import type { FixtureLang, ProbeFixture, ProbeReport } from "../delivery-probe.ts";
 import { PROBE_FIXTURES } from "../delivery-probe.ts";
 import type { TreatmentManifest } from "./eval-contract.ts";
-import type { ValidPack } from "./phrasing.ts";
-import { validatePack } from "./phrasing.ts";
+import type { NudgePhrasing } from "./phrasing.ts";
+import { validateNudgePhrasing } from "./phrasing.ts";
 
 export type { ProbeReport } from "../delivery-probe.ts";
 
 export interface EvaluateCanaryInput {
   treatment: TreatmentManifest;
-  packContent: string | undefined;
+  nudgePhrasing: string | undefined;
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -49,7 +49,7 @@ function isCcNudgeMap(value: unknown): value is Record<Lang, { first: string; re
 function isProbeReport(value: unknown): value is ProbeReport {
   if (typeof value !== "object" || value === null) return false;
   const obj = value as Record<string, unknown>;
-  return isStringOrNull(obj.packHash)
+  return isStringOrNull(obj.nudgePhrasingHash)
     && isNudgeMap(obj.nudges)
     && isRailErrorArray(obj.errors)
     && isCcNudgeMap(obj.ccNudge)
@@ -76,39 +76,39 @@ function failure(treatmentId: string, mismatch: string): { ok: false; reason: st
   return { ok: false, reason: `treatment ${treatmentId}: ${mismatch}` };
 }
 
-function resolvePack(treatment: TreatmentManifest, packContent: string | undefined): { value: ValidPack } | { error: string } {
-  if (treatment.phrasingPack === undefined) return { value: {} };
-  if (packContent === undefined) return { error: "treatment declares a phrasingPack but no pack content was supplied" };
+function resolvePhrasing(treatment: TreatmentManifest, nudgePhrasing: string | undefined): { value: NudgePhrasing } | { error: string } {
+  if (treatment.nudgePhrasingFile === undefined) return { value: {} };
+  if (nudgePhrasing === undefined) return { error: "treatment declares a nudgePhrasingFile but no nudge phrasing content was supplied" };
 
-  const validated = validatePack(packContent);
-  if ("error" in validated) return { error: `invalid phrasing pack: ${validated.error}` };
-  return { value: validated.pack };
+  const validated = validateNudgePhrasing(nudgePhrasing);
+  if ("error" in validated) return { error: `invalid nudge phrasing: ${validated.error}` };
+  return { value: validated.phrasing };
 }
 
-function expectedPackHash(treatment: TreatmentManifest, packContent: string | undefined): string | null {
-  if (treatment.phrasingPack === undefined) return null;
-  return packHash(packContent ?? null);
+function expectedNudgePhrasingHash(treatment: TreatmentManifest, nudgePhrasing: string | undefined): string | null {
+  if (treatment.nudgePhrasingFile === undefined) return null;
+  return nudgePhrasingHash(nudgePhrasing ?? null);
 }
 
-function ccNudgeEntryFor(lang: FixtureLang, pack: ValidPack): { first: string; rest: string } {
-  return pack.CC_NUDGE?.[lang] ?? DEFAULT_CC_NUDGE[lang];
+function ccNudgeEntryFor(lang: FixtureLang, phrasing: NudgePhrasing): { first: string; rest: string } {
+  return phrasing.CC_NUDGE?.[lang] ?? DEFAULT_CC_NUDGE[lang];
 }
 
-export function ccDeltaTextFor(pack: ValidPack): string {
-  return pack.CC_DELTA_NUDGE ?? DEFAULT_CC_DELTA_NUDGE;
+export function ccDeltaTextFor(phrasing: NudgePhrasing): string {
+  return phrasing.CC_DELTA_NUDGE ?? DEFAULT_CC_DELTA_NUDGE;
 }
 
-function checkCcDeltaConstant(report: ProbeReport, pack: ValidPack): string | undefined {
-  const expected = ccDeltaTextFor(pack);
+function checkCcDeltaConstant(report: ProbeReport, phrasing: NudgePhrasing): string | undefined {
+  const expected = ccDeltaTextFor(phrasing);
   if (report.ccDeltaNudge !== expected) {
     return `CC_DELTA_NUDGE mismatch — expected "${expected}", got "${report.ccDeltaNudge}"`;
   }
   return undefined;
 }
 
-function checkCcNudgeConstant(report: ProbeReport, pack: ValidPack): string | undefined {
+function checkCcNudgeConstant(report: ProbeReport, phrasing: NudgePhrasing): string | undefined {
   for (const fixture of PROBE_FIXTURES) {
-    const expected = ccNudgeEntryFor(fixture.lang, pack);
+    const expected = ccNudgeEntryFor(fixture.lang, phrasing);
     const actual = report.ccNudge[fixture.lang];
     if (actual === undefined || actual.first !== expected.first || actual.rest !== expected.rest) {
       return `CC_NUDGE.${fixture.lang} mismatch — resolved constant does not match the expected phrasing`;
@@ -117,16 +117,16 @@ function checkCcNudgeConstant(report: ProbeReport, pack: ValidPack): string | un
   return undefined;
 }
 
-function expectedCcNudgeText(fixture: ProbeFixture, pack: ValidPack): string {
-  const entry = ccNudgeEntryFor(fixture.lang, pack);
+function expectedCcNudgeText(fixture: ProbeFixture, phrasing: NudgePhrasing): string {
+  const entry = ccNudgeEntryFor(fixture.lang, phrasing);
   const threshold = DEFAULT_POLICY[RULE.cc].threshold?.[fixture.lang];
   if (threshold === undefined) throw new Error(`cc rule carries no threshold for ${fixture.lang}`);
   return formatCcNudge(entry.first, { name: fixture.functionName, cc: fixture.cyclomaticComplexity, threshold });
 }
 
-function checkCcNudgeFiring(report: ProbeReport, pack: ValidPack): string | undefined {
+function checkCcNudgeFiring(report: ProbeReport, phrasing: NudgePhrasing): string | undefined {
   for (const fixture of PROBE_FIXTURES) {
-    const expectedText = expectedCcNudgeText(fixture, pack);
+    const expectedText = expectedCcNudgeText(fixture, phrasing);
     const produced = report.nudges[fixture.lang] ?? [];
     if (!produced.some((msg) => msg.includes(expectedText))) {
       return `expected CC_NUDGE phrasing for ${fixture.lang} was not delivered — looked for "${expectedText}" in ${JSON.stringify(produced)}`;
@@ -135,7 +135,7 @@ function checkCcNudgeFiring(report: ProbeReport, pack: ValidPack): string | unde
   return undefined;
 }
 
-type ParsedStage = { report: ProbeReport; pack: ValidPack } | { error: string };
+type ParsedStage = { report: ProbeReport; phrasing: NudgePhrasing } | { error: string };
 
 function parseAndResolve(input: EvaluateCanaryInput): ParsedStage {
   if (input.exitCode !== 0) {
@@ -149,35 +149,35 @@ function parseAndResolve(input: EvaluateCanaryInput): ParsedStage {
     return { error: `probe reported analyze errors: ${parsed.errors.map((e) => `${e.source}: ${e.msg}`).join("; ")}` };
   }
 
-  const pack = resolvePack(input.treatment, input.packContent);
-  if ("error" in pack) return pack;
+  const phrasing = resolvePhrasing(input.treatment, input.nudgePhrasing);
+  if ("error" in phrasing) return phrasing;
 
-  return { report: parsed, pack: pack.value };
+  return { report: parsed, phrasing: phrasing.value };
 }
 
 interface DeliveryCtx {
   treatment: TreatmentManifest;
-  packContent: string | undefined;
+  nudgePhrasing: string | undefined;
   report: ProbeReport;
-  pack: ValidPack;
+  phrasing: NudgePhrasing;
 }
 
-function checkPackHash(ctx: DeliveryCtx): string | undefined {
-  const expected = expectedPackHash(ctx.treatment, ctx.packContent);
-  if (ctx.report.packHash === expected) return undefined;
-  return `packHash mismatch — expected ${JSON.stringify(expected)}, got ${JSON.stringify(ctx.report.packHash)}`;
+function checkNudgePhrasingHash(ctx: DeliveryCtx): string | undefined {
+  const expected = expectedNudgePhrasingHash(ctx.treatment, ctx.nudgePhrasing);
+  if (ctx.report.nudgePhrasingHash === expected) return undefined;
+  return `nudgePhrasingHash mismatch — expected ${JSON.stringify(expected)}, got ${JSON.stringify(ctx.report.nudgePhrasingHash)}`;
 }
 
 function checkCcDelta(ctx: DeliveryCtx): string | undefined {
-  return checkCcDeltaConstant(ctx.report, ctx.pack);
+  return checkCcDeltaConstant(ctx.report, ctx.phrasing);
 }
 
 function checkCcNudge(ctx: DeliveryCtx): string | undefined {
   const railsOff = Boolean(ctx.treatment.env.LIUBAI_RAILS_OFF);
-  return railsOff ? checkCcNudgeConstant(ctx.report, ctx.pack) : checkCcNudgeFiring(ctx.report, ctx.pack);
+  return railsOff ? checkCcNudgeConstant(ctx.report, ctx.phrasing) : checkCcNudgeFiring(ctx.report, ctx.phrasing);
 }
 
-const DELIVERY_CHECKS: ((ctx: DeliveryCtx) => string | undefined)[] = [checkPackHash, checkCcDelta, checkCcNudge];
+const DELIVERY_CHECKS: ((ctx: DeliveryCtx) => string | undefined)[] = [checkNudgePhrasingHash, checkCcDelta, checkCcNudge];
 
 function checkDelivery(ctx: DeliveryCtx): string | undefined {
   for (const check of DELIVERY_CHECKS) {
@@ -191,7 +191,7 @@ export function evaluateCanary(input: EvaluateCanaryInput): CanaryResult {
   const stage = parseAndResolve(input);
   if ("error" in stage) return failure(input.treatment.id, stage.error);
 
-  const mismatch = checkDelivery({ treatment: input.treatment, packContent: input.packContent, report: stage.report, pack: stage.pack });
+  const mismatch = checkDelivery({ treatment: input.treatment, nudgePhrasing: input.nudgePhrasing, report: stage.report, phrasing: stage.phrasing });
   if (mismatch !== undefined) return failure(input.treatment.id, mismatch);
 
   return { ok: true, report: stage.report };

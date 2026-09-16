@@ -58,7 +58,7 @@ function row(over: Partial<RawRow> = {}): RawRow {
     repetition: REPETITION,
     provenance: {
       treatmentId: TREATMENT_ID,
-      phrasingPackHash: null,
+      nudgePhrasingHash: null,
       liubaiSha: "abc1234",
       model: "test-model",
       collectedAt: "2026-09-05T00:00:00.000Z",
