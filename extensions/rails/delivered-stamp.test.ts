@@ -5,6 +5,7 @@ import { register } from "./index.ts";
 import type { RailsDeps } from "./index.ts";
 import { RULE } from "../../engine/contract.ts";
 import { nudgePhrasingHash } from "../../engine/contract.ts";
+import type { RailReportLine } from "../../engine/contract.ts";
 
 const ALL_RULE_NAMES = Object.values(RULE);
 const TOGGLE_KEYS = ["LIUBAI_EVAL", "LIUBAI_RAILS_OFF", "LIUBAI_CC_DELTA_OFF", "LIUBAI_SHADOW_RULES", "LIUBAI_NUDGE_PHRASING"] as const;
@@ -28,25 +29,26 @@ function withEnv<T>(env: Partial<Record<(typeof TOGGLE_KEYS)[number], string>>, 
   }
 }
 
-type DeliveredStamp = { nudgePhrasingHash: string | null; liveRules: string[]; shadowRules: string[] };
+type Delivered = Extract<RailReportLine, { type: "delivered" }>;
 
-function registerAndCapture(env: Partial<Record<(typeof TOGGLE_KEYS)[number], string>>): DeliveredStamp[] {
-  const stamps: DeliveredStamp[] = [];
-  const deps: RailsDeps = { logDedup: () => {}, writeDelivered: (stamp) => stamps.push(stamp) };
+function registerAndCapture(env: Partial<Record<(typeof TOGGLE_KEYS)[number], string>>): Delivered[] {
+  const reported: Delivered[] = [];
+  const deps: RailsDeps = { logDedup: () => {}, report: (line) => reported.push(line as Delivered) };
   withEnv(env, () => register(fakePi(), deps));
-  return stamps;
+  return reported;
 }
 
-function assertDeliveredOnce(stamps: DeliveredStamp[], expected: DeliveredStamp): void {
-  assert.deepEqual(stamps, [expected]);
+function assertDeliveredOnce(reported: Delivered[], expected: Delivered): void {
+  assert.deepEqual(reported, [expected]);
 }
 
 test("under LIUBAI_EVAL, registration stamps the nudge phrasing hash and every rule as live", () => {
-  const stamps = registerAndCapture({ LIUBAI_EVAL: "1", LIUBAI_NUDGE_PHRASING: '{"CC_NUDGE":{}}' }).map(
+  const reported = registerAndCapture({ LIUBAI_EVAL: "1", LIUBAI_NUDGE_PHRASING: '{"CC_NUDGE":{}}' }).map(
     (s) => ({ ...s, liveRules: [...s.liveRules].sort() }),
   );
 
-  assertDeliveredOnce(stamps, {
+  assertDeliveredOnce(reported, {
+    type: "delivered",
     nudgePhrasingHash: nudgePhrasingHash('{"CC_NUDGE":{}}'),
     liveRules: [...ALL_RULE_NAMES].sort(),
     shadowRules: [],
@@ -54,33 +56,33 @@ test("under LIUBAI_EVAL, registration stamps the nudge phrasing hash and every r
 });
 
 test("without LIUBAI_EVAL, registration writes no stamp", () => {
-  const stamps = registerAndCapture({ LIUBAI_NUDGE_PHRASING: '{"CC_NUDGE":{}}' });
+  const reported = registerAndCapture({ LIUBAI_NUDGE_PHRASING: '{"CC_NUDGE":{}}' });
 
-  assert.deepEqual(stamps, []);
+  assert.deepEqual(reported, []);
 });
 
 test("nudgePhrasingHash is null when LIUBAI_NUDGE_PHRASING is unset", () => {
-  const stamps = registerAndCapture({ LIUBAI_EVAL: "1" });
+  const reported = registerAndCapture({ LIUBAI_EVAL: "1" });
 
-  assert.equal(stamps[0]?.nudgePhrasingHash, null);
+  assert.equal(reported[0]?.nudgePhrasingHash, null);
 });
 
 test("LIUBAI_SHADOW_RULES moves the named rule from live into shadow", () => {
-  const stamps = registerAndCapture({ LIUBAI_EVAL: "1", LIUBAI_SHADOW_RULES: RULE.ccDelta });
+  const reported = registerAndCapture({ LIUBAI_EVAL: "1", LIUBAI_SHADOW_RULES: RULE.ccDelta });
 
-  assert.deepEqual(stamps[0]?.shadowRules, [RULE.ccDelta]);
-  assert.equal(stamps[0]?.liveRules.includes(RULE.ccDelta), false);
+  assert.deepEqual(reported[0]?.shadowRules, [RULE.ccDelta]);
+  assert.equal(reported[0]?.liveRules.includes(RULE.ccDelta), false);
 });
 
 test("LIUBAI_CC_DELTA_OFF drops cc-delta from both live and shadow rules", () => {
-  const stamps = registerAndCapture({ LIUBAI_EVAL: "1", LIUBAI_CC_DELTA_OFF: "1", LIUBAI_SHADOW_RULES: RULE.ccDelta });
+  const reported = registerAndCapture({ LIUBAI_EVAL: "1", LIUBAI_CC_DELTA_OFF: "1", LIUBAI_SHADOW_RULES: RULE.ccDelta });
 
-  assert.equal(stamps[0]?.liveRules.includes(RULE.ccDelta), false);
-  assert.equal(stamps[0]?.shadowRules.includes(RULE.ccDelta), false);
+  assert.equal(reported[0]?.liveRules.includes(RULE.ccDelta), false);
+  assert.equal(reported[0]?.shadowRules.includes(RULE.ccDelta), false);
 });
 
 test("LIUBAI_RAILS_OFF still stamps, but with both rule sets empty", () => {
-  const stamps = registerAndCapture({ LIUBAI_EVAL: "1", LIUBAI_RAILS_OFF: "1", LIUBAI_NUDGE_PHRASING: '{"CC_NUDGE":{}}' });
+  const reported = registerAndCapture({ LIUBAI_EVAL: "1", LIUBAI_RAILS_OFF: "1", LIUBAI_NUDGE_PHRASING: '{"CC_NUDGE":{}}' });
 
-  assertDeliveredOnce(stamps, { nudgePhrasingHash: nudgePhrasingHash('{"CC_NUDGE":{}}'), liveRules: [], shadowRules: [] });
+  assertDeliveredOnce(reported, { type: "delivered", nudgePhrasingHash: nudgePhrasingHash('{"CC_NUDGE":{}}'), liveRules: [], shadowRules: [] });
 });

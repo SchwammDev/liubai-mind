@@ -5,6 +5,13 @@ export type Severity = "block" | "nudge";
 
 export const EVAL_ABORT_EXIT_CODE = 17;
 
+export const RAIL_REPORT_FD = 3;
+
+export type DeliveredStamp = { nudgePhrasingHash: string | null; liveRules: string[]; shadowRules: string[] };
+export type RailReportLine =
+  | ({ type: "delivered" } & DeliveredStamp)
+  | { type: "shadow"; rule: RuleName; path: string };
+
 export const RULE = {
   cc: "cc",
   ccDelta: "cc-delta",

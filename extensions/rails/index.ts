@@ -5,9 +5,9 @@ import {
   type ExtensionContext,
   type ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 import { classify, mergeRules, type CommandRules } from "./command-gate.ts";
 import {
@@ -31,13 +31,14 @@ import { withoutDuplicateToolCalls } from "./duplicate-delivery.ts";
 import { cleanProse } from "./prose-gate.ts";
 import { injectWebSearch, loadWebSearchConfig, LIUBAI_CONFIG } from "./web-search.ts";
 import { analyze } from "../../engine/analyze.ts";
-import type { Env, RuleName } from "../../engine/contract.ts";
+import type { DeliveredStamp, Env, RuleName } from "../../engine/contract.ts";
 import { EVAL_ABORT_EXIT_CODE, RULE, nudgePhrasingHash } from "../../engine/contract.ts";
 import { defaultEnv } from "../../engine/env.ts";
 import { detectLang } from "../../engine/lang.ts";
 import { formatBlockReason } from "../../engine/messages.ts";
 import { buildRules, ccDeltaEnabledLangs, DEFAULT_POLICY } from "../../engine/policy.ts";
 import { reconstruct, type FileChange } from "../../engine/reconstruct.ts";
+import { createRailReport, type RailReport } from "./rail-report.ts";
 
 const GLOBAL_RULES = join(homedir(), ".pi/agent/command-rules.json");
 const PROJECT_RULES =
@@ -74,32 +75,6 @@ export function parseShadowRules(value: string | undefined): Set<string> {
   );
 }
 
-export type ShadowLogEntry = { rule: RuleName; path: string };
-export type ShadowLog = (entry: ShadowLogEntry) => void;
-
-function createShadowLog(cwd: string): ShadowLog {
-  const path = join(cwd, ".liubai", "shadow.jsonl");
-  return (entry) => {
-    try {
-      mkdirSync(dirname(path), { recursive: true });
-      appendFileSync(path, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n");
-    } catch {}
-  };
-}
-
-export type DeliveredStamp = { nudgePhrasingHash: string | null; liveRules: string[]; shadowRules: string[] };
-export type WriteDelivered = (stamp: DeliveredStamp) => void;
-
-function createDeliveredWriter(cwd: string): WriteDelivered {
-  const path = join(cwd, ".liubai", "delivered.json");
-  return (stamp) => {
-    try {
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, JSON.stringify(stamp));
-    } catch {}
-  };
-}
-
 function deliveredNudgePhrasingHash(): string | null {
   const raw = process.env.LIUBAI_NUDGE_PHRASING;
   return nudgePhrasingHash(raw && raw.length > 0 ? raw : null);
@@ -110,8 +85,8 @@ function enabledRuleNames(): RuleName[] {
   return (Object.values(RULE) as RuleName[]).filter((name) => name !== RULE.ccDelta || ccDeltaOn);
 }
 
-function stampDelivered(cwd: string, writeDelivered: WriteDelivered): void {
-  if (process.env.LIUBAI_EVAL) writeDelivered(resolveDelivered());
+function stampDelivered(report: RailReport): void {
+  if (process.env.LIUBAI_EVAL) report({ type: "delivered", ...resolveDelivered() });
 }
 
 function resolveDelivered(): DeliveredStamp {
@@ -168,8 +143,7 @@ export type RailsDeps = {
   exec?: Exec;
   readTargetFile?: (path: string) => Promise<string>;
   logDedup?: DedupLog;
-  logShadow?: ShadowLog;
-  writeDelivered?: WriteDelivered;
+  report?: RailReport;
   abort?: (message: string) => void;
 };
 
@@ -190,11 +164,11 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
   const exec = deps?.exec ?? createExec(cwd);
   const readTargetFile = deps?.readTargetFile ?? createTargetReader(cwd);
   const logDedup = deps?.logDedup ?? createFileLog();
-  const logShadow = deps?.logShadow ?? createShadowLog(cwd);
+  const report = deps?.report ?? createRailReport();
   const abort = deps?.abort ?? abortProcess;
   const env = deps?.env ?? defaultEnv();
 
-  stampDelivered(cwd, deps?.writeDelivered ?? createDeliveredWriter(cwd));
+  stampDelivered(report);
 
   pi.registerTool(
     withBashDedup(bashTool, {
@@ -322,7 +296,7 @@ export function register(pi: ExtensionAPI, deps: RailsDeps = {}): void {
     const shadowRules = parseShadowRules(process.env.LIUBAI_SHADOW_RULES);
     const visibleNudges = resp.nudges.filter((n) => !shadowRules.has(n.rule));
     for (const n of resp.nudges) {
-      if (shadowRules.has(n.rule)) logShadow({ rule: n.rule, path: states.path });
+      if (shadowRules.has(n.rule)) report({ type: "shadow", rule: n.rule, path: states.path });
     }
 
     for (const err of resp.errors) {

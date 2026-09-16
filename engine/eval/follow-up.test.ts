@@ -217,6 +217,18 @@ test("runFollowUp_stamps_control_rows_with_a_null_source_repetition", async () =
   assert.deepEqual(control?.followUp, { sourceRun: SOURCE_RUN_NAME, sourceRepetition: null, control: true });
 });
 
+test("runFollowUp_stamps_the_delivery_the_rail_reported_onto_every_row", async () => {
+  const rows = [sourceRow({ treatmentId: "rails-default", repetition: 1, files: { "parse_flags.ts": MUTATED_FLAG_PARSER } })];
+  const sourceRunDir = writeSourceRun(rows);
+  const delivered = { nudgePhrasingHash: null, liveRules: ["cc"], shadowRules: [] };
+  const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false, railReportJsonl: `${JSON.stringify({ type: "delivered", ...delivered })}\n` });
+  const opts = baseOpts(sourceRunDir, { spawner });
+
+  await runFollowUp(opts);
+
+  assert.deepEqual(readRawRows(opts.runDir).map((row) => row.delivered), [delivered, delivered]);
+});
+
 function writeExistingFollowUpRow(runDir: string, row: Partial<RawRow>): void {
   mkdirSync(runDir, { recursive: true });
   writeFileSync(join(runDir, "raw.jsonl"), `${JSON.stringify(row)}\n`);

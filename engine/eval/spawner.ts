@@ -3,6 +3,8 @@ import { existsSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
+import { RAIL_REPORT_FD } from "../contract.ts";
+
 export const REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 export interface RunSpec {
@@ -20,6 +22,7 @@ export interface RunOutcome {
   timedOut: boolean;
   signal?: string;
   stderrTail?: string;
+  railReportJsonl?: string;
 }
 
 export type PiSpawner = (spec: RunSpec) => Promise<RunOutcome>;
@@ -146,6 +149,14 @@ function bwrapNotFoundError(): Error {
   return new Error("bwrap not found on PATH; refusing to run the eval agent unsandboxed");
 }
 
+type StdioSlot = "ignore" | "pipe";
+
+function piStdio(): StdioSlot[] {
+  const stdio: StdioSlot[] = ["ignore", "pipe", "pipe"];
+  stdio[RAIL_REPORT_FD] = "pipe";
+  return stdio;
+}
+
 function runPi(repoRoot: string, spec: RunSpec): Promise<RunOutcome> {
   const piBin = join(repoRoot, "node_modules", ".bin", "pi");
   const bwrapArgs = buildBwrapArgs({ repoRoot, homeDir: homedir(), workDir: spec.cwd });
@@ -157,7 +168,7 @@ function runPi(repoRoot: string, spec: RunSpec): Promise<RunOutcome> {
     const child = spawn("bwrap", args, {
       cwd: spec.cwd,
       env: buildSpawnEnv(process.env, spec.env),
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: piStdio(),
     });
 
     child.on("error", (err: NodeJS.ErrnoException) => {
@@ -174,6 +185,7 @@ function runPi(repoRoot: string, spec: RunSpec): Promise<RunOutcome> {
     });
 
     let stdout = "";
+    let railReportJsonl = "";
     let timedOut = false;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -187,6 +199,10 @@ function runPi(repoRoot: string, spec: RunSpec): Promise<RunOutcome> {
       stdout += chunk.toString("utf8");
     });
 
+    child.stdio[RAIL_REPORT_FD]?.on("data", (chunk: Buffer) => {
+      railReportJsonl += chunk.toString("utf8");
+    });
+
     child.on("close", (code, signal) => {
       if (settled) return;
       settled = true;
@@ -195,6 +211,7 @@ function runPi(repoRoot: string, spec: RunSpec): Promise<RunOutcome> {
       resolve({
         exitCode: code ?? -1,
         stdoutJsonl: stdout,
+        railReportJsonl,
         timedOut,
         ...(signal !== null ? { signal } : {}),
         ...(stderrTail.length > 0 ? { stderrTail } : {}),

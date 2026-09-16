@@ -4,11 +4,12 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, appen
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { runCollect, detectAgentError, countTurns, sumTokenUsage, countNudges, countShadowNudges, readDelivered } from "./collect.ts";
+import { runCollect, detectAgentError, countTurns, sumTokenUsage, countNudges, railReportFrom } from "./collect.ts";
 import type { CollectOpts } from "./collect.ts";
 import type { RunSpec, RunOutcome, PiSpawner, ProbeOutcome, ProbeSpawner } from "./spawner.ts";
 import { gitSha } from "./provenance.ts";
 import { RULE, nudgePhrasingHash, EVAL_ABORT_EXIT_CODE } from "../contract.ts";
+import type { RuleName } from "../contract.ts";
 import { CC_DELTA_NUDGE, CC_NUDGE, formatCcNudge } from "../messages.ts";
 import { DEFAULT_POLICY } from "../policy.ts";
 import { PROBE_FIXTURES } from "../delivery-probe.ts";
@@ -52,6 +53,8 @@ function failingProbeSpawner(outcome: Partial<ProbeOutcome> = {}): ProbeSpawner 
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const CORPUS_DIR = join(import.meta.dirname, "corpus");
+
+type DeliveredStamp = NonNullable<RawRow["delivered"]>;
 
 const EXPECTED_FOUR_PAIRS = [
   "ts-flag-parser/control/1",
@@ -744,39 +747,66 @@ test("countNudges_reports_zero_for_a_rule_that_never_fired", () => {
   assert.equal(nudges["test-linearity"], 0);
 });
 
-function shadowLogLine(rule: string, path: string): string {
-  return `${JSON.stringify({ ts: "2026-08-30T00:00:00.000Z", rule, path })}\n`;
+function railReportedDelivery(stamp: DeliveredStamp): string {
+  return JSON.stringify({ type: "delivered", ...stamp });
 }
 
-test("countShadowNudges_counts_a_shadowed_rule_nudge_once", () => {
-  const log = shadowLogLine("cc-delta", "a.py");
+function railReportedShadowNudge(rule: RuleName, path: string): string {
+  return JSON.stringify({ type: "shadow", rule, path });
+}
 
-  assert.equal(countShadowNudges(log)["cc-delta"], 1);
+function railReport(lines: string[]): string {
+  return `${lines.join("\n")}\n`;
+}
+
+test("railReportFrom_returns_the_delivered_stamp_with_its_type_field_stripped", () => {
+  const stamp: DeliveredStamp = { nudgePhrasingHash: "abc123", liveRules: [RULE.cc], shadowRules: [] };
+
+  const report = railReportFrom(railReport([railReportedDelivery(stamp)]));
+
+  assert.deepEqual(report.delivered, stamp);
 });
 
-test("countShadowNudges_sums_nudges_of_the_same_rule_across_lines", () => {
-  const log = shadowLogLine("cc-delta", "a.py") + shadowLogLine("cc-delta", "b.py");
+test("railReportFrom_keeps_the_first_of_two_delivered_lines", () => {
+  const first: DeliveredStamp = { nudgePhrasingHash: "first", liveRules: [], shadowRules: [] };
+  const second: DeliveredStamp = { nudgePhrasingHash: "second", liveRules: [], shadowRules: [] };
 
-  assert.equal(countShadowNudges(log)["cc-delta"], 2);
+  const report = railReportFrom(railReport([railReportedDelivery(first), railReportedDelivery(second)]));
+
+  assert.deepEqual(report.delivered, first);
 });
 
-test("countShadowNudges_ignores_a_rule_name_the_engine_does_not_know", () => {
-  const log = shadowLogLine("not-a-real-rule", "a.py");
+test("railReportFrom_counts_shadow_nudges_per_rule_and_reports_zero_for_the_rest", () => {
+  const report = railReportFrom(railReport([railReportedShadowNudge(RULE.ccDelta, "a.py"), railReportedShadowNudge(RULE.ccDelta, "b.py")]));
 
-  const nudges = countShadowNudges(log);
-
-  assert.equal(nudges.cc, 0);
-  assert.equal(nudges["cc-delta"], 0);
+  assert.equal(report.shadowNudges?.[RULE.ccDelta], 2);
+  assert.equal(report.shadowNudges?.[RULE.cc], 0);
 });
 
-test("countShadowNudges_skips_a_malformed_line_without_losing_the_valid_ones", () => {
-  const log = "{ not json\n" + shadowLogLine("cc-delta", "a.py");
+test("railReportFrom_ignores_a_shadow_line_naming_a_rule_the_engine_does_not_know", () => {
+  const log = `${JSON.stringify({ type: "shadow", rule: "not-a-real-rule", path: "a.py" })}\n`;
 
-  assert.equal(countShadowNudges(log)["cc-delta"], 1);
+  const report = railReportFrom(log);
+
+  assert.equal(report.shadowNudges, undefined);
 });
 
-test("countShadowNudges_reports_zero_for_an_empty_log", () => {
-  assert.equal(countShadowNudges("")["cc-delta"], 0);
+test("railReportFrom_skips_a_malformed_line_without_losing_the_valid_ones", () => {
+  const report = railReportFrom(railReport(["{ not json", railReportedShadowNudge(RULE.ccDelta, "a.py")]));
+
+  assert.equal(report.shadowNudges?.[RULE.ccDelta], 1);
+});
+
+test("railReportFrom_reports_neither_delivered_nor_shadowNudges_for_undefined_input", () => {
+  assert.deepEqual(railReportFrom(undefined), {});
+});
+
+test("railReportFrom_omits_shadowNudges_when_the_report_has_only_a_delivered_line", () => {
+  const stamp: DeliveredStamp = { nudgePhrasingHash: null, liveRules: [RULE.cc], shadowRules: [] };
+
+  const report = railReportFrom(railReport([railReportedDelivery(stamp)]));
+
+  assert.equal(report.shadowNudges, undefined);
 });
 
 function assertCostMetricsStamped(row: RawRow): void {
@@ -811,25 +841,20 @@ test("runCollect_stamps_the_death_signal_and_stderr_tail_of_a_killed_repetition_
   assert.equal(firstRow(opts.runDir).stderrTail, "gateway stream reset");
 });
 
-function shadowLogSpawner(lines: string[]): PiSpawner {
-  return async (spec) => {
-    const shadowDir = join(spec.cwd, ".liubai");
-    mkdirSync(shadowDir, { recursive: true });
-    writeFileSync(join(shadowDir, "shadow.jsonl"), lines.join(""));
-    return { exitCode: 0, stdoutJsonl: "", timedOut: false };
-  };
+function spawnerWhoseRailReported(lines: string[]): PiSpawner {
+  return async () => ({ exitCode: 0, stdoutJsonl: "", timedOut: false, railReportJsonl: railReport(lines) });
 }
 
-test("runCollect_stamps_shadowNudges_from_the_workdirs_shadow_log_onto_the_raw_row", async () => {
-  const spawner = shadowLogSpawner([shadowLogLine("cc-delta", "a.py"), shadowLogLine("cc-delta", "b.py")]);
+test("runCollect_stamps_shadowNudges_from_the_rails_report_onto_the_raw_row", async () => {
+  const spawner = spawnerWhoseRailReported([railReportedShadowNudge(RULE.ccDelta, "a.py"), railReportedShadowNudge(RULE.ccDelta, "b.py")]);
   const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
 
-  assert.equal(firstRow(opts.runDir).shadowNudges?.["cc-delta"], 2);
+  assert.equal(firstRow(opts.runDir).shadowNudges?.[RULE.ccDelta], 2);
 });
 
-test("runCollect_omits_shadowNudges_from_the_raw_row_when_no_shadow_log_was_written", async () => {
+test("runCollect_omits_shadowNudges_from_the_raw_row_when_the_rail_reported_none", async () => {
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
   const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
@@ -838,41 +863,9 @@ test("runCollect_omits_shadowNudges_from_the_raw_row_when_no_shadow_log_was_writ
   assert.equal(firstRow(opts.runDir).shadowNudges, undefined);
 });
 
-function deliveredStampSpawner(delivered: unknown): PiSpawner {
-  return async (spec) => {
-    const liubaiDir = join(spec.cwd, ".liubai");
-    mkdirSync(liubaiDir, { recursive: true });
-    writeFileSync(join(liubaiDir, "delivered.json"), JSON.stringify(delivered));
-    return { exitCode: 0, stdoutJsonl: "", timedOut: false };
-  };
-}
-
-test("readDelivered_parses_the_workdirs_delivered_stamp", () => {
-  const workDir = tempDir("eval-delivered-");
-  mkdirSync(join(workDir, ".liubai"), { recursive: true });
-  const delivered = { nudgePhrasingHash: "abc123", liveRules: ["cc"], shadowRules: [] };
-  writeFileSync(join(workDir, ".liubai", "delivered.json"), JSON.stringify(delivered));
-
-  assert.deepEqual(readDelivered(workDir), delivered);
-});
-
-test("readDelivered_is_undefined_when_no_stamp_was_written", () => {
-  const workDir = tempDir("eval-delivered-");
-
-  assert.equal(readDelivered(workDir), undefined);
-});
-
-test("readDelivered_is_undefined_when_the_stamp_is_unparseable_json", () => {
-  const workDir = tempDir("eval-delivered-");
-  mkdirSync(join(workDir, ".liubai"), { recursive: true });
-  writeFileSync(join(workDir, ".liubai", "delivered.json"), "{ not json");
-
-  assert.equal(readDelivered(workDir), undefined);
-});
-
-test("runCollect_stamps_delivered_from_the_workdirs_delivered_json_onto_the_raw_row", async () => {
-  const delivered = { nudgePhrasingHash: null, liveRules: ["cc", "cc-delta"], shadowRules: [] };
-  const spawner = deliveredStampSpawner(delivered);
+test("runCollect_stamps_delivered_from_the_rails_report_onto_the_raw_row", async () => {
+  const delivered: DeliveredStamp = { nudgePhrasingHash: null, liveRules: [RULE.cc, RULE.ccDelta], shadowRules: [] };
+  const spawner = spawnerWhoseRailReported([railReportedDelivery(delivered)]);
   const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 
   await runCollect(opts);
@@ -880,7 +873,7 @@ test("runCollect_stamps_delivered_from_the_workdirs_delivered_json_onto_the_raw_
   assert.deepEqual(firstRow(opts.runDir).delivered, delivered);
 });
 
-test("runCollect_omits_delivered_from_the_raw_row_when_no_delivered_stamp_was_written", async () => {
+test("runCollect_omits_delivered_from_the_raw_row_when_the_rail_reported_none", async () => {
   const spawner = fixedOutcomeSpawner({ exitCode: 0, stdoutJsonl: "", timedOut: false });
   const opts = baseOpts({ cases: ["ts-flag-parser"], treatments: ["control"], spawner });
 

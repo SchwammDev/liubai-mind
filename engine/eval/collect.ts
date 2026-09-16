@@ -184,20 +184,46 @@ export function countNudges(stdoutJsonl: string): Record<RuleName, number> {
   return Object.fromEntries(RULE_NAMES.map((rule) => [rule, firings[rule].count])) as Record<RuleName, number>;
 }
 
-export function countShadowNudges(logContents: string): Record<RuleName, number> {
+interface RailReport {
+  delivered?: RawRow["delivered"];
+  shadowNudges?: Record<RuleName, number>;
+}
+
+type ReportedLine = Record<string, unknown>;
+
+function isRuleName(value: unknown): value is RuleName {
+  return typeof value === "string" && RULE_NAMES.includes(value as RuleName);
+}
+
+function reportedLines(jsonl: string): ReportedLine[] {
+  return nonEmptyLines(jsonl)
+    .map(parseJsonLine)
+    .filter((parsed): parsed is ReportedLine => typeof parsed === "object" && parsed !== null);
+}
+
+function firstDeliveredStamp(lines: ReportedLine[]): RawRow["delivered"] {
+  const line = lines.find((reported) => reported.type === "delivered");
+  if (line === undefined) return undefined;
+  const { type: _type, ...stamp } = line;
+  return stamp as RawRow["delivered"];
+}
+
+function shadowNudgeCounts(lines: ReportedLine[]): Record<RuleName, number> | undefined {
+  const rules = lines.filter((reported) => reported.type === "shadow").map((reported) => reported.rule).filter(isRuleName);
+  if (rules.length === 0) return undefined;
   const counts = emptyNudges();
-
-  for (const line of nonEmptyLines(logContents)) {
-    const parsed = parseJsonLine(line);
-    if (typeof parsed !== "object" || parsed === null) continue;
-
-    const rule = (parsed as Record<string, unknown>).rule;
-    if (typeof rule === "string" && RULE_NAMES.includes(rule as RuleName)) {
-      counts[rule as RuleName] += 1;
-    }
-  }
-
+  for (const rule of rules) counts[rule] += 1;
   return counts;
+}
+
+export function railReportFrom(jsonl: string | undefined): RailReport {
+  const lines = reportedLines(jsonl ?? "");
+  const delivered = firstDeliveredStamp(lines);
+  const shadowNudges = shadowNudgeCounts(lines);
+  return {
+    ...(delivered !== undefined ? { delivered } : {}),
+    ...(shadowNudges !== undefined ? { shadowNudges } : {}),
+  };
 }
 
 function silentCrashError(exitCode: number): string | undefined {
@@ -331,22 +357,6 @@ export async function spawnForItem(
   return { outcome, durationMs: Date.now() - start };
 }
 
-function readShadowNudges(workDir: string): Record<RuleName, number> | undefined {
-  const shadowLogPath = join(workDir, ".liubai", "shadow.jsonl");
-  if (!existsSync(shadowLogPath)) return undefined;
-  return countShadowNudges(readFileSync(shadowLogPath, "utf8"));
-}
-
-export function readDelivered(workDir: string): RawRow["delivered"] {
-  const deliveredPath = join(workDir, ".liubai", "delivered.json");
-  if (!existsSync(deliveredPath)) return undefined;
-  try {
-    return JSON.parse(readFileSync(deliveredPath, "utf8")) as RawRow["delivered"];
-  } catch {
-    return undefined;
-  }
-}
-
 export function buildRawRowCore(
   ctx: CollectContext,
   treatmentId: string,
@@ -428,8 +438,7 @@ async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult>
   try {
     const { outcome, durationMs } = await spawnForItem(ctx, task, workDir, env);
     const snapshot = snapshotWorkDir(workDir, plan);
-    const shadowNudges = readShadowNudges(workDir);
-    const delivered = readDelivered(workDir);
+    const { delivered, shadowNudges } = railReportFrom(outcome.railReportJsonl);
     const sentTask = item.treatment.delivery === "prompt" ? task : undefined;
     const row = buildRawRow(ctx, item, nudgePhrasing, outcome, durationMs, snapshot, shadowNudges, delivered, sentTask);
     return { row, stdoutJsonl: outcome.stdoutJsonl };
