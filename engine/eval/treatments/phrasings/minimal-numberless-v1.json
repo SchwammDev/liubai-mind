@@ -1,0 +1,16 @@
+{
+  "CC_NUDGE": {
+    "python": {
+      "first": "{name} holds more decisions than its job needs; simplify it so there are genuinely fewer to follow, not the same decisions spread across more functions.",
+      "rest": "{name}: same smell — genuinely fewer decisions, not the same ones spread around."
+    },
+    "typescript": {
+      "first": "{name} holds more decisions than its job needs; simplify it so there are genuinely fewer to follow, not the same decisions spread across more functions.",
+      "rest": "{name}: same smell — genuinely fewer decisions, not the same ones spread around."
+    },
+    "cpp": {
+      "first": "{name} holds more decisions than its job needs; simplify it so there are genuinely fewer to follow, not the same decisions spread across more functions.",
+      "rest": "{name}: same smell — genuinely fewer decisions, not the same ones spread around."
+    }
+  }
+}
