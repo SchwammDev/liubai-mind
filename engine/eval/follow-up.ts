@@ -14,7 +14,7 @@ import {
   loadError,
   loadExistingKeys,
   nudgePhrasingPath,
-  readDelivered,
+  railReportFrom,
   readNudgePhrasing,
   runItemsConcurrently,
   snapshotWorkDir,
@@ -237,7 +237,7 @@ async function runFollowUpItem(ctx: FollowUpContext, item: FollowUpItem): Promis
   try {
     const { outcome, durationMs } = await spawnForItem(ctx, item.kase.extension!.task, workDir, env);
     const snapshot = snapshotWorkDir(workDir, plan);
-    const delivered = readDelivered(workDir);
+    const { delivered } = railReportFrom(outcome.railReportJsonl);
     const row = buildFollowUpRow(ctx, item, nudgePhrasing, outcome, durationMs, snapshot, delivered);
     return { row, stdoutJsonl: outcome.stdoutJsonl };
   } catch (err) {

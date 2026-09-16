@@ -23,7 +23,6 @@ const IGNORED_DIRS = new Set([
   "dist",
   "build",
   ".cache",
-  ".liubai",
 ]);
 
 function isIgnoredDir(name: string): boolean {

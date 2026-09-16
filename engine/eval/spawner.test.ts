@@ -134,6 +134,34 @@ test("defaultPiSpawner_rejects_clearly_when_bwrap_is_missing_from_path", async (
   );
 });
 
+test("defaultPiSpawner_delivers_the_rails_report_from_the_report_fd_separately_from_stdout", async () => {
+  const repoRoot = stubRepoRoot(`echo '{"type":"delivered"}' >&3; echo '{"event":"done"}'`);
+
+  const outcome = await defaultPiSpawner(repoRoot)(spec());
+
+  assert.equal(outcome.railReportJsonl, '{"type":"delivered"}\n');
+  assert.equal(outcome.stdoutJsonl.trim(), '{"event":"done"}');
+});
+
+test("defaultPiSpawner_reports_an_empty_rail_report_when_the_rail_wrote_nothing", async () => {
+  const repoRoot = stubRepoRoot("exit 0");
+
+  const outcome = await defaultPiSpawner(repoRoot)(spec());
+
+  assert.equal(outcome.railReportJsonl, "");
+});
+
+test("defaultPiSpawner_keeps_the_report_fd_out_of_reach_of_a_shell_the_agent_spawns", async () => {
+  const nodeBin = process.execPath;
+  const shellInjectsIntoFd3 = 'const r = require("child_process").spawnSync("bash", ["-c", "echo injected >&3"], { encoding: "utf8" }); process.stdout.write(r.stderr);';
+  const repoRoot = stubRepoRoot(`"${nodeBin}" -e '${shellInjectsIntoFd3}'`);
+
+  const outcome = await defaultPiSpawner(repoRoot)(spec());
+
+  assert.equal(outcome.railReportJsonl, "");
+  assert.match(outcome.stdoutJsonl, /Bad file descriptor/);
+});
+
 function stubMountPlan(over: Partial<{ repoRoot: string; homeDir: string; workDir: string }> = {}) {
   return {
     repoRoot: mkdtempSync(join(tmpdir(), "bwrap-repo-")),

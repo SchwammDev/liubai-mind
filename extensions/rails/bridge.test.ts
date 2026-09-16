@@ -6,8 +6,9 @@ import { join } from "node:path";
 import { defaultEnv } from "../../engine/env.ts";
 import { createPythonExtractor } from "../../engine/extract-python.ts";
 import { parseShadowRules, register } from "./index.ts";
-import type { RailsDeps, ShadowLogEntry } from "./index.ts";
+import type { RailsDeps } from "./index.ts";
 import type { DedupLog } from "./dedup.ts";
+import type { RailReportLine } from "../../engine/contract.ts";
 
 const MODULE_FILE = "/tmp/liubai-rails/subject.py";
 const TEST_FILE = "/tmp/liubai-rails/tests/test_subject.py";
@@ -49,10 +50,10 @@ const railFailures = (logs: LogEntry[]) => logs.filter((entry) => entry.kind ===
 function railsSession(ctx?: unknown, files = new Map<string, string>(), overrides: RailsDeps = {}) {
   const { pi, handlers } = fakePi();
   const logs: LogEntry[] = [];
-  const shadowLogs: ShadowLogEntry[] = [];
+  const reported: RailReportLine[] = [];
   register(pi, {
     logDedup: (entry) => logs.push(entry),
-    logShadow: (entry) => shadowLogs.push(entry),
+    report: (line) => reported.push(line),
     readTargetFile: (path: string) => Promise.resolve(files.get(path) ?? ""),
     ...overrides,
   });
@@ -83,7 +84,7 @@ function railsSession(ctx?: unknown, files = new Map<string, string>(), override
   const write = (callId: string, path: string, content: string) =>
     apply(callId, "write", { path, content }, path);
 
-  return { apply, write, logs, shadowLogs, files };
+  return { apply, write, logs, reported, files };
 }
 
 function editInput(path: string, oldText: string, newText: string) {
@@ -248,7 +249,7 @@ test("a shadowed nudge-severity rule never rides along on the tool result, but i
 
   assert.equal(outcome.blocked, false);
   assert.doesNotMatch(outcome.text, /buries 8 lines of literal data/);
-  assert.deepEqual(session.shadowLogs, [{ rule: "test-data-plumbing", path: TEST_FILE }]);
+  assert.deepEqual(session.reported, [{ type: "shadow", rule: "test-data-plumbing", path: TEST_FILE }]);
 });
 
 test("a shadowed block-severity rule never blocks the edit, but its firing is logged", async () => {
@@ -259,7 +260,7 @@ test("a shadowed block-severity rule never blocks the edit, but its firing is lo
   );
 
   assert.equal(outcome.blocked, false);
-  assert.deepEqual(session.shadowLogs, [{ rule: "discourage-comments", path: MODULE_FILE }]);
+  assert.deepEqual(session.reported, [{ type: "shadow", rule: "discourage-comments", path: MODULE_FILE }]);
 });
 
 test("a rule not named in LIUBAI_SHADOW_RULES still blocks and is not logged as shadowed", async () => {
@@ -270,13 +271,13 @@ test("a rule not named in LIUBAI_SHADOW_RULES still blocks and is not logged as 
   );
 
   assert.equal(outcome.blocked, true);
-  assert.deepEqual(session.shadowLogs, []);
+  assert.deepEqual(session.reported, []);
 });
 
 function registeredBashTool(): any {
   const registered: any[] = [];
   const pi = { on: () => undefined, registerTool: (tool: any) => registered.push(tool) };
-  register(pi as any, { writeDelivered: () => {} });
+  register(pi as any, { report: () => {} });
   return registered.find((tool) => tool.name === "bash");
 }
 
