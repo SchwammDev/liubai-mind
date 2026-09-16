@@ -1,23 +1,30 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, existsSync, writeFileSync } from "node:fs";
+import { mkdtempSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { runCollect } from "./collect.ts";
 import type { CollectOpts, CollectResult } from "./collect.ts";
+import type { RawRow } from "./eval-contract.ts";
 import { runScore } from "./score.ts";
-import type { RunSpec, PiSpawner, ProbeSpawner } from "./spawner.ts";
+import type { RunSpec, RunOutcome, PiSpawner, ProbeSpawner } from "./spawner.ts";
 import { RULE, packHash } from "../contract.ts";
+import type { RuleName } from "../contract.ts";
 import type { ProbeReport } from "./canary.ts";
 import { healthyProbeReporter } from "./probe-doubles.ts";
+import { nudgeCounts, pristineSourceOf } from "./run-doubles.ts";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const CORPUS_DIR = join(import.meta.dirname, "corpus");
 const TREATMENTS_DIR = join(import.meta.dirname, "treatments");
 const TREATMENT_ID = "cc-delta-numberless";
+const SHADOW_TREATMENT_ID = "cc-delta-shadow";
 const CASE_ID = "ts-flag-parser";
+const ENTRY_FILE = "parse_flags.ts";
 const WRONG_PACK_HASH = "f".repeat(64);
+
+type DeliveredStamp = NonNullable<RawRow["delivered"]>;
 
 function tempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -55,28 +62,66 @@ function firedNudgeMarkerTranscript(rule: string, text: string): string {
   return `${JSON.stringify({ type: "tool_execution_end", toolCallId: "1", toolName: "edit", result, isError: false })}\n`;
 }
 
-function stampDeliveredPack(workDir: string, stampedPackHash: string | null): void {
-  const liubaiDir = join(workDir, ".liubai");
-  mkdirSync(liubaiDir, { recursive: true });
-  const stamp = { packHash: stampedPackHash, liveRules: [RULE.ccDelta], shadowRules: [] };
-  writeFileSync(join(liubaiDir, "delivered.json"), JSON.stringify(stamp));
+function railReportedDelivery(stamp: DeliveredStamp): string {
+  return JSON.stringify({ type: "delivered", ...stamp });
+}
+
+function railReportedShadowNudge(rule: RuleName): string {
+  return JSON.stringify({ type: "shadow", rule, path: ENTRY_FILE });
+}
+
+function railReport(lines: string[]): string {
+  return `${lines.join("\n")}\n`;
+}
+
+function agentExited(over: Partial<RunOutcome>): RunOutcome {
+  return { exitCode: 0, stdoutJsonl: "", timedOut: false, ...over };
+}
+
+function liveCcDeltaStamp(stampedPackHash: string | null): DeliveredStamp {
+  return { packHash: stampedPackHash, liveRules: [RULE.ccDelta], shadowRules: [] };
 }
 
 function repetitionThatDeliversThePack(): PiSpawner {
   return async (spec) => {
     const packContent = spec.env.LIUBAI_PHRASING_PACK ?? "";
-    stampDeliveredPack(spec.cwd, packHash(packContent));
-    const stdoutJsonl = firedNudgeMarkerTranscript(RULE.ccDelta, ccDeltaTextOfPack(packContent));
-    return { exitCode: 0, stdoutJsonl, timedOut: false };
+    return agentExited({
+      stdoutJsonl: firedNudgeMarkerTranscript(RULE.ccDelta, ccDeltaTextOfPack(packContent)),
+      railReportJsonl: railReport([railReportedDelivery(liveCcDeltaStamp(packHash(packContent)))]),
+    });
   };
 }
 
 function repetitionThatDeliversAWrongPackHash(): PiSpawner {
   return async (spec) => {
     const packContent = spec.env.LIUBAI_PHRASING_PACK ?? "";
-    stampDeliveredPack(spec.cwd, WRONG_PACK_HASH);
-    const stdoutJsonl = firedNudgeMarkerTranscript(RULE.ccDelta, ccDeltaTextOfPack(packContent));
-    return { exitCode: 0, stdoutJsonl, timedOut: false };
+    return agentExited({
+      stdoutJsonl: firedNudgeMarkerTranscript(RULE.ccDelta, ccDeltaTextOfPack(packContent)),
+      railReportJsonl: railReport([railReportedDelivery(liveCcDeltaStamp(WRONG_PACK_HASH))]),
+    });
+  };
+}
+
+const SHADOWED_CC_DELTA_STAMP: DeliveredStamp = { packHash: null, liveRules: [], shadowRules: [RULE.ccDelta] };
+const SHADOW_NUDGES_FIRED = 2;
+
+function wipeEverythingIn(workDir: string): void {
+  for (const entry of readdirSync(workDir)) rmSync(join(workDir, entry), { recursive: true, force: true });
+}
+
+function agentsOwnFiles(): Record<string, string> {
+  return { [ENTRY_FILE]: pristineSourceOf(CASE_ID, ENTRY_FILE) };
+}
+
+function repetitionThatWipesTheWorkdirAfterTheRailLoaded(): PiSpawner {
+  return async (spec) => {
+    const reported = [
+      railReportedDelivery(SHADOWED_CC_DELTA_STAMP),
+      ...Array.from({ length: SHADOW_NUDGES_FIRED }, () => railReportedShadowNudge(RULE.ccDelta)),
+    ];
+    wipeEverythingIn(spec.cwd);
+    for (const [name, content] of Object.entries(agentsOwnFiles())) writeFileSync(join(spec.cwd, name), content);
+    return agentExited({ railReportJsonl: railReport(reported) });
   };
 }
 
@@ -84,13 +129,19 @@ function recordingPiSpawner(): { spawner: PiSpawner; calls: RunSpec[] } {
   const calls: RunSpec[] = [];
   const spawner: PiSpawner = async (spec) => {
     calls.push(spec);
-    return { exitCode: 0, stdoutJsonl: "", timedOut: false };
+    return agentExited({});
   };
   return { spawner, calls };
 }
 
-async function collectPackedTreatment(spawner: PiSpawner, probeSpawner: ProbeSpawner): Promise<{ result: CollectResult; runDir: string }> {
+async function collectTreatmentWithAPhrasingPack(spawner: PiSpawner, probeSpawner: ProbeSpawner): Promise<{ result: CollectResult; runDir: string }> {
   const opts = collectOpts({ spawner, probeSpawner });
+  const result = await runCollect(opts);
+  return { result, runDir: opts.runDir };
+}
+
+async function collectShadowTreatment(spawner: PiSpawner): Promise<{ result: CollectResult; runDir: string }> {
+  const opts = collectOpts({ spawner, probeSpawner: healthyProbeReporter(), treatments: [SHADOW_TREATMENT_ID] });
   const result = await runCollect(opts);
   return { result, runDir: opts.runDir };
 }
@@ -99,13 +150,23 @@ async function scoreRun(runDir: string): Promise<{ status: number; stdout: strin
   return runScore({ runDir, corpusDir: CORPUS_DIR, repoRoot: REPO_ROOT, treatmentsDir: TREATMENTS_DIR });
 }
 
+function theOnlyRawRow(runDir: string): RawRow {
+  const rows = readFileSync(join(runDir, "raw.jsonl"), "utf8").trim().split("\n");
+  assert.equal(rows.length, 1);
+  return JSON.parse(rows[0]!) as RawRow;
+}
+
+function deliveryEvidenceOn(row: RawRow): unknown {
+  return { delivered: row.delivered, shadowNudges: row.shadowNudges };
+}
+
 function assertCollectSucceeded(result: CollectResult): void {
-  assert.equal(result.status, 0);
+  assert.equal(result.status, 0, result.stderr);
   assert.equal(result.rowsWritten, 1);
 }
 
 function assertScoreAccepts(result: { status: number; stdout: string }): void {
-  assert.equal(result.status, 0);
+  assert.equal(result.status, 0, result.stdout);
 }
 
 function assertScoreRefuses(result: { status: number; stdout: string }, violationKind: string): void {
@@ -142,8 +203,8 @@ function assertNoRawRowWritten(runDir: string): void {
   assert.equal(existsSync(join(runDir, "raw.jsonl")), false);
 }
 
-test("a_delivered_packed_treatment_scores_with_a_verified_delivery_validity_block", async () => {
-  const { result, runDir } = await collectPackedTreatment(repetitionThatDeliversThePack(), healthyProbeReporter());
+test("a_delivered_phrasing_pack_scores_with_a_verified_delivery_validity_block", async () => {
+  const { result, runDir } = await collectTreatmentWithAPhrasingPack(repetitionThatDeliversThePack(), healthyProbeReporter());
   assertCollectSucceeded(result);
 
   const scored = await scoreRun(runDir);
@@ -154,8 +215,8 @@ test("a_delivered_packed_treatment_scores_with_a_verified_delivery_validity_bloc
   assertTreatmentSummaryRowPresent(scored.stdout, TREATMENT_ID);
 });
 
-test("an_undelivered_packed_treatment_is_refused_by_score", async () => {
-  const { result, runDir } = await collectPackedTreatment(repetitionThatDeliversAWrongPackHash(), healthyProbeReporter());
+test("an_undelivered_phrasing_pack_is_refused_by_score", async () => {
+  const { result, runDir } = await collectTreatmentWithAPhrasingPack(repetitionThatDeliversAWrongPackHash(), healthyProbeReporter());
   assertCollectSucceeded(result);
 
   const scored = await scoreRun(runDir);
@@ -167,9 +228,20 @@ test("an_undelivered_packed_treatment_is_refused_by_score", async () => {
 test("broken_delivery_aborts_the_run_at_the_canary_before_any_repetition_runs", async () => {
   const { spawner, calls } = recordingPiSpawner();
 
-  const { result, runDir } = await collectPackedTreatment(spawner, brokenDeliveryProbe());
+  const { result, runDir } = await collectTreatmentWithAPhrasingPack(spawner, brokenDeliveryProbe());
 
   assertCollectAbortedAtCanary(result, TREATMENT_ID);
   assertRepetitionSpawnerNeverInvoked(calls);
   assertNoRawRowWritten(runDir);
+});
+
+test("the_delivery_verdict_survives_the_agent_wiping_its_workdir", async () => {
+  const { result, runDir } = await collectShadowTreatment(repetitionThatWipesTheWorkdirAfterTheRailLoaded());
+
+  assertCollectSucceeded(result);
+  assert.deepEqual(deliveryEvidenceOn(theOnlyRawRow(runDir)), {
+    delivered: SHADOWED_CC_DELTA_STAMP,
+    shadowNudges: nudgeCounts({ [RULE.ccDelta]: SHADOW_NUDGES_FIRED }),
+  });
+  assertScoreAccepts(await scoreRun(runDir));
 });
