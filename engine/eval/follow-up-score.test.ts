@@ -138,7 +138,7 @@ function noExtensionCorpusDir(caseId: string): string {
 function provenance(over: Partial<Provenance> = {}): Provenance {
   return {
     treatmentId: "rails-default",
-    phrasingPackHash: null,
+    nudgePhrasingHash: null,
     liubaiSha: "abc1234",
     model: "claude-x",
     collectedAt: "2026-08-29T00:00:00.000Z",

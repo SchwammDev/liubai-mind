@@ -36,7 +36,7 @@ test("buildSpawnEnv_strips_experiment_toggles_inherited_from_the_parent_shell", 
   const parent = {
     PATH: "/bin",
     LIUBAI_RAILS_OFF: "1",
-    LIUBAI_PHRASING_PACK: "/tmp/pack.json",
+    LIUBAI_NUDGE_PHRASING: "/tmp/phrasing.json",
     LIUBAI_CC_DELTA_OFF: "1",
     LIUBAI_SHADOW_RULES: "cc-delta",
   };
@@ -49,9 +49,9 @@ test("buildSpawnEnv_strips_experiment_toggles_inherited_from_the_parent_shell", 
 test("buildSpawnEnv_applies_treatment_env_over_the_sanitized_base", () => {
   const parent = { PATH: "/bin", LIUBAI_RAILS_OFF: "1" };
 
-  const env = buildSpawnEnv(parent, { LIUBAI_RAILS_OFF: "1", LIUBAI_PHRASING_PACK: "/packs/coaching.json" });
+  const env = buildSpawnEnv(parent, { LIUBAI_RAILS_OFF: "1", LIUBAI_NUDGE_PHRASING: "/phrasings/coaching.json" });
 
-  assert.deepEqual(env, { PATH: "/bin", LIUBAI_RAILS_OFF: "1", LIUBAI_PHRASING_PACK: "/packs/coaching.json" });
+  assert.deepEqual(env, { PATH: "/bin", LIUBAI_RAILS_OFF: "1", LIUBAI_NUDGE_PHRASING: "/phrasings/coaching.json" });
 });
 
 test("buildSpawnEnv_drops_undefined_parent_entries", () => {
@@ -524,8 +524,8 @@ function realRepoRoot(): string {
   return join(import.meta.dirname, "..", "..");
 }
 
-function packedTreatment(id: string): TreatmentManifest {
-  return { id, env: {}, phrasingPack: "pack.json" };
+function phrasedTreatment(id: string): TreatmentManifest {
+  return { id, env: {}, nudgePhrasingFile: "phrasing.json" };
 }
 
 function assertCanaryPassed(verdict: ReturnType<typeof evaluateCanary>): void {
@@ -538,11 +538,11 @@ function assertCanaryFailedWith(verdict: ReturnType<typeof evaluateCanary>, patt
 }
 
 test(
-  "defaultProbeSpawner runs the real delivery probe inside bwrap and round-trips the delivered phrasing pack",
+  "defaultProbeSpawner runs the real delivery probe inside bwrap and round-trips the delivered nudge phrasing",
   { skip: bwrapSkipReason },
   async () => {
     const workDir = mkdtempSync(join(tmpdir(), "probe-work-"));
-    const packContent = JSON.stringify({
+    const nudgePhrasing = JSON.stringify({
       CC_NUDGE: {
         python: { first: "{name} probe-integration python ({cc}/{threshold})", rest: "{name} rest" },
         typescript: { first: "{name} probe-integration ts ({cc}/{threshold})", rest: "{name} rest" },
@@ -550,11 +550,11 @@ test(
       CC_DELTA_NUDGE: "probe-integration delta text",
     });
 
-    const outcome = await defaultProbeSpawner(realRepoRoot())({ cwd: workDir, env: { LIUBAI_PHRASING_PACK: packContent } });
+    const outcome = await defaultProbeSpawner(realRepoRoot())({ cwd: workDir, env: { LIUBAI_NUDGE_PHRASING: nudgePhrasing } });
 
     const verdict = evaluateCanary({
-      treatment: packedTreatment("probe-integration"),
-      packContent,
+      treatment: phrasedTreatment("probe-integration"),
+      nudgePhrasing,
       exitCode: outcome.exitCode,
       stdout: outcome.stdout,
       stderr: outcome.stderr,
@@ -564,18 +564,18 @@ test(
 );
 
 test(
-  "the canary reports a mismatch when the sandbox delivers a phrasing pack that differs from what was expected",
+  "the canary reports a mismatch when the sandbox delivers a nudge phrasing that differs from what was expected",
   { skip: bwrapSkipReason },
   async () => {
     const workDir = mkdtempSync(join(tmpdir(), "probe-work-"));
-    const deliveredPack = JSON.stringify({ CC_DELTA_NUDGE: "delivered text" });
-    const expectedPack = JSON.stringify({ CC_DELTA_NUDGE: "a different expected text" });
+    const deliveredPhrasing = JSON.stringify({ CC_DELTA_NUDGE: "delivered text" });
+    const expectedPhrasing = JSON.stringify({ CC_DELTA_NUDGE: "a different expected text" });
 
-    const outcome = await defaultProbeSpawner(realRepoRoot())({ cwd: workDir, env: { LIUBAI_PHRASING_PACK: deliveredPack } });
+    const outcome = await defaultProbeSpawner(realRepoRoot())({ cwd: workDir, env: { LIUBAI_NUDGE_PHRASING: deliveredPhrasing } });
 
     const verdict = evaluateCanary({
-      treatment: packedTreatment("probe-integration-mismatch"),
-      packContent: expectedPack,
+      treatment: phrasedTreatment("probe-integration-mismatch"),
+      nudgePhrasing: expectedPhrasing,
       exitCode: outcome.exitCode,
       stdout: outcome.stdout,
       stderr: outcome.stderr,

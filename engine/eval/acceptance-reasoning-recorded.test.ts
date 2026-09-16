@@ -101,7 +101,7 @@ function reasoningReportedForEachSession(records: ReportRecord[]): unknown {
 function provenanceThatAskedFor(level: string | null): Provenance {
   const asCollected = {
     treatmentId: TREATMENT_ID,
-    phrasingPackHash: null,
+    nudgePhrasingHash: null,
     liubaiSha: "3250ea4",
     model: MODEL,
     collectedAt: "2026-09-05T00:00:00.000Z",

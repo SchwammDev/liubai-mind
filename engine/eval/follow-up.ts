@@ -13,9 +13,9 @@ import {
   copyCaseFiles,
   loadError,
   loadExistingKeys,
-  packAbsolutePath,
+  nudgePhrasingPath,
   readDelivered,
-  readPackContent,
+  readNudgePhrasing,
   runItemsConcurrently,
   snapshotWorkDir,
   spawnForItem,
@@ -201,13 +201,13 @@ function materializeSourceFiles(workDir: string, files: Record<string, string>):
 function buildFollowUpRow(
   ctx: FollowUpContext,
   item: FollowUpItem,
-  packContent: string | undefined,
+  nudgePhrasing: string | undefined,
   outcome: RunOutcome,
   durationMs: number,
   snapshot: WorkDirSnapshot,
   delivered: RawRow["delivered"],
 ): RawRow {
-  const core = buildRawRowCore(ctx, item.treatment.id, packContent, outcome, durationMs, snapshot, undefined, delivered);
+  const core = buildRawRowCore(ctx, item.treatment.id, nudgePhrasing, outcome, durationMs, snapshot, undefined, delivered);
   return {
     caseId: item.kase.id,
     treatmentId: item.treatment.id,
@@ -230,15 +230,15 @@ function workDirPlanFor(ctx: FollowUpContext, item: FollowUpItem, workDir: strin
 async function runFollowUpItem(ctx: FollowUpContext, item: FollowUpItem): Promise<ItemResult> {
   const workDir = mkdtempSync(join(ctx.workRoot, "eval-work-"));
   const plan = workDirPlanFor(ctx, item, workDir);
-  const packPath = packAbsolutePath(ctx.treatmentsDir, item.treatment);
-  const packContent = readPackContent(packPath);
-  const env = buildEnv(item.treatment, packContent);
+  const phrasingPath = nudgePhrasingPath(ctx.treatmentsDir, item.treatment);
+  const nudgePhrasing = readNudgePhrasing(phrasingPath);
+  const env = buildEnv(item.treatment, nudgePhrasing);
 
   try {
     const { outcome, durationMs } = await spawnForItem(ctx, item.kase.extension!.task, workDir, env);
     const snapshot = snapshotWorkDir(workDir, plan);
     const delivered = readDelivered(workDir);
-    const row = buildFollowUpRow(ctx, item, packContent, outcome, durationMs, snapshot, delivered);
+    const row = buildFollowUpRow(ctx, item, nudgePhrasing, outcome, durationMs, snapshot, delivered);
     return { row, stdoutJsonl: outcome.stdoutJsonl };
   } catch (err) {
     return { failure: followUpFailureMessage(item, err) };

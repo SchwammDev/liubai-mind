@@ -572,7 +572,7 @@ type ProvenanceField = { label: string; value: (p: Provenance) => string };
 
 const PROVENANCE_FIELDS: readonly ProvenanceField[] = [
   { label: "model", value: (p) => p.model },
-  { label: "phrasing pack", value: (p) => (p.phrasingPackHash === null ? "none" : p.phrasingPackHash.slice(0, 8)) },
+  { label: "nudge phrasing", value: (p) => (p.nudgePhrasingHash === null ? "none" : p.nudgePhrasingHash.slice(0, 8)) },
   { label: "liubai sha", value: (p) => p.liubaiSha },
 ];
 
@@ -813,13 +813,13 @@ function rowLabel(row: RawRow): string {
 
 function notDeliveredViolations(rows: RawRow[]): DeliveryViolation[] {
   return rows
-    .filter((row) => row.delivered !== undefined && row.delivered.packHash !== row.provenance.phrasingPackHash)
+    .filter((row) => row.delivered !== undefined && row.delivered.nudgePhrasingHash !== row.provenance.nudgePhrasingHash)
     .map((row) => ({
       kind: "not-delivered",
       treatmentId: row.treatmentId,
       caseId: row.caseId,
       repetition: row.repetition,
-      message: `${rowLabel(row)}: treatment not delivered — claimed pack ${row.provenance.phrasingPackHash ?? "none"}, delivered ${row.delivered!.packHash ?? "none"}`,
+      message: `${rowLabel(row)}: treatment not delivered — claimed nudge phrasing ${row.provenance.nudgePhrasingHash ?? "none"}, delivered ${row.delivered!.nudgePhrasingHash ?? "none"}`,
     }));
 }
 
@@ -839,17 +839,17 @@ function missingStampViolations(rows: RawRow[], treatmentById: Map<string, Treat
     }));
 }
 
-function packContentFor(treatmentsDir: string, treatment: TreatmentManifest): string | undefined {
-  if (treatment.phrasingPack === undefined) return undefined;
-  return readFileSync(join(treatmentsDir, treatment.phrasingPack), "utf8");
+function nudgePhrasingFor(treatmentsDir: string, treatment: TreatmentManifest): string | undefined {
+  if (treatment.nudgePhrasingFile === undefined) return undefined;
+  return readFileSync(join(treatmentsDir, treatment.nudgePhrasingFile), "utf8");
 }
 
 function expectedPromptMessage(treatmentsDir: string, treatment: TreatmentManifest, kase: CaseManifest): string {
-  const packContent = packContentFor(treatmentsDir, treatment);
-  if (packContent === undefined) {
-    throw new Error(`treatment ${treatment.id}: delivery "prompt" carries no phrasing pack — treatments.ts validation should have rejected this at load time`);
+  const nudgePhrasing = nudgePhrasingFor(treatmentsDir, treatment);
+  if (nudgePhrasing === undefined) {
+    throw new Error(`treatment ${treatment.id}: delivery "prompt" carries no nudge phrasing — treatments.ts validation should have rejected this at load time`);
   }
-  return promptCarriedTreatmentMessage(kase, packContent);
+  return promptCarriedTreatmentMessage(kase, nudgePhrasing);
 }
 
 function promptNotCarriedViolation(row: RawRow, message: string): DeliveryViolation {

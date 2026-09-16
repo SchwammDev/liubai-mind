@@ -2,5 +2,5 @@
   "id": "cc-delta-numbered-prompt",
   "delivery": "prompt",
   "env": { "LIUBAI_RAILS_OFF": "1" },
-  "phrasingPack": "packs/cc-delta-numbered.json"
+  "nudgePhrasingFile": "phrasings/cc-delta-numbered.json"
 }

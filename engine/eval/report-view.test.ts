@@ -55,7 +55,7 @@ function judgedRecord(caseId: string, treatmentId: string, repetition: number, o
 function rawRow(treatmentId: string, model: string, over: Partial<RawRowForReport> = {}): RawRowForReport {
   return {
     treatmentId,
-    provenance: { model, liubaiSha: "sha1", phrasingPackHash: null },
+    provenance: { model, liubaiSha: "sha1", nudgePhrasingHash: null },
     caseId: "case-a",
     repetition: 1,
     files: {},
@@ -522,7 +522,7 @@ test("the setup check reports when delivered text differs across treatments, wit
 
   assert.deepEqual(
     { summary: detail.setupCheck.summary, leaksDeliveredText: detail.setupCheck.summary.includes("fix the") },
-    { summary: "same liubai commit: sha1 · same model: model-a · same wording pack: none · delivered text differs", leaksDeliveredText: false },
+    { summary: "same liubai commit: sha1 · same model: model-a · same nudge phrasing: none · delivered text differs", leaksDeliveredText: false },
   );
 });
 
@@ -702,7 +702,7 @@ test("the original state says the source is unavailable rather than falling back
   const records = {
     "run-a": {
       judged: [judgedRecord("case-a", "t1", 1)],
-      raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" }, provenance: { model: "model-a", liubaiSha: "abc1234-dirty", phrasingPackHash: null } })],
+      raw: [rawRow("t1", "model-a", { caseId: "case-a", repetition: 1, files: { "entry.py": "x\n" }, provenance: { model: "model-a", liubaiSha: "abc1234-dirty", nudgePhrasingHash: null } })],
     },
   };
   const caseFactsByCaseId = new Map([["case-a", caseFacts("entry.py")]]);

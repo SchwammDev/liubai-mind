@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { gitSha, buildProvenance, showFileAtCommit } from "./provenance.ts";
-import { packHash } from "../contract.ts";
+import { nudgePhrasingHash } from "../contract.ts";
 
 function tempGitRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "eval-provenance-"));
@@ -65,35 +65,35 @@ test("gitSha_ignores_rewritten_eval_run_outputs_when_judging_dirtiness", () => {
   assert.doesNotMatch(sha, /-dirty$/);
 });
 
-test("buildProvenance_stamps_a_null_pack_hash_when_no_pack_bytes_are_given", () => {
+test("buildProvenance_stamps_a_null_nudge_phrasing_hash_when_no_nudge_phrasing_bytes_are_given", () => {
   const repo = tempGitRepo();
 
   const provenance = buildProvenance({
     treatmentId: "control",
-    packBytes: null,
+    nudgePhrasingBytes: null,
     repoRoot: repo,
     model: "claude-test",
     now: "2026-08-24T00:00:00.000Z",
     reasoning: "high",
   });
 
-  assert.equal(provenance.phrasingPackHash, null);
+  assert.equal(provenance.nudgePhrasingHash, null);
 });
 
-test("buildProvenance_stamps_a_sha256_pack_hash_when_pack_bytes_are_given", () => {
+test("buildProvenance_stamps_a_sha256_nudge_phrasing_hash_when_nudge_phrasing_bytes_are_given", () => {
   const repo = tempGitRepo();
   const bytes = '{"CC_NUDGE":{"python":{"first":"f","rest":"r"}}}';
 
   const provenance = buildProvenance({
     treatmentId: "rails-default",
-    packBytes: bytes,
+    nudgePhrasingBytes: bytes,
     repoRoot: repo,
     model: "claude-test",
     now: "2026-08-24T00:00:00.000Z",
     reasoning: "high",
   });
 
-  assert.equal(provenance.phrasingPackHash, packHash(bytes));
+  assert.equal(provenance.nudgePhrasingHash, nudgePhrasingHash(bytes));
 });
 
 function assertPassedThroughUnchanged(
@@ -135,7 +135,7 @@ test("buildProvenance_passes_model_treatment_timestamp_and_reasoning_through_unc
 
   const provenance = buildProvenance({
     treatmentId: "rails-default",
-    packBytes: null,
+    nudgePhrasingBytes: null,
     repoRoot: repo,
     model: "claude-test",
     now: "2026-08-24T00:00:00.000Z",

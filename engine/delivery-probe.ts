@@ -1,6 +1,6 @@
 import { analyze } from "./analyze.ts";
 import type { AnalyzeReq, Lang, RailError } from "./contract.ts";
-import { packHash } from "./contract.ts";
+import { nudgePhrasingHash } from "./contract.ts";
 import { defaultEnv } from "./env.ts";
 import { CC_DELTA_NUDGE, CC_NUDGE } from "./messages.ts";
 import { buildRules, DEFAULT_POLICY } from "./policy.ts";
@@ -73,16 +73,16 @@ export const PROBE_FIXTURES: ProbeFixture[] = [
 ];
 
 export interface ProbeReport {
-  packHash: string | null;
+  nudgePhrasingHash: string | null;
   nudges: Partial<Record<FixtureLang, string[]>>;
   errors: RailError[];
   ccNudge: Record<Lang, { first: string; rest: string }>;
   ccDeltaNudge: string;
 }
 
-function resolvedPackHash(): string | null {
-  const raw = process.env.LIUBAI_PHRASING_PACK;
-  return packHash(raw !== undefined && raw.length > 0 ? raw : null);
+function resolvedNudgePhrasingHash(): string | null {
+  const raw = process.env.LIUBAI_NUDGE_PHRASING;
+  return nudgePhrasingHash(raw !== undefined && raw.length > 0 ? raw : null);
 }
 
 export async function runProbe(): Promise<ProbeReport> {
@@ -98,7 +98,7 @@ export async function runProbe(): Promise<ProbeReport> {
     errors.push(...resp.errors);
   }
 
-  return { packHash: resolvedPackHash(), nudges, errors, ccNudge: CC_NUDGE, ccDeltaNudge: CC_DELTA_NUDGE };
+  return { nudgePhrasingHash: resolvedNudgePhrasingHash(), nudges, errors, ccNudge: CC_NUDGE, ccDeltaNudge: CC_DELTA_NUDGE };
 }
 
 async function main(): Promise<void> {

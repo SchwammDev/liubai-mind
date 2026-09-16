@@ -1,1 +1,1 @@
-{ "id": "cc-delta-numberless", "env": {}, "phrasingPack": "packs/cc-delta-numberless.json" }
+{ "id": "cc-delta-numberless", "env": {}, "nudgePhrasingFile": "phrasings/cc-delta-numberless.json" }

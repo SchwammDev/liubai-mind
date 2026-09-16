@@ -9,7 +9,7 @@ import type { CollectOpts, CollectResult } from "./collect.ts";
 import type { RawRow } from "./eval-contract.ts";
 import { runScore } from "./score.ts";
 import type { RunSpec, RunOutcome, PiSpawner, ProbeSpawner } from "./spawner.ts";
-import { RULE, packHash } from "../contract.ts";
+import { RULE, nudgePhrasingHash } from "../contract.ts";
 import type { RuleName } from "../contract.ts";
 import type { ProbeReport } from "./canary.ts";
 import { healthyProbeReporter } from "./probe-doubles.ts";
@@ -22,7 +22,7 @@ const TREATMENT_ID = "cc-delta-numberless";
 const SHADOW_TREATMENT_ID = "cc-delta-shadow";
 const CASE_ID = "ts-flag-parser";
 const ENTRY_FILE = "parse_flags.ts";
-const WRONG_PACK_HASH = "f".repeat(64);
+const WRONG_NUDGE_PHRASING_HASH = "f".repeat(64);
 
 type DeliveredStamp = NonNullable<RawRow["delivered"]>;
 
@@ -49,12 +49,12 @@ function brokenDeliveryProbe(): ProbeSpawner {
   return async (spec) => {
     const outcome = await healthyProbeReporter()(spec);
     const report = JSON.parse(outcome.stdout) as ProbeReport;
-    return { ...outcome, stdout: `${JSON.stringify({ ...report, packHash: WRONG_PACK_HASH })}\n` };
+    return { ...outcome, stdout: `${JSON.stringify({ ...report, nudgePhrasingHash: WRONG_NUDGE_PHRASING_HASH })}\n` };
   };
 }
 
-function ccDeltaTextOfPack(packContent: string): string {
-  return (JSON.parse(packContent) as { CC_DELTA_NUDGE?: string }).CC_DELTA_NUDGE ?? "";
+function ccDeltaTextOfPhrasing(nudgePhrasing: string): string {
+  return (JSON.parse(nudgePhrasing) as { CC_DELTA_NUDGE?: string }).CC_DELTA_NUDGE ?? "";
 }
 
 function firedNudgeMarkerTranscript(rule: string, text: string): string {
@@ -78,31 +78,31 @@ function agentExited(over: Partial<RunOutcome>): RunOutcome {
   return { exitCode: 0, stdoutJsonl: "", timedOut: false, ...over };
 }
 
-function liveCcDeltaStamp(stampedPackHash: string | null): DeliveredStamp {
-  return { packHash: stampedPackHash, liveRules: [RULE.ccDelta], shadowRules: [] };
+function liveCcDeltaStamp(stampedNudgePhrasingHash: string | null): DeliveredStamp {
+  return { nudgePhrasingHash: stampedNudgePhrasingHash, liveRules: [RULE.ccDelta], shadowRules: [] };
 }
 
-function repetitionThatDeliversThePack(): PiSpawner {
+function repetitionThatDeliversTheNudgePhrasing(): PiSpawner {
   return async (spec) => {
-    const packContent = spec.env.LIUBAI_PHRASING_PACK ?? "";
+    const nudgePhrasing = spec.env.LIUBAI_NUDGE_PHRASING ?? "";
     return agentExited({
-      stdoutJsonl: firedNudgeMarkerTranscript(RULE.ccDelta, ccDeltaTextOfPack(packContent)),
-      railReportJsonl: railReport([railReportedDelivery(liveCcDeltaStamp(packHash(packContent)))]),
+      stdoutJsonl: firedNudgeMarkerTranscript(RULE.ccDelta, ccDeltaTextOfPhrasing(nudgePhrasing)),
+      railReportJsonl: railReport([railReportedDelivery(liveCcDeltaStamp(nudgePhrasingHash(nudgePhrasing)))]),
     });
   };
 }
 
-function repetitionThatDeliversAWrongPackHash(): PiSpawner {
+function repetitionThatDeliversAWrongNudgePhrasingHash(): PiSpawner {
   return async (spec) => {
-    const packContent = spec.env.LIUBAI_PHRASING_PACK ?? "";
+    const nudgePhrasing = spec.env.LIUBAI_NUDGE_PHRASING ?? "";
     return agentExited({
-      stdoutJsonl: firedNudgeMarkerTranscript(RULE.ccDelta, ccDeltaTextOfPack(packContent)),
-      railReportJsonl: railReport([railReportedDelivery(liveCcDeltaStamp(WRONG_PACK_HASH))]),
+      stdoutJsonl: firedNudgeMarkerTranscript(RULE.ccDelta, ccDeltaTextOfPhrasing(nudgePhrasing)),
+      railReportJsonl: railReport([railReportedDelivery(liveCcDeltaStamp(WRONG_NUDGE_PHRASING_HASH))]),
     });
   };
 }
 
-const SHADOWED_CC_DELTA_STAMP: DeliveredStamp = { packHash: null, liveRules: [], shadowRules: [RULE.ccDelta] };
+const SHADOWED_CC_DELTA_STAMP: DeliveredStamp = { nudgePhrasingHash: null, liveRules: [], shadowRules: [RULE.ccDelta] };
 const SHADOW_NUDGES_FIRED = 2;
 
 function wipeEverythingIn(workDir: string): void {
@@ -134,7 +134,7 @@ function recordingPiSpawner(): { spawner: PiSpawner; calls: RunSpec[] } {
   return { spawner, calls };
 }
 
-async function collectTreatmentWithAPhrasingPack(spawner: PiSpawner, probeSpawner: ProbeSpawner): Promise<{ result: CollectResult; runDir: string }> {
+async function collectTreatmentWithANudgePhrasing(spawner: PiSpawner, probeSpawner: ProbeSpawner): Promise<{ result: CollectResult; runDir: string }> {
   const opts = collectOpts({ spawner, probeSpawner });
   const result = await runCollect(opts);
   return { result, runDir: opts.runDir };
@@ -203,8 +203,8 @@ function assertNoRawRowWritten(runDir: string): void {
   assert.equal(existsSync(join(runDir, "raw.jsonl")), false);
 }
 
-test("a_delivered_phrasing_pack_scores_with_a_verified_delivery_validity_block", async () => {
-  const { result, runDir } = await collectTreatmentWithAPhrasingPack(repetitionThatDeliversThePack(), healthyProbeReporter());
+test("a_delivered_nudge_phrasing_scores_with_a_verified_delivery_validity_block", async () => {
+  const { result, runDir } = await collectTreatmentWithANudgePhrasing(repetitionThatDeliversTheNudgePhrasing(), healthyProbeReporter());
   assertCollectSucceeded(result);
 
   const scored = await scoreRun(runDir);
@@ -215,8 +215,8 @@ test("a_delivered_phrasing_pack_scores_with_a_verified_delivery_validity_block",
   assertTreatmentSummaryRowPresent(scored.stdout, TREATMENT_ID);
 });
 
-test("an_undelivered_phrasing_pack_is_refused_by_score", async () => {
-  const { result, runDir } = await collectTreatmentWithAPhrasingPack(repetitionThatDeliversAWrongPackHash(), healthyProbeReporter());
+test("an_undelivered_nudge_phrasing_is_refused_by_score", async () => {
+  const { result, runDir } = await collectTreatmentWithANudgePhrasing(repetitionThatDeliversAWrongNudgePhrasingHash(), healthyProbeReporter());
   assertCollectSucceeded(result);
 
   const scored = await scoreRun(runDir);
@@ -228,7 +228,7 @@ test("an_undelivered_phrasing_pack_is_refused_by_score", async () => {
 test("broken_delivery_aborts_the_run_at_the_canary_before_any_repetition_runs", async () => {
   const { spawner, calls } = recordingPiSpawner();
 
-  const { result, runDir } = await collectTreatmentWithAPhrasingPack(spawner, brokenDeliveryProbe());
+  const { result, runDir } = await collectTreatmentWithANudgePhrasing(spawner, brokenDeliveryProbe());
 
   assertCollectAbortedAtCanary(result, TREATMENT_ID);
   assertRepetitionSpawnerNeverInvoked(calls);

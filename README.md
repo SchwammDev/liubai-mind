@@ -60,7 +60,7 @@ liubai eval collect --run <name> --model <provider/id> [--repetitions N] [--time
 liubai eval score --run <name> [--compare <otherRunName>]
 ```
 
-**Treatments** — `engine/eval/treatments/*.json`, one per steering variant; optional phrasing pack delivered as JSON content in `LIUBAI_PHRASING_PACK` (content, not a path — the packs dir is masked inside the eval sandbox).
+**Treatments** — `engine/eval/treatments/*.json`, one per steering variant; optional nudge phrasing delivered as JSON content in `LIUBAI_NUDGE_PHRASING` (content, not a path — the phrasings dir is masked inside the eval sandbox).
 **Corpus** — `engine/eval/corpus/<case>/`, entry file uses the `.case` extension. Every manifest declares `tier: "easy" | "hard"`; hard cases also declare `genuineDpMax` (the decision-point bar a genuine fix must reach, set from the committed reference fix) and ship that reference fix in `reference/` — a test judges it `genuine-fix` and runs it through the behavior checks. Optional `tags` slice hard cases by difficulty lever.
 **Verdicts** — `genuine-fix` (decision points at or below the bar: `genuineDpMax` when set, else any reduction), `gamed` (`helper-split` | `silent-handler` — complexity moved, not removed), `bar-missed` (touched, bar not reached), `untouched` (entry file unchanged), `broken` (output failed to parse), `behavior-broken` (entry changed but the after-source fails the case's behavior checks), `errored` (infra failure, not model behavior), `timed-out` (repetition hit the collect timeout — final state is not a meaningful verdict).
 **Summary** — per-treatment rollups overall and per tier, plus per-case detail rows; `mean dp cut` averages the decision-point reduction over behavior-valid rows (`genuine-fix` + `bar-missed`).

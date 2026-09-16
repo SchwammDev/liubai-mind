@@ -64,7 +64,7 @@ function collectedRow(over: Partial<RawRow>): RawRow {
     repetition: UNTOUCHED,
     provenance: {
       treatmentId: TREATMENT,
-      phrasingPackHash: null,
+      nudgePhrasingHash: null,
       liubaiSha: CORPUS_SHA,
       model: "aqueduct/deepseek-v4-flash-284b",
       collectedAt: "2026-09-05T00:00:00.000Z",

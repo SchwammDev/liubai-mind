@@ -32,7 +32,7 @@ import { cleanProse } from "./prose-gate.ts";
 import { injectWebSearch, loadWebSearchConfig, LIUBAI_CONFIG } from "./web-search.ts";
 import { analyze } from "../../engine/analyze.ts";
 import type { Env, RuleName } from "../../engine/contract.ts";
-import { EVAL_ABORT_EXIT_CODE, RULE, packHash } from "../../engine/contract.ts";
+import { EVAL_ABORT_EXIT_CODE, RULE, nudgePhrasingHash } from "../../engine/contract.ts";
 import { defaultEnv } from "../../engine/env.ts";
 import { detectLang } from "../../engine/lang.ts";
 import { formatBlockReason } from "../../engine/messages.ts";
@@ -87,7 +87,7 @@ function createShadowLog(cwd: string): ShadowLog {
   };
 }
 
-export type DeliveredStamp = { packHash: string | null; liveRules: string[]; shadowRules: string[] };
+export type DeliveredStamp = { nudgePhrasingHash: string | null; liveRules: string[]; shadowRules: string[] };
 export type WriteDelivered = (stamp: DeliveredStamp) => void;
 
 function createDeliveredWriter(cwd: string): WriteDelivered {
@@ -100,9 +100,9 @@ function createDeliveredWriter(cwd: string): WriteDelivered {
   };
 }
 
-function deliveredPackHash(): string | null {
-  const raw = process.env.LIUBAI_PHRASING_PACK;
-  return packHash(raw && raw.length > 0 ? raw : null);
+function deliveredNudgePhrasingHash(): string | null {
+  const raw = process.env.LIUBAI_NUDGE_PHRASING;
+  return nudgePhrasingHash(raw && raw.length > 0 ? raw : null);
 }
 
 function enabledRuleNames(): RuleName[] {
@@ -115,13 +115,13 @@ function stampDelivered(cwd: string, writeDelivered: WriteDelivered): void {
 }
 
 function resolveDelivered(): DeliveredStamp {
-  const hash = deliveredPackHash();
-  if (railsDisabled()) return { packHash: hash, liveRules: [], shadowRules: [] };
+  const hash = deliveredNudgePhrasingHash();
+  if (railsDisabled()) return { nudgePhrasingHash: hash, liveRules: [], shadowRules: [] };
 
   const shadowSet = parseShadowRules(process.env.LIUBAI_SHADOW_RULES);
   const enabled = enabledRuleNames();
   return {
-    packHash: hash,
+    nudgePhrasingHash: hash,
     liveRules: enabled.filter((rule) => !shadowSet.has(rule)),
     shadowRules: enabled.filter((rule) => shadowSet.has(rule)),
   };

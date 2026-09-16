@@ -11,12 +11,12 @@ export interface CcNudgeEntry {
   rest: string;
 }
 
-export interface ValidPack {
+export interface NudgePhrasing {
   CC_NUDGE?: Partial<Record<Lang, CcNudgeEntry>>;
   CC_DELTA_NUDGE?: string;
 }
 
-export type ValidatePackResult = { pack: ValidPack } | { error: string };
+export type ValidateNudgePhrasingResult = { phrasing: NudgePhrasing } | { error: string };
 
 function parseJson(raw: string): { value: unknown } | { error: string } {
   try {
@@ -66,13 +66,13 @@ function validateCcDeltaNudge(value: unknown): { value: string } | { error: stri
   return { value };
 }
 
-export function validatePack(raw: string): ValidatePackResult {
+export function validateNudgePhrasing(raw: string): ValidateNudgePhrasingResult {
   const parsed = parseJson(raw);
   if ("error" in parsed) return { error: parsed.error };
 
   const value = parsed.value;
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return { error: "pack must be a JSON object" };
+    return { error: "nudge phrasing must be a JSON object" };
   }
 
   const entries = value as Record<string, unknown>;
@@ -81,19 +81,19 @@ export function validatePack(raw: string): ValidatePackResult {
     return { error: `unknown top-level key(s): ${unknownKeys.join(", ")}` };
   }
 
-  const pack: ValidPack = {};
+  const phrasing: NudgePhrasing = {};
 
   if ("CC_NUDGE" in entries) {
     const ccNudge = validateCcNudge(entries.CC_NUDGE);
     if ("error" in ccNudge) return { error: ccNudge.error };
-    pack.CC_NUDGE = ccNudge.value;
+    phrasing.CC_NUDGE = ccNudge.value;
   }
 
   if ("CC_DELTA_NUDGE" in entries) {
     const ccDeltaNudge = validateCcDeltaNudge(entries.CC_DELTA_NUDGE);
     if ("error" in ccDeltaNudge) return { error: ccDeltaNudge.error };
-    pack.CC_DELTA_NUDGE = ccDeltaNudge.value;
+    phrasing.CC_DELTA_NUDGE = ccDeltaNudge.value;
   }
 
-  return { pack };
+  return { phrasing };
 }

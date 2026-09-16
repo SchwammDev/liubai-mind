@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import type { TreatmentManifest } from "./eval-contract.ts";
-import { validatePack } from "./phrasing.ts";
+import { validateNudgePhrasing } from "./phrasing.ts";
 
 type LoadResult = TreatmentManifest[] | { error: string };
 
@@ -51,22 +51,22 @@ function validateDeliveryClosesLiveRail(
   };
 }
 
-function validateDeliveryPinsPhrasingPack(
+function validateDeliveryPinsNudgePhrasingFile(
   delivery: "prompt" | "rail" | undefined,
-  phrasingPack: string | undefined,
+  nudgePhrasingFile: string | undefined,
   id: string,
 ): { error: string } | undefined {
   if (delivery !== "prompt") return undefined;
-  if (phrasingPack !== undefined) return undefined;
+  if (nudgePhrasingFile !== undefined) return undefined;
   return {
-    error: `treatment ${id}: delivery: "prompt" requires phrasingPack — a prompt-carried treatment must pin its message in a pack so its meaning cannot drift with the production default wording`,
+    error: `treatment ${id}: delivery: "prompt" requires nudgePhrasingFile — a prompt-carried treatment must pin its message in a nudge phrasing so its meaning cannot drift with the production default wording`,
   };
 }
 
 interface ManifestFields {
   id: string;
   env: Record<string, string>;
-  phrasingPack: string | undefined;
+  nudgePhrasingFile: string | undefined;
   expectedZeroNudges: boolean | undefined;
   delivery: "prompt" | "rail" | undefined;
 }
@@ -78,8 +78,8 @@ function validateFields(raw: Record<string, unknown>): { fields: ManifestFields 
   const env = validateEnv(raw.env);
   if ("error" in env) return env;
 
-  const phrasingPack = validateOptionalString(raw.phrasingPack, "phrasingPack");
-  if ("error" in phrasingPack) return phrasingPack;
+  const nudgePhrasingFile = validateOptionalString(raw.nudgePhrasingFile, "nudgePhrasingFile");
+  if ("error" in nudgePhrasingFile) return nudgePhrasingFile;
 
   const expectedZeroNudges = validateOptionalBoolean(raw.expectedZeroNudges, "expectedZeroNudges");
   if ("error" in expectedZeroNudges) return expectedZeroNudges;
@@ -91,7 +91,7 @@ function validateFields(raw: Record<string, unknown>): { fields: ManifestFields 
     fields: {
       id: id.value,
       env: env.value,
-      phrasingPack: phrasingPack.value,
+      nudgePhrasingFile: nudgePhrasingFile.value,
       expectedZeroNudges: expectedZeroNudges.value,
       delivery: delivery.value,
     },
@@ -102,7 +102,7 @@ function assembleManifest(fields: ManifestFields): TreatmentManifest {
   return {
     id: fields.id,
     env: fields.env,
-    ...(fields.phrasingPack !== undefined ? { phrasingPack: fields.phrasingPack } : {}),
+    ...(fields.nudgePhrasingFile !== undefined ? { nudgePhrasingFile: fields.nudgePhrasingFile } : {}),
     ...(fields.expectedZeroNudges !== undefined ? { expectedZeroNudges: fields.expectedZeroNudges } : {}),
     ...(fields.delivery !== undefined ? { delivery: fields.delivery } : {}),
   };
@@ -120,20 +120,20 @@ function validateManifest(raw: unknown, filename: string): { manifest: Treatment
   const railError = validateDeliveryClosesLiveRail(fields.delivery, fields.env, fields.id);
   if (railError !== undefined) return { error: `${filename}: ${railError.error}` };
 
-  const packError = validateDeliveryPinsPhrasingPack(fields.delivery, fields.phrasingPack, fields.id);
-  if (packError !== undefined) return { error: `${filename}: ${packError.error}` };
+  const nudgePhrasingError = validateDeliveryPinsNudgePhrasingFile(fields.delivery, fields.nudgePhrasingFile, fields.id);
+  if (nudgePhrasingError !== undefined) return { error: `${filename}: ${nudgePhrasingError.error}` };
 
   return { manifest: assembleManifest(fields) };
 }
 
-function validatePhrasingPack(dir: string, manifest: TreatmentManifest): { error: string } | undefined {
-  if (manifest.phrasingPack === undefined) return undefined;
+function validateTreatmentNudgePhrasing(dir: string, manifest: TreatmentManifest): { error: string } | undefined {
+  if (manifest.nudgePhrasingFile === undefined) return undefined;
 
-  const packPath = join(dir, manifest.phrasingPack);
-  const bytes = readFileSync(packPath, "utf8");
-  const result = validatePack(bytes);
+  const nudgePhrasingPath = join(dir, manifest.nudgePhrasingFile);
+  const bytes = readFileSync(nudgePhrasingPath, "utf8");
+  const result = validateNudgePhrasing(bytes);
   if ("error" in result) {
-    return { error: `treatment ${manifest.id}: invalid phrasing pack: ${result.error}` };
+    return { error: `treatment ${manifest.id}: invalid nudge phrasing: ${result.error}` };
   }
   return undefined;
 }
@@ -155,8 +155,8 @@ function readManifests(dir: string): LoadResult {
     }
     seenIds.add(manifest.id);
 
-    const packError = validatePhrasingPack(dirname(join(dir, filename)), manifest);
-    if (packError !== undefined) return packError;
+    const nudgePhrasingError = validateTreatmentNudgePhrasing(dirname(join(dir, filename)), manifest);
+    if (nudgePhrasingError !== undefined) return nudgePhrasingError;
 
     manifests.push(manifest);
   }

@@ -66,28 +66,28 @@ test("loadTreatments_filters_to_the_requested_ids", () => {
   assert.deepEqual(result.map((c) => c.id), ["control"]);
 });
 
-test("loadTreatments_rejects_a_treatment_with_an_invalid_phrasing_pack", () => {
+test("loadTreatments_rejects_a_treatment_with_an_invalid_nudge_phrasing", () => {
   const dir = tempTreatmentsDir();
-  mkdirSync(join(dir, "packs"));
-  writeFileSync(join(dir, "packs", "pack.json"), "{ not json");
-  writeTreatment(dir, "broken-pack.json", { id: "broken-pack", env: {}, phrasingPack: "packs/pack.json" });
+  mkdirSync(join(dir, "phrasings"));
+  writeFileSync(join(dir, "phrasings", "phrasing.json"), "{ not json");
+  writeTreatment(dir, "broken-phrasing.json", { id: "broken-phrasing", env: {}, nudgePhrasingFile: "phrasings/phrasing.json" });
 
   const result = loadTreatments(dir);
 
   assertRejected(result);
-  assert.match(result.error, /broken-pack/);
+  assert.match(result.error, /broken-phrasing/);
 });
 
-test("loadTreatments_accepts_a_treatment_with_a_valid_phrasing_pack", () => {
+test("loadTreatments_accepts_a_treatment_with_a_valid_nudge_phrasing", () => {
   const dir = tempTreatmentsDir();
-  mkdirSync(join(dir, "packs"));
-  writeFileSync(join(dir, "packs", "pack.json"), '{"CC_NUDGE":{"python":{"first":"be terse","rest":"be terse"}}}');
-  writeTreatment(dir, "with-pack.json", { id: "with-pack", env: {}, phrasingPack: "packs/pack.json" });
+  mkdirSync(join(dir, "phrasings"));
+  writeFileSync(join(dir, "phrasings", "phrasing.json"), '{"CC_NUDGE":{"python":{"first":"be terse","rest":"be terse"}}}');
+  writeTreatment(dir, "with-phrasing.json", { id: "with-phrasing", env: {}, nudgePhrasingFile: "phrasings/phrasing.json" });
 
   const result = loadTreatments(dir);
 
   assertLoaded(result);
-  assert.equal(result[0]?.phrasingPack, "packs/pack.json");
+  assert.equal(result[0]?.nudgePhrasingFile, "phrasings/phrasing.json");
 });
 
 test("loadTreatments_reads_expectedZeroNudges_true_from_its_manifest", () => {
@@ -132,13 +132,13 @@ test("loadTreatments_leaves_delivery_undefined_when_the_manifest_omits_it", () =
 
 test("loadTreatments_reads_delivery_prompt_from_a_treatment_that_closes_the_live_rail", () => {
   const dir = tempTreatmentsDir();
-  mkdirSync(join(dir, "packs"));
-  writeFileSync(join(dir, "packs", "pack.json"), '{"CC_DELTA_NUDGE":"nudge text"}');
+  mkdirSync(join(dir, "phrasings"));
+  writeFileSync(join(dir, "phrasings", "phrasing.json"), '{"CC_DELTA_NUDGE":"nudge text"}');
   writeTreatment(dir, "prompt-carried.json", {
     id: "prompt-carried",
     delivery: "prompt",
     env: { LIUBAI_RAILS_OFF: "1" },
-    phrasingPack: "packs/pack.json",
+    nudgePhrasingFile: "phrasings/phrasing.json",
   });
 
   const result = loadTreatments(dir);
@@ -147,23 +147,23 @@ test("loadTreatments_reads_delivery_prompt_from_a_treatment_that_closes_the_live
   assert.equal(result[0]?.delivery, "prompt");
 });
 
-test("loadTreatments_rejects_a_prompt_delivery_treatment_that_carries_no_phrasing_pack", () => {
+test("loadTreatments_rejects_a_prompt_delivery_treatment_that_carries_no_nudge_phrasing", () => {
   const dir = tempTreatmentsDir();
   writeTreatment(dir, "unpinned-prompt.json", { id: "unpinned-prompt", delivery: "prompt", env: { LIUBAI_RAILS_OFF: "1" } });
 
   const result = loadTreatments(dir);
 
   assertRejected(result);
-  assert.match(result.error, /phrasingPack/);
+  assert.match(result.error, /nudgePhrasingFile/);
   assert.match(result.error, /drift/);
 });
 
-test("loadTreatments_reads_the_pinned_pack_for_the_cc_delta_numbered_prompt_treatment", () => {
+test("loadTreatments_reads_the_pinned_nudge_phrasing_for_the_cc_delta_numbered_prompt_treatment", () => {
   const result = loadTreatments(TREATMENTS_DIR);
 
   assertLoaded(result);
   const treatment = result.find((c) => c.id === "cc-delta-numbered-prompt");
-  assert.equal(treatment?.phrasingPack, "packs/cc-delta-numbered.json");
+  assert.equal(treatment?.nudgePhrasingFile, "phrasings/cc-delta-numbered.json");
 });
 
 test("loadTreatments_rejects_a_delivery_value_that_is_neither_prompt_nor_rail", () => {

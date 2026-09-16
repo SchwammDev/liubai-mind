@@ -1,1 +1,1 @@
-{ "id": "bare-metric-v1", "env": {}, "phrasingPack": "packs/bare-metric-v1.json" }
+{ "id": "bare-metric-v1", "env": {}, "nudgePhrasingFile": "phrasings/bare-metric-v1.json" }

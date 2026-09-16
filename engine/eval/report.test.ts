@@ -21,7 +21,7 @@ function unscoredRow(): RawRow {
     repetition: 1,
     provenance: {
       treatmentId: TREATMENT,
-      phrasingPackHash: null,
+      nudgePhrasingHash: null,
       liubaiSha: "3250ea4",
       model: "aqueduct/deepseek-v4-flash-284b",
       collectedAt: "2026-09-05T00:00:00.000Z",
@@ -116,7 +116,7 @@ function minimalRawRow(repetition: number, files: Record<string, string>, over: 
     caseId: CASE_ID,
     treatmentId: TREATMENT,
     repetition,
-    provenance: { treatmentId: TREATMENT, phrasingPackHash: null, liubaiSha: "3250ea4", model: "test-model", collectedAt: "2026-09-05T00:00:00.000Z" },
+    provenance: { treatmentId: TREATMENT, nudgePhrasingHash: null, liubaiSha: "3250ea4", model: "test-model", collectedAt: "2026-09-05T00:00:00.000Z" },
     files,
     exitCode: 0,
     timedOut: false,

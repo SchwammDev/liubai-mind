@@ -35,9 +35,9 @@ export interface JudgedRecordForReport {
 
 export interface RawRowForReport {
   treatmentId: string;
-  provenance: { model: string; liubaiSha: string; phrasingPackHash: string | null };
+  provenance: { model: string; liubaiSha: string; nudgePhrasingHash: string | null };
   task?: string;
-  delivered?: { packHash: string | null };
+  delivered?: { nudgePhrasingHash: string | null };
   caseId: string;
   repetition: number;
   files: Record<string, string>;
@@ -868,12 +868,12 @@ interface TreatmentProvenanceFacts {
   treatmentId: string;
   liubaiShas: string[];
   models: string[];
-  phrasingPackHashes: string[];
+  nudgePhrasingHashes: string[];
   deliveredTexts: string[];
   hasEvidence: boolean;
 }
 
-function phrasingPackLabel(hash: string | null): string {
+function nudgePhrasingLabel(hash: string | null): string {
   return hash === null ? "none" : hash;
 }
 
@@ -882,7 +882,7 @@ function provenanceFactsFor(treatmentId: string, rows: RawRowForReport[]): Treat
     treatmentId,
     liubaiShas: distinctSorted(rows.map((row) => row.provenance.liubaiSha)),
     models: distinctSorted(rows.map((row) => row.provenance.model)),
-    phrasingPackHashes: distinctSorted(rows.map((row) => phrasingPackLabel(row.provenance.phrasingPackHash))),
+    nudgePhrasingHashes: distinctSorted(rows.map((row) => nudgePhrasingLabel(row.provenance.nudgePhrasingHash))),
     deliveredTexts: distinctSorted(rows.filter((row) => row.task !== undefined).map((row) => row.task!)),
     hasEvidence: rows.some((row) => row.task !== undefined || row.delivered !== undefined),
   };
@@ -939,7 +939,7 @@ function setupCheckFor(experiment: Experiment, runData: Map<string, RunRecordsFo
   const lines = [
     compareField("liubai commit", perTreatment.map((facts) => facts.liubaiShas)),
     compareField("model", perTreatment.map((facts) => facts.models)),
-    compareField("wording pack", perTreatment.map((facts) => facts.phrasingPackHashes)),
+    compareField("nudge phrasing", perTreatment.map((facts) => facts.nudgePhrasingHashes)),
     deliveredTextDiffersFact(perTreatment, identicalTreatments),
   ].filter((line): line is string => line !== undefined);
 

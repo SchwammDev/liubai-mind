@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 
 import type { Provenance } from "./eval-contract.ts";
-import { packHash } from "../contract.ts";
+import { nudgePhrasingHash } from "../contract.ts";
 
 function runGit(repoRoot: string, args: string[]): string {
   const res = spawnSync("git", args, { cwd: repoRoot, encoding: "utf8" });
@@ -36,7 +36,7 @@ export function showFileAtCommit(repoRoot: string, sha: string, relativePath: st
 
 export function buildProvenance(input: {
   treatmentId: string;
-  packBytes: string | null;
+  nudgePhrasingBytes: string | null;
   repoRoot: string;
   model: string;
   now: string;
@@ -44,7 +44,7 @@ export function buildProvenance(input: {
 }): Provenance {
   return {
     treatmentId: input.treatmentId,
-    phrasingPackHash: packHash(input.packBytes),
+    nudgePhrasingHash: nudgePhrasingHash(input.nudgePhrasingBytes),
     liubaiSha: gitSha(input.repoRoot),
     model: input.model,
     collectedAt: input.now,

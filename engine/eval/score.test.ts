@@ -249,7 +249,7 @@ function metrics(over: Partial<Metrics> = {}): Metrics {
 function provenance(over: Partial<Provenance> = {}): Provenance {
   return {
     treatmentId: "rails-default",
-    phrasingPackHash: "a".repeat(64),
+    nudgePhrasingHash: "a".repeat(64),
     liubaiSha: "abc1234",
     model: "claude-x",
     collectedAt: "2026-08-20T00:00:00.000Z",
@@ -260,7 +260,7 @@ function provenance(over: Partial<Provenance> = {}): Provenance {
 type Delivered = NonNullable<RawRow["delivered"]>;
 
 function deliveredStamp(over: Partial<Delivered> = {}): Delivered {
-  return { packHash: "a".repeat(64), liveRules: [], shadowRules: [], ...over };
+  return { nudgePhrasingHash: "a".repeat(64), liveRules: [], shadowRules: [], ...over };
 }
 
 function writeTreatmentsDir(treatments: Record<string, Partial<{ expectedZeroNudges: boolean }>>): string {
@@ -1491,10 +1491,10 @@ test("runScore_fails_the_run_with_an_actionable_message_when_the_py_cc_backend_b
   assertScoreFailedBeforeWritingATable(result, runDir);
 });
 
-test("runScore_refuses_a_row_whose_delivered_pack_hash_does_not_match_the_claimed_pack_hash", async () => {
+test("runScore_refuses_a_row_whose_delivered_nudge_phrasing_hash_does_not_match_the_claimed_nudge_phrasing_hash", async () => {
   const treatmentId = "delivery-mismatch";
   const treatmentsDir = writeTreatmentsDir({ [treatmentId]: {} });
-  const row = rawRow(treatmentId, "any-case", { delivered: deliveredStamp({ packHash: "b".repeat(64) }) });
+  const row = rawRow(treatmentId, "any-case", { delivered: deliveredStamp({ nudgePhrasingHash: "b".repeat(64) }) });
   const runDir = tempRunDir();
   writeRawJsonl(runDir, [row]);
 
@@ -1552,13 +1552,13 @@ test("runScore_refuses_a_treatment_whose_delivered_live_rules_never_fired", asyn
 test("runScore_treats_a_silent_treatment_as_valid_when_it_declares_expectedZeroNudges", async () => {
   const treatmentId = "rails-off-expected";
   const treatmentsDir = writeTreatmentsDir({ [treatmentId]: { expectedZeroNudges: true } });
-  const packHash = "a".repeat(64);
+  const nudgePhrasingHash = "a".repeat(64);
   const row = tsFlagParserRow(
     {},
     {
       treatmentId,
-      provenance: provenance({ treatmentId, phrasingPackHash: packHash }),
-      delivered: deliveredStamp({ packHash, liveRules: ["cc"] }),
+      provenance: provenance({ treatmentId, nudgePhrasingHash: nudgePhrasingHash }),
+      delivered: deliveredStamp({ nudgePhrasingHash, liveRules: ["cc"] }),
       nudges: nudges(),
     },
   );
@@ -1589,13 +1589,13 @@ test("runScore_refuses_a_treatment_whose_delivered_shadow_rules_never_fired", as
 test("runScore_writes_a_summary_and_prints_a_validity_block_for_a_fully_delivered_run", async () => {
   const treatmentId = "rails-verified";
   const treatmentsDir = writeTreatmentsDir({ [treatmentId]: {} });
-  const packHash = "a".repeat(64);
+  const nudgePhrasingHash = "a".repeat(64);
   const row = tsFlagParserRow(
     {},
     {
       treatmentId,
-      provenance: provenance({ treatmentId, phrasingPackHash: packHash }),
-      delivered: deliveredStamp({ packHash, liveRules: ["cc"] }),
+      provenance: provenance({ treatmentId, nudgePhrasingHash: nudgePhrasingHash }),
+      delivered: deliveredStamp({ nudgePhrasingHash, liveRules: ["cc"] }),
       nudges: nudges({ cc: 2 }),
     },
   );
@@ -1616,11 +1616,11 @@ const PROMPT_TREATMENT_MESSAGE = "collapse the tangle back into a dispatch a rea
 
 function writePromptTreatmentsDir(promptTreatmentId: string, railTreatmentIds: string[] = []): string {
   const dir = mkdtempSync(join(tmpdir(), "eval-score-treatments-"));
-  mkdirSync(join(dir, "packs"), { recursive: true });
-  writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_TREATMENT_MESSAGE }));
+  mkdirSync(join(dir, "phrasings"), { recursive: true });
+  writeFileSync(join(dir, "phrasings", "phrasing.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_TREATMENT_MESSAGE }));
   writeFileSync(
     join(dir, `${promptTreatmentId}.json`),
-    JSON.stringify({ id: promptTreatmentId, env: { LIUBAI_RAILS_OFF: "1" }, delivery: "prompt", phrasingPack: "packs/pack.json" }),
+    JSON.stringify({ id: promptTreatmentId, env: { LIUBAI_RAILS_OFF: "1" }, delivery: "prompt", nudgePhrasingFile: "phrasings/phrasing.json" }),
   );
   for (const railTreatmentId of railTreatmentIds) {
     writeFileSync(join(dir, `${railTreatmentId}.json`), JSON.stringify({ id: railTreatmentId, env: {} }));
@@ -1680,14 +1680,14 @@ test("runScore_scores_a_mixed_run_applying_each_treatments_own_delivery_checks",
   const promptTreatmentId = "cc-delta-prompt";
   const railTreatmentId = "rails-verified-mixed";
   const treatmentsDir = writePromptTreatmentsDir(promptTreatmentId, [railTreatmentId]);
-  const packHash = "a".repeat(64);
+  const nudgePhrasingHash = "a".repeat(64);
   const promptRow = tsFlagParserRow({}, { treatmentId: promptTreatmentId, task: promptCarriedTask() });
   const railRow = tsFlagParserRow(
     {},
     {
       treatmentId: railTreatmentId,
-      provenance: provenance({ treatmentId: railTreatmentId, phrasingPackHash: packHash }),
-      delivered: deliveredStamp({ packHash, liveRules: ["cc"] }),
+      provenance: provenance({ treatmentId: railTreatmentId, nudgePhrasingHash: nudgePhrasingHash }),
+      delivered: deliveredStamp({ nudgePhrasingHash, liveRules: ["cc"] }),
       nudges: nudges({ cc: 2 }),
     },
   );
@@ -1725,11 +1725,11 @@ const PROMPT_TREATMENT_FORMATTED_MESSAGE = "parseFlags still carries 24 decision
 
 function writePlaceholderPromptTreatmentsDir(promptTreatmentId: string): string {
   const dir = mkdtempSync(join(tmpdir(), "eval-score-treatments-"));
-  mkdirSync(join(dir, "packs"), { recursive: true });
-  writeFileSync(join(dir, "packs", "pack.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_TREATMENT_TEMPLATE_WITH_PLACEHOLDERS }));
+  mkdirSync(join(dir, "phrasings"), { recursive: true });
+  writeFileSync(join(dir, "phrasings", "phrasing.json"), JSON.stringify({ CC_DELTA_NUDGE: PROMPT_TREATMENT_TEMPLATE_WITH_PLACEHOLDERS }));
   writeFileSync(
     join(dir, `${promptTreatmentId}.json`),
-    JSON.stringify({ id: promptTreatmentId, env: { LIUBAI_RAILS_OFF: "1" }, delivery: "prompt", phrasingPack: "packs/pack.json" }),
+    JSON.stringify({ id: promptTreatmentId, env: { LIUBAI_RAILS_OFF: "1" }, delivery: "prompt", nudgePhrasingFile: "phrasings/phrasing.json" }),
   );
   return dir;
 }
