@@ -17,6 +17,13 @@ function assertRejected(result: ReturnType<typeof loadTreatments>): asserts resu
   assert.ok(!Array.isArray(result) && "error" in result, "expected treatments to be rejected");
 }
 
+function assertRejectedForAmbiguousPinnedMessage(result: ReturnType<typeof loadTreatments>, treatmentId: string): void {
+  assertRejected(result);
+  assert.match(result.error, new RegExp(treatmentId));
+  assert.match(result.error, /CC_NUDGE/);
+  assert.match(result.error, /CC_DELTA_NUDGE/);
+}
+
 function tempTreatmentsDir(): string {
   return mkdtempSync(join(tmpdir(), "eval-treatments-"));
 }
@@ -30,7 +37,7 @@ test("loadTreatments_loads_all_committed_treatments", () => {
 
   assertLoaded(result);
   const ids = result.map((c) => c.id).sort();
-  assert.deepEqual(ids, ["bare-metric-v1", "cc-delta-numbered-prompt", "cc-delta-numberless", "cc-delta-numberless-prompt", "cc-delta-off", "cc-delta-shadow", "coaching-v1", "control", "minimal-numberless-v1", "rails-default"]);
+  assert.deepEqual(ids, ["bare-metric-v1", "cc-delta-numbered-prompt", "cc-delta-numberless", "cc-delta-numberless-prompt", "cc-delta-off", "cc-delta-shadow", "coaching-v1", "coaching-v1-prompt", "control", "minimal-numberless-v1", "minimal-numberless-v1-prompt", "rails-default"]);
 });
 
 test("loadTreatments_reads_control_env_from_its_manifest", () => {
@@ -185,4 +192,39 @@ test("loadTreatments_rejects_a_prompt_delivery_treatment_that_leaves_the_live_ra
 
   assertRejected(result);
   assert.match(result.error, /LIUBAI_RAILS_OFF/);
+});
+
+test("loadTreatments_rejects_a_prompt_delivery_treatment_whose_phrasing_pins_both_cc_nudge_and_cc_delta_nudge", () => {
+  const dir = tempTreatmentsDir();
+  mkdirSync(join(dir, "phrasings"));
+  writeFileSync(
+    join(dir, "phrasings", "phrasing.json"),
+    '{"CC_NUDGE":{"python":{"first":"be terse","rest":"be terse"}},"CC_DELTA_NUDGE":"nudge text"}',
+  );
+  writeTreatment(dir, "double-pinned-prompt.json", {
+    id: "double-pinned-prompt",
+    delivery: "prompt",
+    env: { LIUBAI_RAILS_OFF: "1" },
+    nudgePhrasingFile: "phrasings/phrasing.json",
+  });
+
+  const result = loadTreatments(dir);
+
+  assertRejectedForAmbiguousPinnedMessage(result, "double-pinned-prompt");
+});
+
+test("loadTreatments_rejects_a_prompt_delivery_treatment_whose_phrasing_pins_neither_cc_nudge_nor_cc_delta_nudge", () => {
+  const dir = tempTreatmentsDir();
+  mkdirSync(join(dir, "phrasings"));
+  writeFileSync(join(dir, "phrasings", "phrasing.json"), "{}");
+  writeTreatment(dir, "unpinned-message-prompt.json", {
+    id: "unpinned-message-prompt",
+    delivery: "prompt",
+    env: { LIUBAI_RAILS_OFF: "1" },
+    nudgePhrasingFile: "phrasings/phrasing.json",
+  });
+
+  const result = loadTreatments(dir);
+
+  assertRejectedForAmbiguousPinnedMessage(result, "unpinned-message-prompt");
 });

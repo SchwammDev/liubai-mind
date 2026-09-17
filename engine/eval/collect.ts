@@ -304,9 +304,10 @@ function requirePromptNudgePhrasing(nudgePhrasing: string | undefined, treatment
   return nudgePhrasing;
 }
 
-export function buildTask(kase: CaseManifest, treatment: TreatmentManifest, nudgePhrasing: string | undefined): string {
+export async function buildTask(kase: CaseManifest, treatment: TreatmentManifest, nudgePhrasing: string | undefined, corpusDir: string): Promise<string> {
   if (treatment.delivery !== "prompt") return kase.task;
-  return `${kase.task}\n\n${promptCarriedTreatmentMessage(kase, requirePromptNudgePhrasing(nudgePhrasing, treatment))}`;
+  const message = await promptCarriedTreatmentMessage(kase, requirePromptNudgePhrasing(nudgePhrasing, treatment), corpusDir);
+  return `${kase.task}\n\n${message}`;
 }
 
 export function copyCaseFiles(corpusDir: string, kase: CaseManifest, workDir: string): { from: string; to: string }[] {
@@ -433,7 +434,7 @@ async function runItem(ctx: CollectContext, item: WorkItem): Promise<ItemResult>
   const phrasingPath = nudgePhrasingPath(ctx.treatmentsDir, item.treatment);
   const nudgePhrasing = readNudgePhrasing(phrasingPath);
   const env = buildEnv(item.treatment, nudgePhrasing);
-  const task = buildTask(item.kase, item.treatment, nudgePhrasing);
+  const task = await buildTask(item.kase, item.treatment, nudgePhrasing, ctx.corpusDir);
 
   try {
     const { outcome, durationMs } = await spawnForItem(ctx, task, workDir, env);

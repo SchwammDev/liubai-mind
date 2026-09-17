@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 
 import type { TreatmentManifest } from "./eval-contract.ts";
 import { validateNudgePhrasing } from "./phrasing.ts";
+import type { NudgePhrasing } from "./phrasing.ts";
 
 type LoadResult = TreatmentManifest[] | { error: string };
 
@@ -126,8 +127,8 @@ function validateManifest(raw: unknown, filename: string): { manifest: Treatment
   return { manifest: assembleManifest(fields) };
 }
 
-function validateTreatmentNudgePhrasing(dir: string, manifest: TreatmentManifest): { error: string } | undefined {
-  if (manifest.nudgePhrasingFile === undefined) return undefined;
+function validateTreatmentNudgePhrasing(dir: string, manifest: TreatmentManifest): { phrasing: NudgePhrasing | undefined } | { error: string } {
+  if (manifest.nudgePhrasingFile === undefined) return { phrasing: undefined };
 
   const nudgePhrasingPath = join(dir, manifest.nudgePhrasingFile);
   const bytes = readFileSync(nudgePhrasingPath, "utf8");
@@ -135,7 +136,26 @@ function validateTreatmentNudgePhrasing(dir: string, manifest: TreatmentManifest
   if ("error" in result) {
     return { error: `treatment ${manifest.id}: invalid nudge phrasing: ${result.error}` };
   }
-  return undefined;
+  return { phrasing: result.phrasing };
+}
+
+function validateDeliveryPinsExactlyOneMessage(
+  delivery: "prompt" | "rail" | undefined,
+  phrasing: NudgePhrasing | undefined,
+  id: string,
+): { error: string } | undefined {
+  if (delivery !== "prompt") return undefined;
+  if (phrasing === undefined) return undefined;
+
+  const pinsCcNudge = phrasing.CC_NUDGE !== undefined;
+  const pinsCcDeltaNudge = phrasing.CC_DELTA_NUDGE !== undefined;
+  if (pinsCcNudge !== pinsCcDeltaNudge) return undefined;
+
+  const pinnedBoth = `treatment ${id}: delivery: "prompt" nudge phrasing pins both CC_NUDGE and CC_DELTA_NUDGE`;
+  const pinnedNeither = `treatment ${id}: delivery: "prompt" nudge phrasing pins neither CC_NUDGE nor CC_DELTA_NUDGE`;
+  return {
+    error: `${pinsCcNudge ? pinnedBoth : pinnedNeither} — a prompt-carried treatment must pin exactly one message so its wording cannot drift with the production default`,
+  };
 }
 
 function readManifests(dir: string): LoadResult {
@@ -155,8 +175,11 @@ function readManifests(dir: string): LoadResult {
     }
     seenIds.add(manifest.id);
 
-    const nudgePhrasingError = validateTreatmentNudgePhrasing(dirname(join(dir, filename)), manifest);
-    if (nudgePhrasingError !== undefined) return nudgePhrasingError;
+    const nudgePhrasingResult = validateTreatmentNudgePhrasing(dirname(join(dir, filename)), manifest);
+    if ("error" in nudgePhrasingResult) return nudgePhrasingResult;
+
+    const pinnedMessageError = validateDeliveryPinsExactlyOneMessage(manifest.delivery, nudgePhrasingResult.phrasing, manifest.id);
+    if (pinnedMessageError !== undefined) return pinnedMessageError;
 
     manifests.push(manifest);
   }
