@@ -20,18 +20,31 @@ const CASE_ID = "ts-flag-parser";
 const CASE_TASK = caseTask();
 const TREATMENT_MESSAGE = treatmentMessage();
 
+const CC_NUDGE_TREATMENT_ID = "minimal-numberless-v1-prompt";
+const CASE_WHOSE_SMELL_HIDES_IN_A_HELPER = "py-timeseries-qc";
+const MOST_COMPLEX_FUNCTION_IN_THAT_CASES_STARTING_FILE = "classify_spikes";
+
 interface CaseFacts {
   task: string;
   entrySymbol: string;
   baseline: { decisionPoints: number };
 }
 
+function caseFactsOf(caseId: string): CaseFacts {
+  return JSON.parse(readFileSync(join(CORPUS_DIR, caseId, "manifest.json"), "utf8")) as CaseFacts;
+}
+
 function caseFacts(): CaseFacts {
-  return JSON.parse(readFileSync(join(CORPUS_DIR, CASE_ID, "manifest.json"), "utf8")) as CaseFacts;
+  return caseFactsOf(CASE_ID);
 }
 
 function caseTask(): string {
   return caseFacts().task;
+}
+
+function ccNudgeTreatmentMessage(): string {
+  const phrasing = JSON.parse(readFileSync(join(TREATMENTS_DIR, "phrasings", "minimal-numberless-v1.json"), "utf8")) as { CC_NUDGE: { python: { first: string } } };
+  return phrasing.CC_NUDGE.python.first.replaceAll("{name}", MOST_COMPLEX_FUNCTION_IN_THAT_CASES_STARTING_FILE);
 }
 
 function treatmentMessage(): string {
@@ -98,11 +111,16 @@ function assertCollectSucceeded(result: CollectResult, repetitions: number): voi
   assert.equal(result.rowsWritten, repetitions);
 }
 
-function assertEveryRepetitionOpensWithTheCaseTaskAndTheTreatmentMessage(calls: RunSpec[], repetitions: number): void {
+function assertEveryRepetitionOpensWithTheCaseTaskAndTheTreatmentMessage(
+  calls: RunSpec[],
+  repetitions: number,
+  caseTask: string = CASE_TASK,
+  treatmentMessage: string = TREATMENT_MESSAGE,
+): void {
   assert.equal(calls.length, repetitions);
   for (const spec of calls) {
-    assert.ok(spec.task.includes(CASE_TASK), "opening prompt lost the case task");
-    assert.ok(spec.task.includes(TREATMENT_MESSAGE), "opening prompt does not carry the treatment message");
+    assert.ok(spec.task.includes(caseTask), "opening prompt lost the case task");
+    assert.ok(spec.task.includes(treatmentMessage), `opening prompt does not carry the treatment message; sent:\n${spec.task}`);
   }
 }
 
@@ -150,6 +168,22 @@ test("a_prompt_carried_treatment_opens_every_repetition_with_the_treatment_messa
   assertScoreVerifiesPromptDelivery(scored);
   assertSummaryWritten(runDir);
   assertTreatmentSummaryRowPresent(scored.stdout, TREATMENT_ID);
+});
+
+test("a_prompt_carried_cc_nudge_treatment_opens_every_repetition_naming_the_most_complex_function_of_the_starting_file_and_scores_as_verified", async () => {
+  const { spawner, calls } = recordingPiSpawner();
+  const opts = collectOpts({ spawner, repetitions: 2, cases: [CASE_WHOSE_SMELL_HIDES_IN_A_HELPER], treatments: [CC_NUDGE_TREATMENT_ID] });
+
+  const result = await runCollect(opts);
+
+  assertCollectSucceeded(result, 2);
+  assertEveryRepetitionOpensWithTheCaseTaskAndTheTreatmentMessage(calls, 2, caseFactsOf(CASE_WHOSE_SMELL_HIDES_IN_A_HELPER).task, ccNudgeTreatmentMessage());
+  assertTheLiveRailIsClosedForEveryRepetition(calls);
+
+  const scored = await scoreRun(opts.runDir);
+
+  assertScoreVerifiesPromptDelivery(scored);
+  assertTreatmentSummaryRowPresent(scored.stdout, CC_NUDGE_TREATMENT_ID);
 });
 
 test("a_run_whose_recorded_prompt_lacks_the_treatment_message_is_refused_by_score", async () => {

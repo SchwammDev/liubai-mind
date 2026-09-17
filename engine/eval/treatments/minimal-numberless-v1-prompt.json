@@ -1,0 +1,6 @@
+{
+  "id": "minimal-numberless-v1-prompt",
+  "delivery": "prompt",
+  "env": { "LIUBAI_RAILS_OFF": "1" },
+  "nudgePhrasingFile": "phrasings/minimal-numberless-v1.json"
+}

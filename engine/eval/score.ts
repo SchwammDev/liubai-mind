@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { Lang, Extracted, RuleName } from "../contract.ts";
+import type { Lang, RuleName } from "../contract.ts";
 import { RULE } from "../contract.ts";
 import type { CaseManifest, TreatmentManifest } from "./eval-contract.ts";
 import type { RawRow, Metrics, Verdict, GamedReason, JudgeResult, Provenance, Tier } from "./eval-contract.ts";
@@ -10,6 +10,7 @@ import { countSilentHandlers } from "./silent-handlers.ts";
 import { loadCases, declaredFiles } from "./corpus.ts";
 import { loadTreatments } from "./treatments.ts";
 import { promptCarriedTreatmentMessage } from "./prompt-carried-message.ts";
+import { extractFunctions, readEntrySource } from "./case-source.ts";
 import { runBehaviorChecks } from "./behavior-checks.ts";
 import type { BehaviorCheckOutcome } from "./behavior-checks.ts";
 import { scanReferences } from "./references.ts";
@@ -92,12 +93,6 @@ function referenceLang(lang: Lang): "typescript" | "python" {
   throw new Error(`score: unsupported lang for reference scanning: ${lang}`);
 }
 
-async function extractFunctions(lang: Lang, path: string, after: string): Promise<Extracted> {
-  if (lang === "typescript") return await typescriptExtractor.extract({ path, after });
-  if (lang === "python") return await pythonExtractor.extract({ path, after });
-  throw new Error(`score: unsupported lang for extraction: ${lang}`);
-}
-
 const BROKEN_METRICS: Metrics = { decisionPoints: 0, nFunctions: 0, silentHandlers: 0, parsed: false };
 
 async function computeMetrics(lang: Lang, path: string, source: string | undefined): Promise<Metrics> {
@@ -142,10 +137,6 @@ function findCase(cases: CaseManifest[], caseId: string): CaseManifest {
   const kase = cases.find((c) => c.id === caseId);
   if (kase === undefined) throw new Error(`score: unknown case id in raw row: ${caseId}`);
   return kase;
-}
-
-function readBeforeSource(corpusDir: string, kase: CaseManifest): string {
-  return readFileSync(join(corpusDir, kase.id, `${kase.entry}.case`), "utf8");
 }
 
 export function createdFilesOf(kase: CaseManifest, files: Record<string, string>): string[] {
@@ -301,7 +292,7 @@ async function computeRecordFacts(row: RawRow, corpusDir: string, kase: CaseMani
 async function judgeRow(row: RawRow, cases: CaseManifest[], corpusDir: string, contamination: ContaminationCheck | undefined): Promise<JudgedRow> {
   const { contaminated, consultedRail } = classifyRow(row, contamination);
   const kase = findCase(cases, row.caseId);
-  const beforeSource = readBeforeSource(corpusDir, kase);
+  const beforeSource = readEntrySource(corpusDir, kase);
   const afterSource = row.files[kase.entry];
   const recordFacts = await computeRecordFacts(row, corpusDir, kase, beforeSource, afterSource);
 
@@ -844,24 +835,25 @@ function nudgePhrasingFor(treatmentsDir: string, treatment: TreatmentManifest): 
   return readFileSync(join(treatmentsDir, treatment.nudgePhrasingFile), "utf8");
 }
 
-function expectedPromptMessage(treatmentsDir: string, treatment: TreatmentManifest, kase: CaseManifest): string {
+async function expectedPromptMessage(treatmentsDir: string, treatment: TreatmentManifest, kase: CaseManifest, corpusDir: string): Promise<string> {
   const nudgePhrasing = nudgePhrasingFor(treatmentsDir, treatment);
   if (nudgePhrasing === undefined) {
     throw new Error(`treatment ${treatment.id}: delivery "prompt" carries no nudge phrasing — treatments.ts validation should have rejected this at load time`);
   }
-  return promptCarriedTreatmentMessage(kase, nudgePhrasing);
+  return promptCarriedTreatmentMessage(kase, nudgePhrasing, corpusDir);
 }
 
 function promptNotCarriedViolation(row: RawRow, message: string): DeliveryViolation {
   return { kind: "prompt-not-carried", treatmentId: row.treatmentId, caseId: row.caseId, repetition: row.repetition, message };
 }
 
-function promptCarriedViolations(
+async function promptCarriedViolations(
   rows: RawRow[],
   treatmentById: Map<string, TreatmentManifest>,
   treatmentsDir: string,
   caseById: Map<string, CaseManifest>,
-): DeliveryViolation[] {
+  corpusDir: string,
+): Promise<DeliveryViolation[]> {
   const violations: DeliveryViolation[] = [];
 
   for (const row of rows) {
@@ -874,7 +866,7 @@ function promptCarriedViolations(
       continue;
     }
 
-    const expected = expectedPromptMessage(treatmentsDir, treatment, kase);
+    const expected = await expectedPromptMessage(treatmentsDir, treatment, kase, corpusDir);
     if (row.task !== undefined && row.task.includes(expected)) continue;
 
     violations.push(
@@ -953,19 +945,20 @@ function treatmentSummaryFor(treatmentId: string, treatmentRows: RawRow[], manif
   };
 }
 
-function checkDeliveryValidity(
+async function checkDeliveryValidity(
   rows: RawRow[],
   treatments: TreatmentManifest[],
   treatmentsDir: string,
   caseById: Map<string, CaseManifest>,
-): DeliveryValidity {
+  corpusDir: string,
+): Promise<DeliveryValidity> {
   const treatmentById = new Map(treatments.map((c) => [c.id, c]));
   const treatmentRowGroups = [...rowsByTreatment(rows)];
 
   const violations = [
     ...notDeliveredViolations(rows),
     ...missingStampViolations(rows, treatmentById),
-    ...promptCarriedViolations(rows, treatmentById, treatmentsDir, caseById),
+    ...(await promptCarriedViolations(rows, treatmentById, treatmentsDir, caseById, corpusDir)),
     ...treatmentRowGroups.flatMap(([treatmentId, treatmentRows]) => nudgeFloorViolations(treatmentId, treatmentRows, treatmentById.get(treatmentId))),
   ];
   if (violations.length > 0) return { kind: "invalid", violations };
@@ -976,7 +969,7 @@ function checkDeliveryValidity(
   return { kind: "valid", treatments: treatmentSummaries };
 }
 
-function resolveDeliveryValidity(rows: RawRow[], treatmentsDir: string, corpusDir: string): { result: DeliveryValidity } | { error: string } {
+async function resolveDeliveryValidity(rows: RawRow[], treatmentsDir: string, corpusDir: string): Promise<{ result: DeliveryValidity } | { error: string }> {
   const treatments = loadTreatments(treatmentsDir);
   if ("error" in treatments) return { error: `score: failed to load treatments: ${treatments.error}` };
 
@@ -990,7 +983,7 @@ function resolveDeliveryValidity(rows: RawRow[], treatmentsDir: string, corpusDi
   if ("error" in cases) return { error: `score: failed to load corpus: ${cases.error}` };
   const caseById = new Map(cases.map((c) => [c.id, c]));
 
-  return { result: checkDeliveryValidity(rows, treatments, treatmentsDir, caseById) };
+  return { result: await checkDeliveryValidity(rows, treatments, treatmentsDir, caseById, corpusDir) };
 }
 
 function formatDeliveryViolations(violations: DeliveryViolation[]): string {
@@ -1020,7 +1013,7 @@ export async function runScore(opts: {
   const parsedRaw = readRawJsonl(opts.runDir);
   if ("error" in parsedRaw) return { status: ERROR_STATUS, stdout: parsedRaw.error };
 
-  const validity = resolveDeliveryValidity(parsedRaw.rows, opts.treatmentsDir ?? DEFAULT_TREATMENTS_DIR, opts.corpusDir);
+  const validity = await resolveDeliveryValidity(parsedRaw.rows, opts.treatmentsDir ?? DEFAULT_TREATMENTS_DIR, opts.corpusDir);
   if ("error" in validity) return { status: ERROR_STATUS, stdout: validity.error };
   if (validity.result.kind === "invalid") return { status: ERROR_STATUS, stdout: formatDeliveryViolations(validity.result.violations) };
 
