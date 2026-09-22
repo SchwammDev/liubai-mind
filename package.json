@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.86.1"
+    "@earendil-works/pi-coding-agent": "0.87.0"
   },
   "devDependencies": {
     "@types/node": "26.1.1",
