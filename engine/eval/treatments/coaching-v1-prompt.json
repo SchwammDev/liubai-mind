@@ -1,6 +1,0 @@
-{
-  "id": "coaching-v1-prompt",
-  "delivery": "prompt",
-  "env": { "LIUBAI_RAILS_OFF": "1" },
-  "nudgePhrasingFile": "phrasings/coaching-v1.json"
-}

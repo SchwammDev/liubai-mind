@@ -1,1 +1,0 @@
-(catch_clause) @catch
