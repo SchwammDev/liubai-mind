@@ -34,7 +34,7 @@ Real question = **ratio and placement** of the two, and whether it should **shif
 - **A nudge that names a number becomes a target** (#60). cc-delta reports `dpBefore`/`dpAfter` and re-fires unchanged on every write; ~20% of repetitions hit it, and those cost double the turns — agents hunt the threshold and hand-count branches instead of finishing. `obsess-over-rules` is an agent failure mode too, and a quantified, non-escalating rail induces it.
 - **Capability scales exploitation** (#59). The stronger eval model probed the harness itself — reading probes and reference solutions; the weaker one never did. Stronger models don't just need fewer rails, they need sealed ones.
 
-The in-repo eval harness (nudge-phrasing experiments, incl. the unfinished #70 wording comparison) was removed at `01593cf`; recover any of it with `git show 01593cf^:engine/eval/<path>`.
+The in-repo eval harness (nudge-phrasing experiments, incl. the unfinished #70 wording comparison) was removed at `d2ea25f`; recover any of it with `git show d2ea25f^:engine/eval/<path>`.
 
 ## What the harness fights
 
