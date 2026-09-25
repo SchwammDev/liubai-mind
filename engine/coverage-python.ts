@@ -1,5 +1,6 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 
 import { pythonExtractor } from "./extract-python.ts";
@@ -26,8 +27,8 @@ function isFileEntry(value: unknown): value is CoverageJsonFile {
     && v.missing_lines.every((n) => typeof n === "number");
 }
 
-function parseCoverageJson(stdout: string): Snapshot {
-  const parsed = JSON.parse(stdout) as Partial<CoverageJson>;
+function parseCoverageJson(report: string): Snapshot {
+  const parsed = JSON.parse(report) as Partial<CoverageJson>;
   const files = parsed.files ?? {};
   const snapshot: Snapshot = { files: {} };
   for (const [rel, entry] of Object.entries(files)) {
@@ -45,16 +46,22 @@ export function pythonCrapAdapter(cwd: string): CrapAdapter {
     snapshotMtime: () => statSync(dotCoverage).mtimeMs / 1000,
 
     loadSnapshot: (): SnapshotLoad => {
-      const res = spawnSync("coverage", ["json", "-o", "-"], { cwd, encoding: "utf8" });
+      const reportDir = mkdtempSync(join(tmpdir(), "liubai-coverage-json-"));
+      const reportFile = join(reportDir, "report.json");
+      try {
+        const res = spawnSync("coverage", ["json", "-o", reportFile], { cwd, encoding: "utf8" });
 
-      if (res.error !== undefined && (res.error as NodeJS.ErrnoException).code === "ENOENT") {
-        return { error: MISSING_CLI_MSG };
+        if (res.error !== undefined && (res.error as NodeJS.ErrnoException).code === "ENOENT") {
+          return { error: MISSING_CLI_MSG };
+        }
+        if (res.status !== 0) {
+          const detail = (res.stderr ?? "").trim() || `exit ${res.status}`;
+          return { error: `crap: \`coverage json\` failed: ${detail}` };
+        }
+        return parseCoverageJson(readFileSync(reportFile, "utf8"));
+      } finally {
+        rmSync(reportDir, { recursive: true, force: true });
       }
-      if (res.status !== 0) {
-        const detail = (res.stderr ?? "").trim() || `exit ${res.status}`;
-        return { error: `crap: \`coverage json\` failed: ${detail}` };
-      }
-      return parseCoverageJson(res.stdout);
     },
 
     extractFunctions: (_filePath, source) => {

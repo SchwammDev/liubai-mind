@@ -18,12 +18,27 @@ function rmTree(dir: string): void {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
-function makeFakeCoverageExecutable(dir: string, body: string, exitCode = 0): string {
+function makeFakeCoverageExecutable(dir: string, body: string, opts: { stdout?: string; exitCode?: number } = {}): string {
+  const stdout = opts.stdout ?? "";
+  const exitCode = opts.exitCode ?? 0;
+  const esc = (s: string) => s.replace(/'/g, "'\\''");
   const binDir = path.join(dir, "bin");
   fs.mkdirSync(binDir, { recursive: true });
-  const exe = path.join(binDir, "coverage");
-  fs.writeFileSync(exe, `#!/bin/sh\nprintf '%s' '${body.replace(/'/g, "'\\''")}'\nexit ${exitCode}\n`);
-  fs.chmodSync(exe, 0o755);
+  const exe = [
+    "#!/bin/sh",
+    `printf '%s' '${esc(stdout)}'`,
+    'out=""',
+    'prev=""',
+    'for a in "$@"; do',
+    '  if [ "$prev" = "-o" ]; then out="$a"; fi',
+    '  prev="$a"',
+    "done",
+    `printf '%s' '${esc(body)}' > "${"$"}out"`,
+    `exit ${exitCode}`,
+  ].join("\n") + "\n";
+  const exePath = path.join(binDir, "coverage");
+  fs.writeFileSync(exePath, exe);
+  fs.chmodSync(exePath, 0o755);
   return binDir;
 }
 
@@ -114,7 +129,7 @@ test("load_snapshot_surfaces_stderr_detail_on_nonzero_exit", () => {
   const dir = tmpDir("covpy-fail-");
   try {
     touchDotCoverage(dir);
-    const binDir = makeFakeCoverageExecutable(dir, "", 2);
+    const binDir = makeFakeCoverageExecutable(dir, "", { exitCode: 2 });
     fs.writeFileSync(path.join(binDir, "coverage"), "#!/bin/sh\nprintf '%s\\n' 'boom: no source' >&2\nexit 2\n");
     fs.chmodSync(path.join(binDir, "coverage"), 0o755);
     const oldPath = process.env.PATH;
@@ -125,6 +140,28 @@ test("load_snapshot_surfaces_stderr_detail_on_nonzero_exit", () => {
 
       assert.ok(!("files" in result));
       assert.match((result as { error: string }).error, /boom: no source/);
+    } finally {
+      process.env.PATH = oldPath;
+    }
+  } finally {
+    rmTree(dir);
+  }
+});
+
+test("load_snapshot_ignores_stdout_chatter_and_reads_report_from_temp_file", () => {
+  const dir = tmpDir("covpy-combine-");
+  try {
+    touchDotCoverage(dir);
+    const binDir = makeFakeCoverageExecutable(dir, COVERAGE_JSON_HEADER, {
+      stdout: "Combined 1 file, skipped 1\n",
+    });
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${oldPath}`;
+
+    try {
+      const snapshot = pythonCrapAdapter(dir).loadSnapshot() as Snapshot;
+
+      assert.deepEqual(snapshot.files["app/foo.py"], { executed: [1, 2], missing: [3, 4, 5] });
     } finally {
       process.env.PATH = oldPath;
     }
